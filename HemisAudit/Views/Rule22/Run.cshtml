@@ -1,4 +1,5 @@
 @using System.Text.Json
+@using HemisAudit.ViewModels
 @model HemisAudit.ViewModels.Rule22RunReviewViewModel
 @{
     ViewData["Title"] = $"Rule 22 Run {Model.RunId}";
@@ -8,6 +9,10 @@
     var canOpenWorkspace = ViewBag.CanOpenWorkspace is bool openWorkspace && openWorkspace;
     var isArchived = ViewBag.IsArchived is bool archived && archived;
     var moduleNavigation = ViewBag.ModuleNavigation as HemisAudit.ViewModels.ModuleSequenceNavigationViewModel;
+    var mappedColumns = (Model.Summary.MappedColumns?.Any() == true
+            ? Model.Summary.MappedColumns
+            : Rule22ColumnMappingHelper.Build(Model.Summary))
+        .ToList();
     var reviewRowsJson = JsonSerializer.Serialize(
         Model.Summary.ReviewRows.Select(row => new
         {
@@ -17,17 +22,25 @@
             sampleNumber = row.SampleNumber,
             staffNumber037 = row.StaffNumber037,
             year038 = row.Year038,
+            col011 = row.Col011,
+            col012 = row.Col012,
+            col013 = row.Col013,
             col039 = row.Col039,
             col040 = row.Col040,
             col041 = row.Col041,
             col042 = row.Col042,
             col046 = row.Col046,
-            col047 = row.Col047,
             col048 = row.Col048,
-            col094 = row.Col094,
             validationResult = row.ValidationResult,
             exceptionReason = row.ExceptionReason
         }));
+    var mappedColumnsJson = JsonSerializer.Serialize(mappedColumns.Select(item => new
+    {
+        key = item.Key,
+        label = item.Label,
+        columnName = item.ColumnName,
+        valueField = item.ValueField
+    }));
     var controlSummaryJson = JsonSerializer.Serialize(
         Model.Summary.ControlSummaries.Select(item => new
         {
@@ -211,16 +224,29 @@
                     <div>@Model.Summary.ProfTable</div>
                 </div>
                 <div>
-                    <div style="color:#757575;font-size:12px;text-transform:uppercase;font-weight:700">Column _041</div>
-                    <div>@Model.Summary.Column041</div>
+                    <div style="color:#757575;font-size:12px;text-transform:uppercase;font-weight:700">Control Filter Value</div>
+                    <div>@Model.Summary.FilterValue041</div>
                 </div>
                 <div>
-                    <div style="color:#757575;font-size:12px;text-transform:uppercase;font-weight:700">Column _039</div>
-                    <div>@Model.Summary.Column039</div>
+                    <div style="color:#757575;font-size:12px;text-transform:uppercase;font-weight:700">Category Filter Value</div>
+                    <div>@Model.Summary.FilterValue039</div>
                 </div>
                 <div>
                     <div style="color:#757575;font-size:12px;text-transform:uppercase;font-weight:700">Status</div>
                     <div>@Model.Summary.Status</div>
+                </div>
+            </div>
+
+            <div style="margin-top:20px">
+                <h4 style="margin:0 0 10px 0">Selected PROF Columns</h4>
+                <div class="form-grid">
+                    @foreach (var item in mappedColumns)
+                    {
+                        <div>
+                            <div style="color:#757575;font-size:12px;text-transform:uppercase;font-weight:700">@item.Label</div>
+                            <div>@item.ColumnName</div>
+                        </div>
+                    }
                 </div>
             </div>
 
@@ -288,16 +314,10 @@
                                 <th>Control</th>
                                 <th>Validation #</th>
                                 <th>Control Row #</th>
-                                <th>Staff #</th>
-                                <th>Year</th>
-                                <th>_039</th>
-                                <th>_041</th>
-                                <th>_040</th>
-                                <th>_042</th>
-                                <th>_046</th>
-                                <th>_047</th>
-                                <th>_048</th>
-                                <th>_094</th>
+                                @foreach (var item in mappedColumns)
+                                {
+                                    <th>@item.Label (@item.ColumnName)</th>
+                                }
                                 <th>Reason</th>
                             </tr>
                         </thead>
@@ -348,6 +368,7 @@
     const tabs = document.querySelectorAll('[data-review-tab]');
     const panels = document.querySelectorAll('[data-review-panel]');
     const reviewRows = @Html.Raw(reviewRowsJson);
+    const mappedColumns = @Html.Raw(mappedColumnsJson);
     const controlSummary = @Html.Raw(controlSummaryJson);
 
     const escapeHtml = value => String(value ?? '')
@@ -388,16 +409,7 @@
                     <td>${escapeHtml(row.controlType)}</td>
                     <td>${Number(row.validationNumber || 0).toLocaleString()}</td>
                     <td>${Number(row.sampleNumber || 0).toLocaleString()}</td>
-                    <td>${escapeHtml(row.staffNumber037)}</td>
-                    <td>${escapeHtml(row.year038)}</td>
-                    <td>${escapeHtml(row.col039)}</td>
-                    <td>${escapeHtml(row.col041)}</td>
-                    <td>${escapeHtml(row.col040)}</td>
-                    <td>${escapeHtml(row.col042)}</td>
-                    <td>${escapeHtml(row.col046)}</td>
-                    <td>${escapeHtml(row.col047)}</td>
-                    <td>${escapeHtml(row.col048)}</td>
-                    <td>${escapeHtml(row.col094)}</td>
+                    ${mappedColumns.map(item => `<td>${escapeHtml(row[item.valueField])}</td>`).join('')}
                     <td>${escapeHtml(row.exceptionReason)}</td>
                 </tr>`).join('');
         };

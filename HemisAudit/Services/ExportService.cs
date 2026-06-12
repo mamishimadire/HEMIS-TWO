@@ -2399,17 +2399,26 @@ namespace HemisAudit.Services
         public byte[] ExportExcel(Rule22ValidationSummary summary)
         {
             using var wb = new XLWorkbook();
-            var headers = GetRule22Headers();
+            var mappedColumns = GetRule22MappedColumns(summary);
+            var headers = GetRule22Headers(summary);
 
             var wsSummary = wb.Worksheets.Add("Summary");
             StyleHeaderRow(wsSummary, 1, "HEMIS RULE 22: STAFF SAMPLING (DBO_PROF)", 2);
-            var summaryData = new[]
+            var summaryData = new List<(string Label, string Value)>
             {
                 ("Database", summary.Database),
                 ("PROF Table", summary.ProfTable),
-                ("Column _041", summary.Column041),
-                ("Column _039", summary.Column039),
+                ("Employment Status Filter Column", summary.Column041),
+                ("Personnel Category Filter Column", summary.Column039),
+                ("Employment Status Filter Value", summary.FilterValue041),
+                ("Personnel Category Filter Value", summary.FilterValue039),
                 ("Validation Date", summary.Timestamp),
+                ("", ""),
+            };
+
+            summaryData.AddRange(mappedColumns.Select(item => ($"{item.Label} Column", item.ColumnName)));
+            summaryData.AddRange(new[]
+            {
                 ("", ""),
                 ("RESULT SUMMARY", ""),
                 ("Total Validated", summary.TotalValidated.ToString("N0")),
@@ -2421,7 +2430,7 @@ namespace HemisAudit.Services
                 ("Control 3 Available", summary.Control3Count.ToString("N0")),
                 ("Status", summary.Status),
                 ("Warning", summary.Warning ?? "")
-            };
+            });
 
             var summaryRow = 2;
             foreach (var (label, value) in summaryData)
@@ -2478,7 +2487,7 @@ namespace HemisAudit.Services
             var wsRows = wb.Worksheets.Add("Review Rows");
             StyleHeaderRow(wsRows, 1, "RULE 22 REVIEW ROWS", headers.Count);
             WriteRule22HeaderRow(wsRows, 2, headers);
-            WriteRule22Rows(wsRows, 3, summary.ReviewRows, headers);
+            WriteRule22Rows(wsRows, 3, summary.ReviewRows, headers, mappedColumns);
 
             var failRows = summary.ReviewRows
                 .Where(row => string.Equals(row.ValidationResult, "FAIL", StringComparison.OrdinalIgnoreCase))
@@ -2488,7 +2497,7 @@ namespace HemisAudit.Services
                 var wsFail = wb.Worksheets.Add("FAIL Rows");
                 StyleHeaderRow(wsFail, 1, "RULE 22 FAIL ROWS", headers.Count);
                 WriteRule22HeaderRow(wsFail, 2, headers);
-                WriteRule22Rows(wsFail, 3, failRows, headers);
+                WriteRule22Rows(wsFail, 3, failRows, headers, mappedColumns);
             }
 
             using var ms = new MemoryStream();
@@ -3814,7 +3823,9 @@ namespace HemisAudit.Services
         public byte[] ExportCsv(Rule22ValidationSummary summary)
         {
             var sb = new StringBuilder();
-            var headers = GetRule22Headers();
+            var mappedColumns = GetRule22MappedColumns(summary);
+            var mappedColumnsByHeader = mappedColumns.ToDictionary(GetRule22ColumnHeader, StringComparer.OrdinalIgnoreCase);
+            var headers = GetRule22Headers(summary);
             sb.AppendLine(string.Join(",", headers.Select(CsvEscape)));
 
             foreach (var row in summary.ReviewRows)
@@ -3825,18 +3836,9 @@ namespace HemisAudit.Services
                     "Control_Type" => row.ControlType,
                     "Control_Definition" => row.ControlDefinition,
                     "Control_Row_Number" => row.SampleNumber.ToString(),
-                    "Staff_Number_037" => row.StaffNumber037,
-                    "Year_038" => row.Year038,
-                    "Col_039" => row.Col039,
-                    "Col_040" => row.Col040,
-                    "Col_041" => row.Col041,
-                    "Col_042" => row.Col042,
-                    "Col_046" => row.Col046,
-                    "Col_047" => row.Col047,
-                    "Col_048" => row.Col048,
-                    "Col_094" => row.Col094,
                     "Validation_Result" => row.ValidationResult,
                     "Exception_Reason" => row.ExceptionReason,
+                    _ when mappedColumnsByHeader.TryGetValue(header, out var mapping) => Rule22ColumnMappingHelper.GetRowValue(row, mapping.ValueField),
                     _ => ""
                 });
 
@@ -4525,26 +4527,30 @@ namespace HemisAudit.Services
                 "RESULTS"
             };
 
-        private static List<string> GetRule22Headers() =>
-            new()
+        private static List<string> GetRule22Headers(Rule22ValidationSummary summary)
+        {
+            var headers = new List<string>
             {
                 "Validation_Number",
                 "Control_Type",
                 "Control_Definition",
-                "Control_Row_Number",
-                "Staff_Number_037",
-                "Year_038",
-                "Col_039",
-                "Col_040",
-                "Col_041",
-                "Col_042",
-                "Col_046",
-                "Col_047",
-                "Col_048",
-                "Col_094",
-                "Validation_Result",
-                "Exception_Reason"
+                "Control_Row_Number"
             };
+
+            headers.AddRange(GetRule22MappedColumns(summary).Select(GetRule22ColumnHeader));
+            headers.Add("Validation_Result");
+            headers.Add("Exception_Reason");
+            return headers;
+        }
+
+        private static List<Rule22MappedColumnViewModel> GetRule22MappedColumns(Rule22ValidationSummary summary) =>
+            (summary.MappedColumns?.Any() == true
+                ? summary.MappedColumns
+                : Rule22ColumnMappingHelper.Build(summary))
+            .ToList();
+
+        private static string GetRule22ColumnHeader(Rule22MappedColumnViewModel mapping) =>
+            $"{mapping.Label} ({mapping.ColumnName})";
 
         private static List<string> GetRule25Headers() =>
             new()
@@ -5137,8 +5143,9 @@ namespace HemisAudit.Services
             return (rows ?? new List<Rule20ReviewRowViewModel>()).ToList();
         }
 
-        private static void WriteRule22Rows(IXLWorksheet ws, int startRow, List<Rule22ReviewRowViewModel> rows, List<string> headers)
+        private static void WriteRule22Rows(IXLWorksheet ws, int startRow, List<Rule22ReviewRowViewModel> rows, List<string> headers, List<Rule22MappedColumnViewModel> mappedColumns)
         {
+            var mappedColumnsByHeader = mappedColumns.ToDictionary(GetRule22ColumnHeader, StringComparer.OrdinalIgnoreCase);
             var rowIndex = startRow;
             foreach (var row in rows)
             {
@@ -5151,18 +5158,9 @@ namespace HemisAudit.Services
                         "Control_Type" => row.ControlType,
                         "Control_Definition" => row.ControlDefinition,
                         "Control_Row_Number" => row.SampleNumber.ToString(),
-                        "Staff_Number_037" => row.StaffNumber037,
-                        "Year_038" => row.Year038,
-                        "Col_039" => row.Col039,
-                        "Col_040" => row.Col040,
-                        "Col_041" => row.Col041,
-                        "Col_042" => row.Col042,
-                        "Col_046" => row.Col046,
-                        "Col_047" => row.Col047,
-                        "Col_048" => row.Col048,
-                        "Col_094" => row.Col094,
                         "Validation_Result" => row.ValidationResult,
                         "Exception_Reason" => row.ExceptionReason,
+                        _ when mappedColumnsByHeader.TryGetValue(header, out var mapping) => Rule22ColumnMappingHelper.GetRowValue(row, mapping.ValueField),
                         _ => ""
                     };
 

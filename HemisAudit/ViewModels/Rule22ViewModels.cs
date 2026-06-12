@@ -22,8 +22,17 @@ namespace HemisAudit.ViewModels
     {
         public bool Success { get; set; }
         public List<string> Columns { get; set; } = new();
+        public string? AutoColumn037 { get; set; }
+        public string? AutoColumn038 { get; set; }
+        public string? AutoColumn011 { get; set; }
+        public string? AutoColumn012 { get; set; }
+        public string? AutoColumn013 { get; set; }
         public string? AutoColumn041 { get; set; }
         public string? AutoColumn039 { get; set; }
+        public string? AutoColumn040 { get; set; }
+        public string? AutoColumn042 { get; set; }
+        public string? AutoColumn046 { get; set; }
+        public string? AutoColumn048 { get; set; }
         public string? Error { get; set; }
     }
 
@@ -33,8 +42,17 @@ namespace HemisAudit.ViewModels
         public string Database { get; set; } = "";
         public string Driver { get; set; } = "";
         public string ProfTable { get; set; } = "";
+        public string Column037 { get; set; } = "_037";
+        public string Column038 { get; set; } = "_038";
+        public string Column011 { get; set; } = "_011";
+        public string Column012 { get; set; } = "_012";
+        public string Column013 { get; set; } = "_013";
         public string Column041 { get; set; } = "_041";
         public string Column039 { get; set; } = "_039";
+        public string Column040 { get; set; } = "_040";
+        public string Column042 { get; set; } = "_042";
+        public string Column046 { get; set; } = "_046";
+        public string Column048 { get; set; } = "_048";
         public string FilterValue041 { get; set; } = "PE";
         public string FilterValue039 { get; set; } = "01";
         public int Control1SampleSize { get; set; }
@@ -61,8 +79,17 @@ namespace HemisAudit.ViewModels
         public string Database { get; set; } = "";
         public string Driver { get; set; } = "ODBC Driver 17 for SQL Server";
         public string ProfTable { get; set; } = "";
+        public string Column037 { get; set; } = "_037";
+        public string Column038 { get; set; } = "_038";
+        public string Column011 { get; set; } = "_011";
+        public string Column012 { get; set; } = "_012";
+        public string Column013 { get; set; } = "_013";
         public string Column041 { get; set; } = "_041";
         public string Column039 { get; set; } = "_039";
+        public string Column040 { get; set; } = "_040";
+        public string Column042 { get; set; } = "_042";
+        public string Column046 { get; set; } = "_046";
+        public string Column048 { get; set; } = "_048";
         public string FilterValue041 { get; set; } = "PE";
         public string FilterValue039 { get; set; } = "01";
         public int Control1SampleSize { get; set; }
@@ -89,6 +116,9 @@ namespace HemisAudit.ViewModels
         public int SampleNumber { get; set; }
         public string StaffNumber037 { get; set; } = "";
         public string Year038 { get; set; } = "";
+        public string Col011 { get; set; } = "";
+        public string Col012 { get; set; } = "";
+        public string Col013 { get; set; } = "";
         public string Col039 { get; set; } = "";
         public string Col040 { get; set; } = "";
         public string Col041 { get; set; } = "";
@@ -99,6 +129,117 @@ namespace HemisAudit.ViewModels
         public string Col094 { get; set; } = "";
         public string ValidationResult { get; set; } = "";
         public string ExceptionReason { get; set; } = "";
+    }
+
+    public class Rule22MappedColumnViewModel
+    {
+        public string Key { get; set; } = "";
+        public string Label { get; set; } = "";
+        public string ColumnName { get; set; } = "";
+        public string ValueField { get; set; } = "";
+    }
+
+    public static class Rule22ColumnMappingHelper
+    {
+        public static List<Rule22MappedColumnViewModel> Build(
+            string? column037,
+            string? column038,
+            string? column011,
+            string? column012,
+            string? column013,
+            string? column039,
+            string? column040,
+            string? column041,
+            string? column042,
+            string? column046,
+            string? column048) =>
+            new()
+            {
+                Create("column037", "Staff Number", column037, "_037", "staffNumber037"),
+                Create("column038", "Year", column038, "_038", "year038"),
+                Create("column011", "Date of Birth", column011, "_011", "col011"),
+                Create("column012", "Gender", column012, "_012", "col012"),
+                Create("column013", "Race", column013, "_013", "col013"),
+                Create("column039", "Personnel Category", column039, "_039", "col039"),
+                Create("column040", "Rank of Staff Member", column040, "_040", "col040"),
+                Create("column041", "Employment Status", column041, "_041", "col041"),
+                Create("column042", "Full-Time/Part-Time Status", column042, "_042", "col042"),
+                Create("column046", "Qualification Type", column046, "_046", "col046"),
+                Create("column048", "On Payroll Code", column048, "_048", "col048")
+            };
+
+        public static List<Rule22MappedColumnViewModel> Build(Rule22ValidationRequest request) =>
+            Build(
+                request.Column037,
+                request.Column038,
+                request.Column011,
+                request.Column012,
+                request.Column013,
+                request.Column039,
+                request.Column040,
+                request.Column041,
+                request.Column042,
+                request.Column046,
+                request.Column048);
+
+        public static List<Rule22MappedColumnViewModel> Build(Rule22ValidationSummary summary) =>
+            Build(
+                summary.Column037,
+                summary.Column038,
+                summary.Column011,
+                summary.Column012,
+                summary.Column013,
+                summary.Column039,
+                summary.Column040,
+                summary.Column041,
+                summary.Column042,
+                summary.Column046,
+                summary.Column048);
+
+        public static IEnumerable<string> GetSelectedColumns(Rule22VerifyRequest request) =>
+            Build(
+                request.Column037,
+                request.Column038,
+                request.Column011,
+                request.Column012,
+                request.Column013,
+                request.Column039,
+                request.Column040,
+                request.Column041,
+                request.Column042,
+                request.Column046,
+                request.Column048)
+            .Select(item => item.ColumnName)
+            .Distinct(StringComparer.OrdinalIgnoreCase);
+
+        public static string GetRowValue(Rule22ReviewRowViewModel row, string? valueField) =>
+            valueField switch
+            {
+                "staffNumber037" => row.StaffNumber037,
+                "year038" => row.Year038,
+                "col011" => row.Col011,
+                "col012" => row.Col012,
+                "col013" => row.Col013,
+                "col039" => row.Col039,
+                "col040" => row.Col040,
+                "col041" => row.Col041,
+                "col042" => row.Col042,
+                "col046" => row.Col046,
+                "col048" => row.Col048,
+                _ => ""
+            };
+
+        public static string Normalize(string? value, string fallback) =>
+            string.IsNullOrWhiteSpace(value) ? fallback : value.Trim();
+
+        private static Rule22MappedColumnViewModel Create(string key, string label, string? columnName, string fallback, string valueField) =>
+            new()
+            {
+                Key = key,
+                Label = label,
+                ColumnName = Normalize(columnName, fallback),
+                ValueField = valueField
+            };
     }
 
     public class Rule22ValidationSummary
@@ -112,8 +253,17 @@ namespace HemisAudit.ViewModels
         public string Timestamp { get; set; } = "";
         public string Database { get; set; } = "";
         public string ProfTable { get; set; } = "";
+        public string Column037 { get; set; } = "_037";
+        public string Column038 { get; set; } = "_038";
+        public string Column011 { get; set; } = "_011";
+        public string Column012 { get; set; } = "_012";
+        public string Column013 { get; set; } = "_013";
         public string Column041 { get; set; } = "_041";
         public string Column039 { get; set; } = "_039";
+        public string Column040 { get; set; } = "_040";
+        public string Column042 { get; set; } = "_042";
+        public string Column046 { get; set; } = "_046";
+        public string Column048 { get; set; } = "_048";
         public string FilterValue041 { get; set; } = "PE";
         public string FilterValue039 { get; set; } = "01";
         public int Control1SampleSize { get; set; }
@@ -126,6 +276,7 @@ namespace HemisAudit.ViewModels
         public int ClientId { get; set; }
         public int? SavedRunId { get; set; }
         public List<Rule22ControlSummaryItemViewModel> ControlSummaries { get; set; } = new();
+        public List<Rule22MappedColumnViewModel> MappedColumns { get; set; } = new();
         public List<Rule22ReviewRowViewModel> ReviewRows { get; set; } = new();
         public string? Warning { get; set; }
         public string? Error { get; set; }
@@ -160,8 +311,17 @@ namespace HemisAudit.ViewModels
         public string Database { get; set; } = "";
         public string Driver { get; set; } = "ODBC Driver 17 for SQL Server";
         public string ProfTable { get; set; } = "";
+        public string Column037 { get; set; } = "_037";
+        public string Column038 { get; set; } = "_038";
+        public string Column011 { get; set; } = "_011";
+        public string Column012 { get; set; } = "_012";
+        public string Column013 { get; set; } = "_013";
         public string Column041 { get; set; } = "_041";
         public string Column039 { get; set; } = "_039";
+        public string Column040 { get; set; } = "_040";
+        public string Column042 { get; set; } = "_042";
+        public string Column046 { get; set; } = "_046";
+        public string Column048 { get; set; } = "_048";
         public string FilterValue041 { get; set; } = "PE";
         public string FilterValue039 { get; set; } = "01";
         public int Control1SampleSize { get; set; }

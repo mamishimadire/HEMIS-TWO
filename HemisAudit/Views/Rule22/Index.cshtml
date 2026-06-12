@@ -104,19 +104,55 @@
                         <select id="profTable"></select>
                     </div>
                     <div class="field-group">
-                        <label for="column041">Column _041</label>
-                        <select id="column041"></select>
+                        <label for="column037">Staff Number Column</label>
+                        <select id="column037"></select>
                     </div>
                     <div class="field-group">
-                        <label for="column039">Column _039</label>
+                        <label for="column038">Year Column</label>
+                        <select id="column038"></select>
+                    </div>
+                    <div class="field-group">
+                        <label for="column011">Date of Birth Column</label>
+                        <select id="column011"></select>
+                    </div>
+                    <div class="field-group">
+                        <label for="column012">Gender Column</label>
+                        <select id="column012"></select>
+                    </div>
+                    <div class="field-group">
+                        <label for="column013">Race Column</label>
+                        <select id="column013"></select>
+                    </div>
+                    <div class="field-group">
+                        <label for="column039">Personnel Category Column</label>
                         <select id="column039"></select>
                     </div>
                     <div class="field-group">
-                        <label for="filterValue041">Filter Value for _041 <span style="color:#757575;font-size:11px">(e.g. PE)</span></label>
+                        <label for="column040">Rank Column</label>
+                        <select id="column040"></select>
+                    </div>
+                    <div class="field-group">
+                        <label for="column041">Employment Status Column</label>
+                        <select id="column041"></select>
+                    </div>
+                    <div class="field-group">
+                        <label for="column042">Full-Time/Part-Time Status Column</label>
+                        <select id="column042"></select>
+                    </div>
+                    <div class="field-group">
+                        <label for="column046">Qualification Type Column</label>
+                        <select id="column046"></select>
+                    </div>
+                    <div class="field-group">
+                        <label for="column048">On Payroll Code Column</label>
+                        <select id="column048"></select>
+                    </div>
+                    <div class="field-group">
+                        <label for="filterValue041">Employment Status Filter Value <span style="color:#757575;font-size:11px">(e.g. PE)</span></label>
                         <input type="text" id="filterValue041" value="PE" placeholder="PE" maxlength="50" />
                     </div>
                     <div class="field-group">
-                        <label for="filterValue039">Filter Value for _039 <span style="color:#757575;font-size:11px">(e.g. 01)</span></label>
+                        <label for="filterValue039">Personnel Category Filter Value <span style="color:#757575;font-size:11px">(e.g. 01)</span></label>
                         <input type="text" id="filterValue039" value="01" placeholder="01" maxlength="50" />
                     </div>
                 </div>
@@ -258,14 +294,37 @@
         resultsVisible: true
     };
 
+    const mappedColumnFields = [
+        { key: 'column037', label: 'Staff Number', defaultValue: '_037', autoKey: 'autoColumn037', valueField: 'staffNumber037' },
+        { key: 'column038', label: 'Year', defaultValue: '_038', autoKey: 'autoColumn038', valueField: 'year038' },
+        { key: 'column011', label: 'Date of Birth', defaultValue: '_011', autoKey: 'autoColumn011', valueField: 'col011' },
+        { key: 'column012', label: 'Gender', defaultValue: '_012', autoKey: 'autoColumn012', valueField: 'col012' },
+        { key: 'column013', label: 'Race', defaultValue: '_013', autoKey: 'autoColumn013', valueField: 'col013' },
+        { key: 'column039', label: 'Personnel Category', defaultValue: '_039', autoKey: 'autoColumn039', valueField: 'col039' },
+        { key: 'column040', label: 'Rank of Staff Member', defaultValue: '_040', autoKey: 'autoColumn040', valueField: 'col040' },
+        { key: 'column041', label: 'Employment Status', defaultValue: '_041', autoKey: 'autoColumn041', valueField: 'col041' },
+        { key: 'column042', label: 'Full-Time/Part-Time Status', defaultValue: '_042', autoKey: 'autoColumn042', valueField: 'col042' },
+        { key: 'column046', label: 'Qualification Type', defaultValue: '_046', autoKey: 'autoColumn046', valueField: 'col046' },
+        { key: 'column048', label: 'On Payroll Code', defaultValue: '_048', autoKey: 'autoColumn048', valueField: 'col048' }
+    ];
+
     const els = {
         clientId: document.getElementById('clientId'),
         server: document.getElementById('server'),
         driver: document.getElementById('driver'),
         database: document.getElementById('database'),
         profTable: document.getElementById('profTable'),
+        column037: document.getElementById('column037'),
+        column038: document.getElementById('column038'),
+        column011: document.getElementById('column011'),
+        column012: document.getElementById('column012'),
+        column013: document.getElementById('column013'),
         column041: document.getElementById('column041'),
         column039: document.getElementById('column039'),
+        column040: document.getElementById('column040'),
+        column042: document.getElementById('column042'),
+        column046: document.getElementById('column046'),
+        column048: document.getElementById('column048'),
         filterValue041: document.getElementById('filterValue041'),
         filterValue039: document.getElementById('filterValue039'),
         connectionOutput: document.getElementById('connectionOutput'),
@@ -291,6 +350,8 @@
     const detailsPane = document.querySelector('[data-tab-panel="details"]');
     const chartsPane = document.querySelector('[data-tab-panel="charts"]');
 
+    const getColumnSelect = key => els[key];
+
     function escapeHtml(value) {
         return String(value ?? '')
             .replaceAll('&', '&amp;')
@@ -298,6 +359,65 @@
             .replaceAll('>', '&gt;')
             .replaceAll('"', '&quot;')
             .replaceAll("'", '&#39;');
+    }
+
+    function getConfiguredColumns(source) {
+        const mapped = Array.isArray(source?.mappedColumns) && source.mappedColumns.length
+            ? source.mappedColumns
+            : mappedColumnFields.map(field => ({
+                key: field.key,
+                label: field.label,
+                columnName: source?.[field.key] || field.defaultValue,
+                valueField: field.valueField
+            }));
+
+        return mapped.filter(item => item && item.columnName && item.valueField);
+    }
+
+    function getColumnHeading(item) {
+        return `${item.label} (${item.columnName})`;
+    }
+
+    function renderMappedColumnSummary(source) {
+        const mappings = getConfiguredColumns(source);
+        return mappings.map(item => `
+            <div>
+                <div style="color:#757575;font-size:12px;text-transform:uppercase;font-weight:700">${escapeHtml(item.label)}</div>
+                <div>${escapeHtml(item.columnName)}</div>
+            </div>`).join('');
+    }
+
+    function clearMappedColumnSelects() {
+        mappedColumnFields.forEach(field => {
+            const select = getColumnSelect(field.key);
+            if (select) {
+                select.innerHTML = '';
+            }
+        });
+    }
+
+    function populateMappedColumnSelects(data, shouldReset) {
+        const options = (data.columns || []).map(name => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join('');
+        const available = new Set(data.columns || []);
+        const preservedValues = Object.fromEntries(
+            mappedColumnFields.map(field => [field.key, getColumnSelect(field.key)?.value || ''])
+        );
+
+        mappedColumnFields.forEach(field => {
+            const select = getColumnSelect(field.key);
+            if (!select) {
+                return;
+            }
+
+            select.innerHTML = options;
+            const preferredValue = !shouldReset && preservedValues[field.key] && available.has(preservedValues[field.key])
+                ? preservedValues[field.key]
+                : data[field.autoKey] || (available.has(field.defaultValue) ? field.defaultValue : '');
+
+            if (preferredValue) {
+                select.value = preferredValue;
+            }
+        });
     }
 
     function normalizeRole(value) {
@@ -366,10 +486,11 @@
     function updateControlDefinitionsBox() {
         var fv041 = (els.filterValue041?.value || 'PE').trim() || 'PE';
         var fv039 = (els.filterValue039?.value || '01').trim() || '01';
-        var e041 = escapeHtml(fv041), e039 = escapeHtml(fv039);
-        var d1 = document.getElementById('ctrl1Def'); if (d1) d1.textContent = `_041='${fv041}' AND _039='${fv039}'`;
-        var d2 = document.getElementById('ctrl2Def'); if (d2) d2.textContent = `_041='${fv041}' AND _039<>'${fv039}'`;
-        var d3 = document.getElementById('ctrl3Def'); if (d3) d3.textContent = `_041<>'${fv041}' AND _039<>'${fv039}'`;
+        var column041 = els.column041?.value || '_041';
+        var column039 = els.column039?.value || '_039';
+        var d1 = document.getElementById('ctrl1Def'); if (d1) d1.textContent = `${column041}='${fv041}' AND ${column039}='${fv039}'`;
+        var d2 = document.getElementById('ctrl2Def'); if (d2) d2.textContent = `${column041}='${fv041}' AND ${column039}<>'${fv039}'`;
+        var d3 = document.getElementById('ctrl3Def'); if (d3) d3.textContent = `${column041}<>'${fv041}' AND ${column039}<>'${fv039}'`;
     }
 
     function getRequest() {
@@ -380,8 +501,17 @@
             database: els.database.value || '',
             driver: els.driver.value,
             profTable: els.profTable.value || '',
+            column037: els.column037.value || '_037',
+            column038: els.column038.value || '_038',
+            column011: els.column011.value || '_011',
+            column012: els.column012.value || '_012',
+            column013: els.column013.value || '_013',
             column041: els.column041.value || '_041',
             column039: els.column039.value || '_039',
+            column040: els.column040.value || '_040',
+            column042: els.column042.value || '_042',
+            column046: els.column046.value || '_046',
+            column048: els.column048.value || '_048',
             filterValue041: (els.filterValue041?.value || 'PE').trim() || 'PE',
             filterValue039: (els.filterValue039?.value || '01').trim() || '01',
             control1SampleSize: 0,
@@ -430,7 +560,8 @@
             </div>`;
     }
 
-    function renderFilteredTable(rows) {
+    function renderFilteredTable(summary) {
+        const mappedColumns = getConfiguredColumns(summary);
         return `
             <div class="form-grid" style="margin-bottom:16px">
                 <div class="field-group">
@@ -460,16 +591,7 @@
                             <th>Control</th>
                             <th>Validation #</th>
                             <th>Control Row #</th>
-                            <th>Staff #</th>
-                            <th>Year</th>
-                            <th>_039</th>
-                            <th>_041</th>
-                            <th>_040</th>
-                            <th>_042</th>
-                            <th>_046</th>
-                            <th>_047</th>
-                            <th>_048</th>
-                            <th>_094</th>
+                            ${mappedColumns.map(item => `<th>${escapeHtml(getColumnHeading(item))}</th>`).join('')}
                             <th>Reason</th>
                         </tr>
                     </thead>
@@ -478,11 +600,12 @@
             </div>`;
     }
 
-    function bindWorkspaceFilters(rows) {
+    function bindWorkspaceFilters(rows, summary) {
         const resultFilter = document.getElementById('workspaceRule22ResultFilter');
         const controlFilter = document.getElementById('workspaceRule22ControlFilter');
         const filterInfo = document.getElementById('workspaceRule22FilterInfo');
         const filterBody = document.getElementById('workspaceRule22FilterBody');
+        const mappedColumns = getConfiguredColumns(summary);
 
         if (!resultFilter || !controlFilter || !filterInfo || !filterBody) return;
 
@@ -504,16 +627,7 @@
                     <td>${escapeHtml(row.controlType)}</td>
                     <td>${Number(row.validationNumber || 0).toLocaleString()}</td>
                     <td>${Number(row.sampleNumber || 0).toLocaleString()}</td>
-                    <td>${escapeHtml(row.staffNumber037)}</td>
-                    <td>${escapeHtml(row.year038)}</td>
-                    <td>${escapeHtml(row.col039)}</td>
-                    <td>${escapeHtml(row.col041)}</td>
-                    <td>${escapeHtml(row.col040)}</td>
-                    <td>${escapeHtml(row.col042)}</td>
-                    <td>${escapeHtml(row.col046)}</td>
-                    <td>${escapeHtml(row.col047)}</td>
-                    <td>${escapeHtml(row.col048)}</td>
-                    <td>${escapeHtml(row.col094)}</td>
+                    ${mappedColumns.map(item => `<td>${escapeHtml(row[item.valueField])}</td>`).join('')}
                     <td>${escapeHtml(row.exceptionReason)}</td>
                 </tr>`).join('');
         };
@@ -544,6 +658,7 @@
                 <td>${Number(item.passCount || 0).toLocaleString()}</td>
                 <td>${Number(item.failCount || 0).toLocaleString()}</td>
             </tr>`).join('');
+        const mappedColumnSummary = renderMappedColumnSummary(summary);
 
         resultPane.innerHTML = `
             <div class="stats-grid" style="margin-bottom:24px">
@@ -580,17 +695,21 @@
                         <div>${escapeHtml(summary.profTable)}</div>
                     </div>
                     <div>
-                        <div style="color:#757575;font-size:12px;text-transform:uppercase;font-weight:700">Column _041</div>
-                        <div>${escapeHtml(summary.column041)}</div>
+                        <div style="color:#757575;font-size:12px;text-transform:uppercase;font-weight:700">Control Filter Value</div>
+                        <div>${escapeHtml(summary.filterValue041 || '')}</div>
                     </div>
                     <div>
-                        <div style="color:#757575;font-size:12px;text-transform:uppercase;font-weight:700">Column _039</div>
-                        <div>${escapeHtml(summary.column039)}</div>
+                        <div style="color:#757575;font-size:12px;text-transform:uppercase;font-weight:700">Category Filter Value</div>
+                        <div>${escapeHtml(summary.filterValue039 || '')}</div>
                     </div>
                     <div>
                         <div style="color:#757575;font-size:12px;text-transform:uppercase;font-weight:700">Status</div>
                         <div>${escapeHtml(summary.status)}</div>
                     </div>
+                </div>
+                <div style="margin-top:20px">
+                    <h4 style="margin:0 0 10px 0">Selected PROF Columns</h4>
+                    <div class="form-grid">${mappedColumnSummary}</div>
                 </div>
                 <div style="margin-top:20px">
                     <h4 style="margin:0 0 10px 0">Control Breakdown</h4>
@@ -613,10 +732,10 @@
         detailsPane.innerHTML = reviewRows.length
             ? `<div class="card" style="padding:20px">
                     <div class="alert alert--info" style="margin-bottom:16px">Filter the validated row preview by Control 1, Control 2, Control 3, and by PASS or FAIL. Downloads include the full result set.</div>
-                    ${renderFilteredTable(reviewRows)}
+                    ${renderFilteredTable(summary)}
                </div>`
             : '<div class="alert alert--info" style="margin:0">No validated rows were saved for this run.</div>';
-        bindWorkspaceFilters(reviewRows);
+        bindWorkspaceFilters(reviewRows, summary);
         renderCharts(summary);
     }
 
@@ -652,8 +771,7 @@
             const options = (data.databases || []).map(name => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join('');
             els.database.innerHTML = options;
             els.profTable.innerHTML = '';
-            els.column041.innerHTML = '';
-            els.column039.innerHTML = '';
+            clearMappedColumnSelects();
             resetForReconnect('SQL connection refreshed. Select the database and run Rule 22 again.');
             setOutput(els.connectionOutput, 'success', `Loaded ${Number((data.databases || []).length).toLocaleString()} database(s).`);
             if (els.database.value) await loadTables();
@@ -714,11 +832,8 @@
                 return;
             }
 
-            const options = (data.columns || []).map(name => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join('');
-            els.column041.innerHTML = options;
-            els.column039.innerHTML = options;
-            if (data.autoColumn041) els.column041.value = data.autoColumn041;
-            if (data.autoColumn039) els.column039.value = data.autoColumn039;
+            populateMappedColumnSelects(data, shouldReset);
+            updateControlDefinitionsBox();
         } catch (error) {
             setOutput(els.configOutput, 'danger', error.message || 'Column detection failed.');
         }
@@ -1031,8 +1146,12 @@
             els.profTable.innerHTML = workspace.profTable ? `<option value="${escapeHtml(workspace.profTable)}">${escapeHtml(workspace.profTable)}</option>` : '';
             els.profTable.value = workspace.profTable || '';
             await loadProfColumns(false);
-            if (workspace.column041) els.column041.value = workspace.column041;
-            if (workspace.column039) els.column039.value = workspace.column039;
+            mappedColumnFields.forEach(field => {
+                const select = getColumnSelect(field.key);
+                if (select && workspace[field.key]) {
+                    select.value = workspace[field.key];
+                }
+            });
             if (els.filterValue041) els.filterValue041.value = workspace.filterValue041 || 'PE';
             if (els.filterValue039) els.filterValue039.value = workspace.filterValue039 || '01';
             updateControlDefinitionsBox();
@@ -1084,6 +1203,8 @@
         if (document.getElementById('chkSql').checked) await downloadBlob(`${apiBasePath}/DownloadSql`, getRequest(), 'Rule22.sql');
     });
 
+    if (els.column041) els.column041.addEventListener('change', updateControlDefinitionsBox);
+    if (els.column039) els.column039.addEventListener('change', updateControlDefinitionsBox);
     if (els.filterValue041) els.filterValue041.addEventListener('input', updateControlDefinitionsBox);
     if (els.filterValue039) els.filterValue039.addEventListener('input', updateControlDefinitionsBox);
     updateControlDefinitionsBox();
@@ -1092,4 +1213,3 @@
     if (state.clientId > 0) loadWorkspace();
 })();
 </script>
-
