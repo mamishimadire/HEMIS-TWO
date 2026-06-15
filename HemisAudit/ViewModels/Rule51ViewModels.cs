@@ -36,6 +36,8 @@ namespace HemisAudit.ViewModels
         public string ValpacCol049   { get; set; } = "_049";
         public string SaNationalValues { get; set; } = "SA,PR";
         public string ValpacCol008ZPlaceholders { get; set; } = "ZZZZZZZZZZZZZ";
+        public string CregTable      { get; set; } = "";
+        public string CregIdCol      { get; set; } = "_007";
         public List<Rule51ColumnMapping> ColumnMappings { get; set; } = new();
     }
 
@@ -70,6 +72,8 @@ namespace HemisAudit.ViewModels
         public string ValpacCol049   { get; set; } = "_049";
         public string SaNationalValues { get; set; } = "SA,PR";
         public string ValpacCol008ZPlaceholders { get; set; } = "ZZZZZZZZZZZZZ";
+        public string CregTable      { get; set; } = "";
+        public string CregIdCol      { get; set; } = "_007";
         public List<Rule51ColumnMapping> ColumnMappings { get; set; } = new();
     }
 
@@ -115,6 +119,7 @@ namespace HemisAudit.ViewModels
         public int FailCount { get; set; }
         public int ForeignNationalExemptCount { get; set; }
         public int PassWithReviewCount { get; set; }
+        public int NotInCregCount { get; set; }
         public decimal ExceptionRate { get; set; }
         public string Status { get; set; } = "";
         public string Timestamp { get; set; } = "";
@@ -132,6 +137,8 @@ namespace HemisAudit.ViewModels
         public string ValpacCol049  { get; set; } = "_049";
         public string SaNationalValues { get; set; } = "SA,PR";
         public string ValpacCol008ZPlaceholders { get; set; } = "ZZZZZZZZZZZZZ";
+        public string CregTable      { get; set; } = "";
+        public string CregIdCol      { get; set; } = "_007";
         public List<Rule51ColumnMapping> ColumnMappings { get; set; } = new();
         public string TableLinkageText { get; set; } = "";
         public string RuleModeText { get; set; } = "";

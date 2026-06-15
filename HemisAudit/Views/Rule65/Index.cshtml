@@ -1,0 +1,836 @@
+@using HemisAudit.Models
+@{
+    ViewData["Title"] = "Rule 65 - Cancellation Census Date Validation";
+    Layout = "~/Views/Shared/_Layout.cshtml";
+    var clients = ViewBag.Clients as List<Client> ?? new();
+    var selectedClientId = ViewBag.ClientId is int cid ? cid : 0;
+    var currentSystemRole = ViewBag.CurrentSystemRole as string ?? "";
+    var isResultsOnlyRole =
+        string.Equals(currentSystemRole, "Manager", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(currentSystemRole, "Director", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(currentSystemRole, "Trainee", StringComparison.OrdinalIgnoreCase);
+    var moduleNavigation = ViewBag.ModuleNavigation as HemisAudit.ViewModels.ModuleSequenceNavigationViewModel;
+}
+
+<div id="app" class="rule-page-shell">
+    @if (moduleNavigation != null)
+    {
+        @await Html.PartialAsync("_ModuleSequenceNav", moduleNavigation)
+    }
+
+    <div class="engagement-selector">
+        <label for="clientId">Engagement</label>
+        <select id="clientId">
+            <option value="">Select engagement</option>
+            @foreach (var client in clients)
+            {
+                <option value="@client.Id" selected="@(client.Id == selectedClientId ? "selected" : null)">
+                    @client.Name (@client.FiscalYear)
+                </option>
+            }
+        </select>
+    </div>
+
+    <div class="rule-header">
+        <div class="rule-header__icon">R65</div>
+        <div>
+            <h1 class="rule-header__title">HEMIS RULE 65: Cancellation Census Date Validation</h1>
+            <p class="rule-header__sub">
+                Rule 65 checks the cancellation list for rows where <code>CANCEL</code> equals the row <code>CENSUS</code> date,
+                and where any <code>CANCEL</code> date also matches <code>CURRENT_CENSUS</code> from <code>CENSUS_LIST_CLIENT</code>.
+            </p>
+        </div>
+        <div class="rule-header__badge" id="statusBadge" style="display:none"></div>
+    </div>
+
+    @if (!isResultsOnlyRole)
+    {
+        <div class="accordion-stack">
+            <div class="accordion-item">
+                <button class="accordion-toggle" type="button" onclick="toggleAccordion('connection')">
+                    <span class="acc-icon">DB</span><span>Database Connection</span><span class="acc-chevron">v</span>
+                </button>
+                <div class="accordion-body" id="body-connection">
+                    <div class="form-grid">
+                        <div class="field-group">
+                            <label for="server">Server Name</label>
+                            <input id="server" type="text" placeholder="e.g. MYSERVER or MYSERVER\INSTANCE" />
+                        </div>
+                        <div class="field-group">
+                            <label for="driver">Driver</label>
+                            <select id="driver">
+                                <option value="ODBC Driver 17 for SQL Server">ODBC Driver 17 for SQL Server</option>
+                                <option value="ODBC Driver 18 for SQL Server">ODBC Driver 18 for SQL Server</option>
+                                <option value="SQL Server">SQL Server</option>
+                            </select>
+                        </div>
+                        <div class="field-group">
+                            <label for="database">Database</label>
+                            <select id="database"></select>
+                        </div>
+                    </div>
+                    <div class="action-bar" style="justify-content:flex-start;margin:12px 0 0">
+                        <button type="button" class="btn btn-primary" id="connectBtn">Connect</button>
+                    </div>
+                    <div id="connectionOutput" class="status-output"></div>
+                </div>
+            </div>
+
+            <div class="accordion-item">
+                <button class="accordion-toggle" type="button" onclick="toggleAccordion('config')">
+                    <span class="acc-icon">CF</span><span>Rule Configuration</span><span class="acc-chevron">v</span>
+                </button>
+                <div class="accordion-body" id="body-config" style="display:none">
+                    <div class="info-box info-box--red">
+                        <strong>Audit Logic:</strong><br />
+                        <span>Step 1: Read the cancellation list rows using <code>STD_NO</code>, <code>QUAL</code>, <code>SUBJ</code>, <code>CANCEL</code>, and <code>CENSUS</code>.</span><br />
+                        <span>Step 2: FAIL any row where <code>CANCEL</code> equals the row <code>CENSUS</code> date.</span><br />
+                        <span>Step 3: FAIL any row where <code>CANCEL</code> also matches a <code>CURRENT_CENSUS</code> date in <code>CENSUS_LIST_CLIENT</code>.</span><br />
+                        <span>Step 4: PASS when the cancel date matches neither check.</span>
+                    </div>
+                    <div class="form-grid">
+                        <div class="field-group">
+                            <label for="cancellationTable">Cancellation Table</label>
+                            <select id="cancellationTable"></select>
+                        </div>
+                        <div class="field-group">
+                            <label for="clientTable">Client Census Table</label>
+                            <select id="clientTable"></select>
+                        </div>
+                    </div>
+                    <div id="configOutput" class="status-output"></div>
+                </div>
+            </div>
+
+            <div class="accordion-item">
+                <button class="accordion-toggle" type="button" onclick="toggleAccordion('colmap')">
+                    <span class="acc-icon">CM</span><span>Column Mapping</span><span class="acc-chevron">v</span>
+                </button>
+                <div class="accordion-body" id="body-colmap" style="display:none">
+                    <div class="alert alert--info" style="margin-bottom:12px">
+                        Map the cancellation list and client census columns Rule 65 uses. Defaults match the layout you described.
+                    </div>
+                    <div style="font-weight:700;font-size:13px;text-transform:uppercase;color:#555;margin-bottom:8px">Cancellation Table</div>
+                    <div class="form-grid">
+                        <div class="field-group">
+                            <label>Student Number</label>
+                            <select id="cm_studentNoCol"></select>
+                        </div>
+                        <div class="field-group">
+                            <label>Qualification</label>
+                            <select id="cm_qualificationCol"></select>
+                        </div>
+                        <div class="field-group">
+                            <label>Subject</label>
+                            <select id="cm_subjectCol"></select>
+                        </div>
+                        <div class="field-group">
+                            <label>Cancel Date</label>
+                            <select id="cm_cancelDateCol"></select>
+                        </div>
+                        <div class="field-group">
+                            <label>Census Date</label>
+                            <select id="cm_censusDateCol"></select>
+                        </div>
+                    </div>
+
+                    <div style="font-weight:700;font-size:13px;text-transform:uppercase;color:#555;margin:14px 0 8px">Client Census Table</div>
+                    <div class="form-grid">
+                        <div class="field-group">
+                            <label>Current Census</label>
+                            <select id="cm_currentCensusCol"></select>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    }
+
+    <div class="workspace-signoff-card">
+        <div class="workspace-signoff-card__header">
+            <div>
+                <div class="workspace-signoff-card__title">Saved Workspace</div>
+                <div class="workspace-signoff-card__subtitle">Latest Rule 65 configuration and results reload automatically for this engagement.</div>
+            </div>
+            <div id="workspaceRunState" class="badge badge--neutral badge--sm">No saved run loaded</div>
+        </div>
+        <div id="workspaceInfo" class="alert alert--info">Select an engagement to load the saved Rule 65 workspace.</div>
+        <div class="workspace-signoff-grid">
+            <div>
+                <div style="color:#757575;font-size:12px;text-transform:uppercase;font-weight:700">Current Run</div>
+                <div id="workspaceRunLabel">No saved run yet</div>
+            </div>
+            <div>
+                <div style="color:#757575;font-size:12px;text-transform:uppercase;font-weight:700">Status</div>
+                <div id="workspaceStatusLabel">-</div>
+            </div>
+            <div>
+                <div style="color:#757575;font-size:12px;text-transform:uppercase;font-weight:700">Last Edited</div>
+                <div id="workspaceEditedLabel">-</div>
+            </div>
+            <div>
+                <div style="color:#757575;font-size:12px;text-transform:uppercase;font-weight:700">Your Role</div>
+                <div id="workspaceRoleLabel">@(string.IsNullOrWhiteSpace(currentSystemRole) ? "-" : currentSystemRole)</div>
+            </div>
+            <div class="field-group" style="grid-column:1/-1">
+                <label for="workspaceSignoffComment">Signoff Comment</label>
+                <textarea id="workspaceSignoffComment" rows="3" placeholder="Add review or completion notes"></textarea>
+            </div>
+        </div>
+        <div class="workspace-signoff-actions">
+            @if (!isResultsOnlyRole)
+            {
+                <button type="button" class="btn btn-secondary" id="beginEditBtn">Begin Edit</button>
+                <button type="button" class="btn btn-success" id="saveWorkspaceBtn">Save Workspace</button>
+            }
+            <button type="button" class="btn btn-primary" id="signoffBtn">Save Signoff</button>
+            <button type="button" class="btn btn-warning" id="removeSignoffBtn">Remove Signoff</button>
+        </div>
+    </div>
+
+    @if (!isResultsOnlyRole)
+    {
+        <div class="action-bar">
+            <button type="button" class="btn btn-info" id="verifyBtn">Verify Tables</button>
+            <button type="button" class="btn btn-success" id="runBtn">Run Rule 65</button>
+            <button type="button" class="btn btn-primary" id="sqlBtn">Generate SQL</button>
+        </div>
+    }
+
+    <div class="results-panel">
+        <div class="results-tabs">
+            <button class="tab-btn active" type="button" data-tab="analysis">Analysis</button>
+            <button class="tab-btn" type="button" data-tab="flagged">FLAGGED</button>
+            <button class="tab-btn" type="button" data-tab="clear">CLEAR</button>
+            <button class="tab-btn" type="button" data-tab="sql">SQL</button>
+            <button class="tab-btn" type="button" data-tab="downloads">Downloads</button>
+        </div>
+        <div class="tab-pane active" data-tab-panel="analysis"></div>
+        <div class="tab-pane" data-tab-panel="flagged"></div>
+        <div class="tab-pane" data-tab-panel="clear"></div>
+        <div class="tab-pane" data-tab-panel="sql">
+            <textarea id="sqlText" rows="20" readonly style="width:100%;font-family:monospace;font-size:12px"></textarea>
+        </div>
+        <div class="tab-pane" data-tab-panel="downloads">
+            <div class="alert alert--info" style="margin-bottom:12px">Download the full validated result set. Excel and CSV include all flagged and clear rows, even when the exception count is zero. SQL includes the audit query used for Rule 65.</div>
+            <div class="action-bar" style="justify-content:flex-start;margin:0">
+                <button type="button" class="btn btn-info" id="downloadExcelBtn">Excel</button>
+                <button type="button" class="btn btn-info" id="downloadCsvBtn">CSV</button>
+                <button type="button" class="btn btn-secondary" id="downloadSqlBtn">SQL</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="spinner" class="spinner-overlay" style="display:none">
+        <div class="spinner-box">
+            <div class="spinner-ring"></div>
+            <p id="spinnerMsg">Processing...</p>
+        </div>
+    </div>
+</div>
+
+<form id="antiForgeryForm" method="post" style="display:none">
+    @Html.AntiForgeryToken()
+</form>
+
+<script>
+window.toggleAccordion = function (section) {
+    const body = document.getElementById(`body-${section}`);
+    if (body) body.style.display = body.style.display === 'none' ? '' : 'none';
+};
+
+(() => {
+    const apiBase = '/Rule65';
+    const currentSystemRole = '@currentSystemRole';
+    const isResultsOnlyRole = @(isResultsOnlyRole.ToString().ToLowerInvariant());
+    const token = document.querySelector('#antiForgeryForm input[name="__RequestVerificationToken"]')?.value || '';
+
+    const state = {
+        clientId: @(selectedClientId > 0 ? selectedClientId : 0),
+        currentRunId: null,
+        summary: null,
+        sql: '',
+        currentStatus: '',
+        currentUserEngagementRole: '',
+        currentUserHasSignedOff: false,
+        isWorkspaceSaved: false,
+        hasDataAnalystSignoff: false,
+        resultsVisible: false
+    };
+
+    const els = {
+        clientId: document.getElementById('clientId'),
+        server: document.getElementById('server'),
+        driver: document.getElementById('driver'),
+        database: document.getElementById('database'),
+        cancellationTable: document.getElementById('cancellationTable'),
+        clientTable: document.getElementById('clientTable'),
+        connectBtn: document.getElementById('connectBtn'),
+        studentNoCol: document.getElementById('cm_studentNoCol'),
+        qualificationCol: document.getElementById('cm_qualificationCol'),
+        subjectCol: document.getElementById('cm_subjectCol'),
+        cancelDateCol: document.getElementById('cm_cancelDateCol'),
+        censusDateCol: document.getElementById('cm_censusDateCol'),
+        currentCensusCol: document.getElementById('cm_currentCensusCol'),
+        connectionOutput: document.getElementById('connectionOutput'),
+        configOutput: document.getElementById('configOutput'),
+        workspaceInfo: document.getElementById('workspaceInfo'),
+        workspaceRunState: document.getElementById('workspaceRunState'),
+        workspaceRunLabel: document.getElementById('workspaceRunLabel'),
+        workspaceStatusLabel: document.getElementById('workspaceStatusLabel'),
+        workspaceEditedLabel: document.getElementById('workspaceEditedLabel'),
+        workspaceRoleLabel: document.getElementById('workspaceRoleLabel'),
+        workspaceSignoffComment: document.getElementById('workspaceSignoffComment'),
+        beginEditBtn: document.getElementById('beginEditBtn'),
+        saveWorkspaceBtn: document.getElementById('saveWorkspaceBtn'),
+        signoffBtn: document.getElementById('signoffBtn'),
+        removeSignoffBtn: document.getElementById('removeSignoffBtn'),
+        analysisPane: document.querySelector('[data-tab-panel="analysis"]'),
+        flaggedPane: document.querySelector('[data-tab-panel="flagged"]'),
+        clearPane: document.querySelector('[data-tab-panel="clear"]'),
+        sqlText: document.getElementById('sqlText'),
+        statusBadge: document.getElementById('statusBadge'),
+        spinner: document.getElementById('spinner'),
+        spinnerMsg: document.getElementById('spinnerMsg')
+    };
+
+    const tabButtons = document.querySelectorAll('.tab-btn[data-tab]');
+
+    function setActiveTab(tab) {
+        tabButtons.forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+        document.querySelectorAll('.tab-pane').forEach(p => p.classList.toggle('active', p.dataset.tabPanel === tab));
+    }
+
+    tabButtons.forEach(b => b.addEventListener('click', () => setActiveTab(b.dataset.tab)));
+
+    function setBusy(isBusy, message = 'Processing...') {
+        if (!els.spinner) return;
+        els.spinner.style.display = isBusy ? 'flex' : 'none';
+        if (els.spinnerMsg) els.spinnerMsg.textContent = message;
+    }
+
+    function showSpinner(message) { setBusy(true, message); }
+    function hideSpinner() { setBusy(false); }
+
+    function normalizeRole(value) {
+        return String(value || '').replace(/[^a-z0-9]+/gi, '').toLowerCase();
+    }
+
+    function updateWorkspaceButtons() {
+        const role = state.currentUserEngagementRole || currentSystemRole || '';
+        const normalizedRole = normalizeRole(role);
+        const normalizedSystemRole = normalizeRole(currentSystemRole);
+        const canEdit = !isResultsOnlyRole && (normalizedSystemRole === 'dataanalyst' || normalizedRole === 'dataanalyst');
+        const canSign = !!state.currentRunId && !!state.isWorkspaceSaved &&
+            (normalizedRole === 'dataanalyst' || (state.resultsVisible && (normalizedRole === 'manager' || normalizedRole === 'director')));
+        const signed = !!state.currentUserHasSignedOff;
+
+        window.ruleWorkspaceUi?.setReadonlyShell('app', !canEdit || signed);
+        window.ruleWorkspaceUi?.setFormSectionReadonly('.accordion-stack', !canEdit || signed);
+        window.ruleWorkspaceUi?.applyStates([
+            { target: 'connectBtn',    disabled: !canEdit || signed },
+            { target: 'verifyBtn',     disabled: !canEdit || signed },
+            { target: 'runBtn',        disabled: !canEdit || signed },
+            { target: 'sqlBtn',        disabled: !canEdit || signed },
+            { target: els.beginEditBtn,    disabled: signed || !canEdit || !state.currentRunId },
+            { target: els.saveWorkspaceBtn, disabled: signed || !canEdit || !state.currentRunId || !state.summary },
+            {
+                target: els.signoffBtn,
+                disabled: signed || !canSign,
+                text: signed ? `Signed Off as ${role || currentSystemRole}` : 'Save Signoff'
+            },
+            { target: els.removeSignoffBtn, show: signed, display: '', disabled: !signed },
+            { target: els.workspaceSignoffComment, disabled: signed || !canSign }
+        ]);
+        window.ruleWorkspaceUi?.setButtonGroupReadonly(['.workspace-signoff-actions', '.action-bar'], signed, {
+            allow: ['#downloadExcelBtn', '#downloadCsvBtn', '#downloadSqlBtn', '#removeSignoffBtn']
+        });
+    }
+
+    function escapeHtml(value) {
+        return (value ?? '').toString()
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
+    function populateSelect(select, options, selectedValue) {
+        if (!select) return;
+        const current = selectedValue ?? select.value;
+        const unique = [...new Set((options || []).filter(Boolean))];
+        select.innerHTML = unique.map(option => `<option value="${escapeHtml(option)}">${escapeHtml(option)}</option>`).join('');
+        if (current && unique.includes(current)) select.value = current;
+        else if (unique.length > 0) select.value = unique[0];
+    }
+
+    function renderStatus(text, type = 'info') {
+        if (!els.statusBadge) return;
+        els.statusBadge.style.display = text ? '' : 'none';
+        els.statusBadge.textContent = text || '';
+        els.statusBadge.className = `rule-header__badge badge badge--${type}`;
+    }
+
+    function setOutput(element, message, type = 'info') {
+        if (!element) return;
+        element.className = `status-output alert alert--${type}`;
+        element.textContent = message;
+    }
+
+    function fmt(value) {
+        return Number(value || 0).toLocaleString('en-ZA').replace(/\s/g, ',');
+    }
+
+    async function postJson(url, payload) {
+        return await window.fetchJsonWithProgress(url, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'RequestVerificationToken': token
+            },
+            body: JSON.stringify(payload)
+        });
+    }
+
+    async function downloadBlob(url, payload, filename) {
+        await window.downloadFileWithProgress({
+            url,
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'RequestVerificationToken': token
+            },
+            body: JSON.stringify(payload),
+            defaultFileName: filename,
+            label: 'Downloading result'
+        });
+    }
+
+    function getRequestPayload() {
+        return {
+            clientId: Number(els.clientId?.value || 0),
+            runId: state.currentRunId,
+            server: els.server?.value?.trim() || '',
+            database: els.database?.value || '',
+            driver: els.driver?.value || 'ODBC Driver 17 for SQL Server',
+            cancellationTable: els.cancellationTable?.value || '',
+            clientTable: els.clientTable?.value || '',
+            columnMapping: {
+                studentNoCol: els.studentNoCol?.value || 'STD_NO',
+                qualificationCol: els.qualificationCol?.value || 'QUAL',
+                subjectCol: els.subjectCol?.value || 'SUBJ',
+                cancelDateCol: els.cancelDateCol?.value || 'CANCEL',
+                censusDateCol: els.censusDateCol?.value || 'CENSUS',
+                currentCensusCol: els.currentCensusCol?.value || 'CURRENT_CENSUS'
+            }
+        };
+    }
+
+    function updateWorkspaceCard(workspace, resultsVisible) {
+        state.currentRunId = workspace?.runId ?? workspace?.RunId ?? null;
+        state.currentStatus = workspace?.currentStatus ?? workspace?.CurrentStatus ?? '';
+        state.currentUserEngagementRole = workspace?.currentUserEngagementRole ?? workspace?.CurrentUserEngagementRole ?? '';
+        state.currentUserHasSignedOff = workspace?.currentUserHasSignedOff ?? workspace?.CurrentUserHasSignedOff ?? false;
+        state.isWorkspaceSaved = !!(workspace?.runId ?? workspace?.RunId);
+        state.hasDataAnalystSignoff = workspace?.hasDataAnalystSignoff ?? workspace?.HasDataAnalystSignoff ?? false;
+        state.resultsVisible = resultsVisible;
+
+        els.workspaceRunState.textContent = state.currentRunId ? `Run #${state.currentRunId}` : 'No saved run loaded';
+        els.workspaceRunLabel.textContent = state.currentRunId ? `Run #${state.currentRunId}` : 'No saved run yet';
+        els.workspaceStatusLabel.textContent = state.currentStatus || '-';
+        els.workspaceEditedLabel.textContent = workspace?.lastEditedAt || workspace?.LastEditedAt || '-';
+        els.workspaceRoleLabel.textContent = state.currentUserEngagementRole || currentSystemRole || '-';
+        els.workspaceSignoffComment.value = workspace?.currentUserSignoffComment || workspace?.CurrentUserSignoffComment || '';
+
+        if (!workspace) {
+            els.workspaceInfo.textContent = 'No saved Rule 65 workspace exists for this engagement yet.';
+            els.workspaceInfo.className = 'alert alert--info';
+            return;
+        }
+
+        if (!resultsVisible) {
+            els.workspaceInfo.textContent = 'A saved workspace exists, but the results remain locked until the assigned data analyst signs off.';
+            els.workspaceInfo.className = 'alert alert--warning';
+            return;
+        }
+
+        els.workspaceInfo.textContent = 'Saved Rule 65 workspace loaded.';
+        els.workspaceInfo.className = 'alert alert--success';
+    }
+
+    function renderReviewRow(row) {
+        const esc = escapeHtml;
+        const result = String(row.validationResult ?? row.ValidationResult ?? '').toUpperCase();
+        const badgeClass = result === 'PASS' ? 'badge--pass' : 'badge--fail';
+        const code = row.errorCode ?? row.ErrorCode ?? '';
+        return `<tr>
+            <td>${esc(row.rowNumber ?? row.RowNumber ?? '')}</td>
+            <td><strong>${esc(row.studentNo ?? row.StudentNo ?? '')}</strong></td>
+            <td><code>${esc(row.qualification ?? row.Qualification ?? '-')}</code></td>
+            <td><code>${esc(row.subject ?? row.Subject ?? '-')}</code></td>
+            <td><code>${esc(row.cancelDate ?? row.CancelDate ?? '-')}</code></td>
+            <td><code>${esc(row.censusDate ?? row.CensusDate ?? '-')}</code></td>
+            <td><code>${esc(row.currentCensus ?? row.CurrentCensus ?? '-')}</code></td>
+            <td>${code ? `<span class="badge ${badgeClass}">${esc(code)}</span>` : '-'}</td>
+            <td style="text-align:center"><span class="badge ${badgeClass}">${esc(result || '-')}</span></td>
+            <td style="font-size:11px">${esc(row.validationExplanation ?? row.ValidationExplanation ?? '')}</td>
+        </tr>`;
+    }
+
+    function reviewTableHtml(rows, emptyMessage) {
+        if (!rows || !rows.length) {
+            return `<div class="empty-card"><p>${escapeHtml(emptyMessage)}</p></div>`;
+        }
+        return `<div style="overflow-x:auto"><table class="data-table" style="font-size:12px">
+            <thead><tr>
+                <th>#</th><th>STD_NO</th><th>QUAL</th><th>SUBJ</th>
+                <th>CANCEL</th><th>CENSUS</th><th>CURRENT_CENSUS</th>
+                <th>Code</th><th>Result</th><th>Explanation</th>
+            </tr></thead>
+            <tbody>${rows.map(renderReviewRow).join('')}</tbody>
+        </table></div>`;
+    }
+
+    function renderAnalysis(summary) {
+        if (!summary) {
+            els.analysisPane.innerHTML = '<div class="empty-card"><p>Run Rule 65 or load a saved workspace to view results.</p></div>';
+            return;
+        }
+        const statusClass = (summary.status ?? summary.Status ?? '') === 'PASS' ? 'badge--pass' : 'badge--fail';
+        const categories = summary.exceptionCategories ?? summary.ExceptionCategories ?? [];
+        const getCat = key => (categories.find(c => (c.category ?? c.Category ?? '').toUpperCase() === key) || {});
+        const cancelEqualsCensus = getCat('CANCEL_EQUALS_CENSUS').count ?? getCat('CANCEL_EQUALS_CENSUS').Count ?? 0;
+        const currentCensusMatch = getCat('CURRENT_CENSUS_MATCH').count ?? getCat('CURRENT_CENSUS_MATCH').Count ?? 0;
+        const bothMatches        = getCat('CANCEL_EQUALS_CENSUS_AND_CURRENT_CENSUS').count ?? getCat('CANCEL_EQUALS_CENSUS_AND_CURRENT_CENSUS').Count ?? 0;
+        const invalidCancel      = getCat('INVALID_CANCEL_DATE').count ?? getCat('INVALID_CANCEL_DATE').Count ?? 0;
+        const categoryRows = categories.map(c => `<tr style="background:#FFF8E1">
+            <td style="font-family:Consolas,monospace;font-size:12px;font-weight:700;color:#BF360C">${escapeHtml(c.category ?? c.Category ?? '')}</td>
+            <td style="font-size:13px">${escapeHtml(c.description ?? c.Description ?? '')}</td>
+            <td style="text-align:right;font-weight:700;font-size:14px;color:#BF360C">${fmt(c.count ?? c.Count ?? 0)}</td>
+        </tr>`).join('');
+
+        els.analysisPane.innerHTML = `
+            <div class="stats-grid" style="margin-bottom:20px">
+                <div class="stat-card"><div class="stat-card__label">Total Tested</div><div class="stat-card__value">${fmt(summary.totalCount ?? summary.TotalCount)}</div></div>
+                <div class="stat-card stat-card--pass"><div class="stat-card__label">Clear Rows</div><div class="stat-card__value">${fmt(summary.passCount ?? summary.PassCount)}</div></div>
+                <div class="stat-card stat-card--fail"><div class="stat-card__label">Flagged Rows</div><div class="stat-card__value">${fmt(summary.failCount ?? summary.FailCount)}</div></div>
+                <div class="stat-card stat-card--fail"><div class="stat-card__label">Cancel = Census</div><div class="stat-card__value">${fmt(cancelEqualsCensus)}</div></div>
+                <div class="stat-card stat-card--pass"><div class="stat-card__label">Cancel on Current Census</div><div class="stat-card__value">${fmt(currentCensusMatch)}</div></div>
+                <div class="stat-card stat-card--fail"><div class="stat-card__label">Matched Both Checks</div><div class="stat-card__value">${fmt(bothMatches)}</div></div>
+                <div class="stat-card stat-card--fail"><div class="stat-card__label">Invalid Cancel Date</div><div class="stat-card__value">${fmt(invalidCancel)}</div></div>
+                <div class="stat-card"><div class="stat-card__label">Exception Rate</div><div class="stat-card__value">${escapeHtml(String(summary.exceptionRate ?? summary.ExceptionRate ?? 0))}%</div></div>
+                <div class="stat-card"><div class="stat-card__label">Status</div><div class="stat-card__value"><span class="badge ${statusClass}">${escapeHtml(summary.status ?? summary.Status ?? '')}</span></div></div>
+            </div>
+            <div class="card" style="padding:20px">
+                <div class="form-grid" style="margin-bottom:${(summary.isPreviewOnly ?? summary.IsPreviewOnly) ? '12px' : '0'}">
+                    <div><div class="stat-label">Cancellation Table</div><div>${escapeHtml(summary.cancellationTable ?? summary.CancellationTable ?? '')}</div></div>
+                    <div><div class="stat-label">Client Census Table</div><div>${escapeHtml(summary.clientTable ?? summary.ClientTable ?? '')}</div></div>
+                    <div><div class="stat-label">Timestamp</div><div>${escapeHtml(summary.timestamp ?? summary.Timestamp ?? '')}</div></div>
+                    <div><div class="stat-label">Status</div><div><span class="badge ${statusClass}">${escapeHtml(summary.status ?? summary.Status ?? '')}</span></div></div>
+                </div>
+                ${(summary.isPreviewOnly ?? summary.IsPreviewOnly) ? `<div class="alert alert--warning" style="margin:0">Browser preview is limited to the first ${fmt(summary.previewLimit ?? summary.PreviewLimit)} exception rows and ${fmt(summary.previewLimit ?? summary.PreviewLimit)} clear rows. Download the result files for the full tested population.</div>` : ''}
+            </div>
+            ${categories.length ? `<div class="card" style="padding:20px;margin-top:16px;border-left:4px solid #F57C00">
+                <h3 class="section-title" style="margin-top:0;color:#E65100">Exception Category Breakdown</h3>
+                <table class="data-table" style="min-width:520px">
+                    <thead><tr>
+                        <th style="background:#F57C00;color:#fff">Category</th>
+                        <th style="background:#F57C00;color:#fff">Description</th>
+                        <th style="background:#F57C00;color:#fff;text-align:right">Count</th>
+                    </tr></thead>
+                    <tbody>${categoryRows}</tbody>
+                </table>
+            </div>` : ''}`;
+    }
+
+    function renderFlagged(summary) {
+        if (!summary) {
+            els.flaggedPane.innerHTML = '<div class="empty-card"><p>No Rule 65 results loaded.</p></div>';
+            return;
+        }
+        const rows = summary.failRows ?? summary.FailRows ?? [];
+        const total = summary.failCount ?? summary.FailCount ?? 0;
+        const previewOnly = summary.isPreviewOnly ?? summary.IsPreviewOnly;
+        els.flaggedPane.innerHTML = `
+            <div class="card" style="padding:16px;margin-bottom:12px">
+                <strong>FLAGGED Rows</strong> — ${fmt(total)} row(s) where CANCEL equals the row CENSUS date.
+                ${previewOnly ? `<span class="badge badge--neutral" style="margin-left:8px">Preview: first ${fmt(summary.previewLimit ?? summary.PreviewLimit)} rows shown</span>` : ''}
+            </div>
+            ${reviewTableHtml(rows, 'No flagged rows were returned for this run.')}`;
+    }
+
+    function renderClear(summary) {
+        if (!summary) {
+            els.clearPane.innerHTML = '<div class="empty-card"><p>No Rule 65 results loaded.</p></div>';
+            return;
+        }
+        const rows = summary.passRows ?? summary.PassRows ?? [];
+        const total = summary.passCount ?? summary.PassCount ?? 0;
+        els.clearPane.innerHTML = `
+            <div class="card" style="padding:16px;margin-bottom:12px">
+                <strong>CLEAR Rows</strong> — ${fmt(total)} row(s) where the cancellation date is valid and does not equal the row CENSUS date.
+                ${rows.length < total ? `<span class="badge badge--neutral" style="margin-left:8px">Sample of ${fmt(rows.length)} shown</span>` : ''}
+            </div>
+            ${reviewTableHtml(rows, 'No clear rows were returned for this run.')}`;
+    }
+
+    function applySummary(summary) {
+        state.summary = summary;
+        if (summary) {
+            state.currentRunId = summary.savedRunId ?? summary.SavedRunId ?? state.currentRunId;
+            state.currentStatus = summary.status ?? summary.Status ?? '';
+            els.workspaceRunState.textContent = state.currentRunId ? `Run #${state.currentRunId} | ${state.currentStatus}` : 'No saved run loaded';
+            els.workspaceRunLabel.textContent = state.currentRunId ? `Run #${state.currentRunId}` : 'No saved run yet';
+            els.workspaceStatusLabel.textContent = state.currentStatus || '-';
+        }
+        renderStatus(state.currentStatus, state.currentStatus === 'PASS' ? 'pass' : state.currentStatus ? 'fail' : 'info');
+        renderAnalysis(summary);
+        renderFlagged(summary);
+        renderClear(summary);
+        updateWorkspaceButtons();
+    }
+
+    async function loadColumnsForTable(tableName, type) {
+        if (!tableName || !els.server.value || !els.database.value) return;
+
+        const result = await postJson(`${apiBase}/GetColumns`, {
+            server: els.server.value.trim(),
+            database: els.database.value,
+            driver: els.driver.value,
+            tableName
+        });
+
+        const columns = result.columns ?? result.Columns ?? [];
+        if (type === 'cancellation') {
+            populateSelect(els.studentNoCol, columns, result.autoStudentNoCol ?? result.AutoStudentNoCol ?? 'STD_NO');
+            populateSelect(els.qualificationCol, columns, result.autoQualificationCol ?? result.AutoQualificationCol ?? 'QUAL');
+            populateSelect(els.subjectCol, columns, result.autoSubjectCol ?? result.AutoSubjectCol ?? 'SUBJ');
+            populateSelect(els.cancelDateCol, columns, result.autoCancelDateCol ?? result.AutoCancelDateCol ?? 'CANCEL');
+            populateSelect(els.censusDateCol, columns, result.autoCensusDateCol ?? result.AutoCensusDateCol ?? 'CENSUS');
+        } else {
+            populateSelect(els.currentCensusCol, columns, result.autoCurrentCensusCol ?? result.AutoCurrentCensusCol ?? 'CURRENT_CENSUS');
+        }
+    }
+
+    async function connect() {
+        if (!els.server.value.trim()) {
+            setOutput(els.connectionOutput, 'Enter a server name first.', 'warning');
+            return;
+        }
+
+        setBusy(true, 'Loading databases...');
+        try {
+            const dbs = await postJson(`${apiBase}/GetDatabases`, { server: els.server.value.trim(), driver: els.driver.value });
+            populateSelect(els.database, dbs.databases ?? dbs.Databases ?? [], els.database.value);
+            setOutput(els.connectionOutput, 'Connected. Choose a database, then configure the tables.', 'success');
+
+            if (els.database.value) {
+                const tables = await postJson(`${apiBase}/GetTables`, { server: els.server.value.trim(), database: els.database.value, driver: els.driver.value });
+                const items = tables.tables ?? tables.Tables ?? [];
+                populateSelect(els.cancellationTable, items, tables.autoCancellationTable ?? tables.AutoCancellationTable);
+                populateSelect(els.clientTable, items, tables.autoClientTable ?? tables.AutoClientTable);
+                await loadColumnsForTable(els.cancellationTable.value, 'cancellation');
+                await loadColumnsForTable(els.clientTable.value, 'client');
+            }
+        } catch (error) {
+            setOutput(els.connectionOutput, error.message || 'Connection failed.', 'error');
+        } finally {
+            setBusy(false);
+        }
+    }
+
+    async function loadWorkspaceState() {
+        if (!state.clientId) {
+            updateWorkspaceCard(null, false);
+            applySummary(null);
+            return;
+        }
+
+        try {
+            const data = await window.fetchJsonWithProgress(`${apiBase}/GetWorkspaceState?clientId=${state.clientId}`, { method: 'GET' });
+            if (!data.success || !data.hasWorkspace) {
+                updateWorkspaceCard(null, false);
+                applySummary(null);
+                return;
+            }
+
+            const workspace = data.workspace;
+            updateWorkspaceCard(workspace, data.resultsVisible);
+
+            if (workspace) {
+                els.server.value = workspace.server ?? workspace.Server ?? '';
+                els.database.innerHTML = (workspace.database ?? workspace.Database ?? '') ? `<option value="${escapeHtml(workspace.database ?? workspace.Database ?? '')}">${escapeHtml(workspace.database ?? workspace.Database ?? '')}</option>` : '';
+                els.driver.value = workspace.driver ?? workspace.Driver ?? 'ODBC Driver 17 for SQL Server';
+                els.cancellationTable.innerHTML = (workspace.cancellationTable ?? workspace.CancellationTable ?? '') ? `<option value="${escapeHtml(workspace.cancellationTable ?? workspace.CancellationTable ?? '')}">${escapeHtml(workspace.cancellationTable ?? workspace.CancellationTable ?? '')}</option>` : '';
+                els.clientTable.innerHTML = (workspace.clientTable ?? workspace.ClientTable ?? '') ? `<option value="${escapeHtml(workspace.clientTable ?? workspace.ClientTable ?? '')}">${escapeHtml(workspace.clientTable ?? workspace.ClientTable ?? '')}</option>` : '';
+
+                const mapping = workspace.columnMapping ?? workspace.ColumnMapping ?? {};
+                populateSelect(els.studentNoCol, [mapping.studentNoCol ?? mapping.StudentNoCol ?? 'STD_NO'], mapping.studentNoCol ?? mapping.StudentNoCol ?? 'STD_NO');
+                populateSelect(els.qualificationCol, [mapping.qualificationCol ?? mapping.QualificationCol ?? 'QUAL'], mapping.qualificationCol ?? mapping.QualificationCol ?? 'QUAL');
+                populateSelect(els.subjectCol, [mapping.subjectCol ?? mapping.SubjectCol ?? 'SUBJ'], mapping.subjectCol ?? mapping.SubjectCol ?? 'SUBJ');
+                populateSelect(els.cancelDateCol, [mapping.cancelDateCol ?? mapping.CancelDateCol ?? 'CANCEL'], mapping.cancelDateCol ?? mapping.CancelDateCol ?? 'CANCEL');
+                populateSelect(els.censusDateCol, [mapping.censusDateCol ?? mapping.CensusDateCol ?? 'CENSUS'], mapping.censusDateCol ?? mapping.CensusDateCol ?? 'CENSUS');
+                populateSelect(els.currentCensusCol, [mapping.currentCensusCol ?? mapping.CurrentCensusCol ?? 'CURRENT_CENSUS'], mapping.currentCensusCol ?? mapping.CurrentCensusCol ?? 'CURRENT_CENSUS');
+            }
+
+            applySummary(data.resultsVisible ? (workspace.summary ?? workspace.Summary ?? null) : null);
+        } catch (error) {
+            updateWorkspaceCard(null, false);
+            applySummary(null);
+            els.workspaceInfo.textContent = error.message || 'Failed to load workspace.';
+            els.workspaceInfo.className = 'alert alert--error';
+        }
+    }
+
+    async function verifyTables() {
+        setBusy(true, 'Verifying tables...');
+        try {
+            const result = await postJson(`${apiBase}/VerifyTables`, getRequestPayload());
+            const cancellationCount = result.cancellationCount ?? result.CancellationCount ?? 0;
+            const clientCount = result.clientCount ?? result.ClientCount ?? 0;
+            setOutput(els.configOutput, `Verified. Cancellation rows: ${cancellationCount}. Client census rows: ${clientCount}.`, 'success');
+        } catch (error) {
+            setOutput(els.configOutput, error.message || 'Verification failed.', 'error');
+        } finally {
+            setBusy(false);
+        }
+    }
+
+    async function runValidation() {
+        setBusy(true, 'Running Rule 65...');
+        try {
+            const result = await postJson(`${apiBase}/RunValidation`, getRequestPayload());
+            applySummary(result);
+            const flagged = result.failCount ?? result.FailCount ?? 0;
+            const status  = result.status ?? result.Status ?? '';
+            setOutput(els.configOutput, `Rule 65 completed. ${fmt(flagged)} flagged rows. Status: ${status}.`, flagged === 0 ? 'success' : 'warning');
+            await loadWorkspaceState();
+        } catch (error) {
+            setOutput(els.configOutput, error.message || 'Validation failed.', 'error');
+        } finally {
+            setBusy(false);
+        }
+    }
+
+    async function generateSql() {
+        try {
+            const result = await postJson(`${apiBase}/GenerateSql`, getRequestPayload());
+            els.sqlText.value = result.sql ?? result.Sql ?? '';
+            setActiveTab('sql');
+        } catch (error) {
+            els.sqlText.value = error.message || 'SQL generation failed.';
+        }
+    }
+
+    async function saveWorkspace() {
+        setBusy(true, 'Saving workspace...');
+        try {
+            const result = await postJson(`${apiBase}/SaveWorkspace`, getRequestPayload());
+            state.currentRunId = result.workspace?.runId ?? result.workspace?.RunId ?? state.currentRunId;
+            await loadWorkspaceState();
+        } catch (error) {
+            els.workspaceInfo.textContent = error.message || 'Save workspace failed.';
+            els.workspaceInfo.className = 'alert alert--error';
+        } finally {
+            setBusy(false);
+        }
+    }
+
+    async function beginEdit() {
+        if (!state.currentRunId) {
+            els.workspaceInfo.textContent = 'Select a saved run before editing.';
+            els.workspaceInfo.className = 'alert alert--warning';
+            return;
+        }
+
+        setBusy(true, 'Unlocking workspace...');
+        try {
+            await postJson(`${apiBase}/BeginWorkspaceEdit`, getRequestPayload());
+            await loadWorkspaceState();
+        } catch (error) {
+            els.workspaceInfo.textContent = error.message || 'Begin edit failed.';
+            els.workspaceInfo.className = 'alert alert--error';
+        } finally {
+            setBusy(false);
+        }
+    }
+
+    async function saveSignoff() {
+        if (!state.currentRunId || !state.clientId) return;
+
+        try {
+            await postJson(`${apiBase}/SignOffWorkspace`, {
+                clientId: state.clientId,
+                runId: state.currentRunId,
+                comment: els.workspaceSignoffComment.value || ''
+            });
+            await loadWorkspaceState();
+        } catch (error) {
+            els.workspaceInfo.textContent = error.message || 'Signoff failed.';
+            els.workspaceInfo.className = 'alert alert--error';
+        }
+    }
+
+    async function removeSignoff() {
+        if (!state.currentRunId || !state.clientId) return;
+
+        try {
+            await postJson(`${apiBase}/RemoveWorkspaceSignoff`, {
+                clientId: state.clientId,
+                runId: state.currentRunId,
+                comment: ''
+            });
+            await loadWorkspaceState();
+        } catch (error) {
+            els.workspaceInfo.textContent = error.message || 'Remove signoff failed.';
+            els.workspaceInfo.className = 'alert alert--error';
+        }
+    }
+
+    els.clientId?.addEventListener('change', async () => {
+        state.clientId = Number(els.clientId.value || 0);
+        await loadWorkspaceState();
+    });
+    els.connectBtn?.addEventListener('click', connect);
+    els.database?.addEventListener('change', async () => {
+        if (!els.server.value.trim() || !els.database.value) return;
+        try {
+            const tables = await postJson(`${apiBase}/GetTables`, { server: els.server.value.trim(), database: els.database.value, driver: els.driver.value });
+            const items = tables.tables ?? tables.Tables ?? [];
+            populateSelect(els.cancellationTable, items, tables.autoCancellationTable ?? tables.AutoCancellationTable);
+            populateSelect(els.clientTable, items, tables.autoClientTable ?? tables.AutoClientTable);
+            await loadColumnsForTable(els.cancellationTable.value, 'cancellation');
+            await loadColumnsForTable(els.clientTable.value, 'client');
+        } catch (e) {
+            setOutput(els.connectionOutput, e.message || 'Failed to load tables.', 'error');
+        }
+    });
+    els.cancellationTable?.addEventListener('change', () => loadColumnsForTable(els.cancellationTable.value, 'cancellation'));
+    els.clientTable?.addEventListener('change', () => loadColumnsForTable(els.clientTable.value, 'client'));
+    document.getElementById('verifyBtn')?.addEventListener('click', verifyTables);
+    document.getElementById('runBtn')?.addEventListener('click', runValidation);
+    document.getElementById('sqlBtn')?.addEventListener('click', generateSql);
+    document.getElementById('saveWorkspaceBtn')?.addEventListener('click', saveWorkspace);
+    document.getElementById('beginEditBtn')?.addEventListener('click', beginEdit);
+    document.getElementById('signoffBtn')?.addEventListener('click', saveSignoff);
+    document.getElementById('removeSignoffBtn')?.addEventListener('click', removeSignoff);
+    document.getElementById('downloadExcelBtn')?.addEventListener('click', async () => {
+        if (!state.summary) return;
+        try { await downloadBlob(`${apiBase}/DownloadExcel`, state.summary, 'Rule65_Cancellation_Census_Date_Validation.xlsx'); }
+        catch (e) { alert(e.message || 'Excel download failed.'); }
+    });
+    document.getElementById('downloadCsvBtn')?.addEventListener('click', async () => {
+        if (!state.summary) return;
+        try { await downloadBlob(`${apiBase}/DownloadCsv`, state.summary, 'Rule65_Cancellation_Census_Date_Validation.csv'); }
+        catch (e) { alert(e.message || 'CSV download failed.'); }
+    });
+    document.getElementById('downloadSqlBtn')?.addEventListener('click', async () => {
+        try { await downloadBlob(`${apiBase}/DownloadSql`, getRequestPayload(), 'Rule65_Cancellation_Census_Date_Validation.sql'); }
+        catch (e) { alert(e.message || 'SQL download failed.'); }
+    });
+
+    applySummary(null);
+    if (state.clientId > 0) loadWorkspaceState();
+})();
+</script>

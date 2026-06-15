@@ -1,0 +1,944 @@
+@using HemisAudit.Models
+@{
+    ViewData["Title"] = "Rule 64 - STUD to CREG Student Number Validation";
+    Layout = "~/Views/Shared/_Layout.cshtml";
+    var clients = ViewBag.Clients as List<Client> ?? new();
+    var selectedClientId = ViewBag.ClientId is int cid ? cid : 0;
+    var currentSystemRole = ViewBag.CurrentSystemRole as string ?? "";
+    var isResultsOnlyRole =
+        string.Equals(currentSystemRole, "Manager", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(currentSystemRole, "Director", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(currentSystemRole, "Trainee", StringComparison.OrdinalIgnoreCase);
+    var moduleNavigation = ViewBag.ModuleNavigation as HemisAudit.ViewModels.ModuleSequenceNavigationViewModel;
+}
+
+<div id="app" class="rule-page-shell">
+    @if (moduleNavigation != null)
+    {
+        @await Html.PartialAsync("_ModuleSequenceNav", moduleNavigation)
+    }
+
+    <div class="engagement-selector">
+        <label for="clientId">Engagement</label>
+        <select id="clientId">
+            <option value="">Select engagement</option>
+            @foreach (var client in clients)
+            {
+                <option value="@client.Id" selected="@(client.Id == selectedClientId ? "selected" : null)">
+                    @client.Name (@client.FiscalYear)
+                </option>
+            }
+        </select>
+    </div>
+
+    <div class="rule-header">
+        <div class="rule-header__icon">R64</div>
+        <div>
+            <h1 class="rule-header__title">HEMIS RULE 64: STUD to CREG Student Number Validation</h1>
+            <p class="rule-header__sub">
+                Rule 64 checks whether each student number in <code>STUD._007</code> exists in <code>CREG._007</code>.
+                PASS means the student number is present in CREG. FAIL means it is missing, and the rule then confirms
+                whether that same student number is absent from <code>STUD PRODUCTION.IAGSTNO</code>.
+            </p>
+        </div>
+        <div class="rule-header__badge" id="statusBadge" style="display:none"></div>
+    </div>
+
+    @if (!isResultsOnlyRole)
+    {
+        <div class="accordion-stack">
+            <div class="accordion-item">
+                <button class="accordion-toggle" type="button" onclick="toggleAccordion('connection')">
+                    <span class="acc-icon">DB</span><span>Database Connection</span><span class="acc-chevron">v</span>
+                </button>
+                <div class="accordion-body" id="body-connection">
+                    <div class="form-grid">
+                        <div class="field-group">
+                            <label for="server">Server Name</label>
+                            <input id="server" type="text" placeholder="e.g. MYSERVER or MYSERVER\INSTANCE" />
+                        </div>
+                        <div class="field-group">
+                            <label for="driver">Driver</label>
+                            <select id="driver">
+                                <option value="ODBC Driver 17 for SQL Server">ODBC Driver 17 for SQL Server</option>
+                                <option value="ODBC Driver 18 for SQL Server">ODBC Driver 18 for SQL Server</option>
+                                <option value="SQL Server">SQL Server</option>
+                            </select>
+                        </div>
+                        <div class="field-group">
+                            <label for="database">Database</label>
+                            <select id="database"></select>
+                        </div>
+                    </div>
+                    <div class="action-bar" style="justify-content:flex-start;margin:12px 0 0">
+                        <button type="button" class="btn btn-primary" id="connectBtn">Connect</button>
+                    </div>
+                    <div id="connectionOutput" class="status-output"></div>
+                </div>
+            </div>
+
+            <div class="accordion-item">
+                <button class="accordion-toggle" type="button" onclick="toggleAccordion('config')">
+                    <span class="acc-icon">CF</span><span>Rule Configuration</span><span class="acc-chevron">v</span>
+                </button>
+                <div class="accordion-body" id="body-config" style="display:none">
+                    <div class="info-box info-box--red">
+                        <strong>Audit Logic:</strong><br />
+                        <span>Step 1: Select student numbers from <code>STUD</code>.</span><br />
+                        <span>Step 2: Check whether each student number exists in <code>CREG</code>.</span><br />
+                        <span>Step 3: For STUD rows missing from <code>CREG</code>, confirm whether the student number is also missing from <code>STUD PRODUCTION</code>.</span><br />
+                        <span>Step 4: PASS when the student number is found in <code>CREG._007</code>; FAIL when it is missing, with production confirmation shown in the result.</span>
+                    </div>
+                    <div class="form-grid">
+                        <div class="field-group">
+                            <label for="studTable">STUD Table</label>
+                            <select id="studTable"></select>
+                        </div>
+                        <div class="field-group">
+                            <label for="cregTable">CREG Table</label>
+                            <select id="cregTable"></select>
+                        </div>
+                        <div class="field-group">
+                            <label for="prodTable">STUD PRODUCTION Table</label>
+                            <select id="prodTable"></select>
+                        </div>
+                    </div>
+                    <div id="configOutput" class="status-output"></div>
+                </div>
+            </div>
+
+            <div class="accordion-item">
+                <button class="accordion-toggle" type="button" onclick="toggleAccordion('colmap')">
+                    <span class="acc-icon">CM</span><span>Column Mapping</span><span class="acc-chevron">v</span>
+                </button>
+                <div class="accordion-body" id="body-colmap" style="display:none">
+                    <div class="alert alert--info" style="margin-bottom:12px">
+                        Map your database columns to the student number and compare value fields Rule 64 uses. Defaults match the standard HEMIS layout.
+                    </div>
+                    <div style="font-weight:700;font-size:13px;text-transform:uppercase;color:#555;margin-bottom:8px">STUD Table</div>
+                    <div class="form-grid">
+                        <div class="field-group">
+                            <label>Student Number <small>(default <code>_007</code>)</small></label>
+                            <select id="cm_studStudentNoCol"><option value="_007">_007</option></select>
+                        </div>
+                        <div class="field-group">
+                            <label>Compare Value <small>(default <code>_001</code>)</small></label>
+                            <select id="cm_studCompareValueCol"><option value="_001">_001</option></select>
+                        </div>
+                    </div>
+
+                    <div style="font-weight:700;font-size:13px;text-transform:uppercase;color:#555;margin:14px 0 8px">CREG Table</div>
+                    <div class="form-grid">
+                        <div class="field-group">
+                            <label>Student Number <small>(default <code>_007</code>)</small></label>
+                            <select id="cm_cregStudentNoCol"><option value="_007">_007</option></select>
+                        </div>
+                        <div class="field-group">
+                            <label>Compare Value <small>(default <code>_001</code>)</small></label>
+                            <select id="cm_cregCompareValueCol"><option value="_001">_001</option></select>
+                        </div>
+                    </div>
+
+                    <div style="font-weight:700;font-size:13px;text-transform:uppercase;color:#555;margin:14px 0 8px">STUD PRODUCTION Table</div>
+                    <div class="form-grid">
+                        <div class="field-group">
+                            <label>Student Number <small>(default <code>IAGSTNO</code>)</small></label>
+                            <select id="cm_prodStudentNoCol"><option value="IAGSTNO">IAGSTNO</option></select>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    }
+
+    <div class="workspace-signoff-card">
+        <div class="workspace-signoff-card__header">
+            <div>
+                <div class="workspace-signoff-card__title">Saved Workspace</div>
+                <div class="workspace-signoff-card__subtitle">Latest Rule 64 configuration and results reload automatically for this engagement.</div>
+            </div>
+            <div id="workspaceRunState" class="badge badge--neutral badge--sm">No saved run loaded</div>
+        </div>
+        <div id="workspaceInfo" class="alert alert--info">Select an engagement to load the saved Rule 64 workspace.</div>
+        <div class="workspace-signoff-grid">
+            <div>
+                <div style="color:#757575;font-size:12px;text-transform:uppercase;font-weight:700">Current Run</div>
+                <div id="workspaceRunLabel">No saved run yet</div>
+            </div>
+            <div>
+                <div style="color:#757575;font-size:12px;text-transform:uppercase;font-weight:700">Status</div>
+                <div id="workspaceStatusLabel">-</div>
+            </div>
+            <div>
+                <div style="color:#757575;font-size:12px;text-transform:uppercase;font-weight:700">Last Edited</div>
+                <div id="workspaceEditedLabel">-</div>
+            </div>
+            <div>
+                <div style="color:#757575;font-size:12px;text-transform:uppercase;font-weight:700">Your Role</div>
+                <div id="workspaceRoleLabel">@(string.IsNullOrWhiteSpace(currentSystemRole) ? "-" : currentSystemRole)</div>
+            </div>
+            <div class="field-group" style="grid-column:1/-1">
+                <label for="workspaceSignoffComment">Signoff Comment</label>
+                <textarea id="workspaceSignoffComment" rows="3" placeholder="Add review or completion notes"></textarea>
+            </div>
+        </div>
+        <div class="workspace-signoff-actions">
+            @if (!isResultsOnlyRole)
+            {
+                <button type="button" class="btn btn-secondary" id="beginEditBtn">Begin Edit</button>
+                <button type="button" class="btn btn-success" id="saveWorkspaceBtn">Save Workspace</button>
+            }
+            <button type="button" class="btn btn-primary" id="signoffBtn">Save Signoff</button>
+            <button type="button" class="btn btn-warning" id="removeSignoffBtn">Remove Signoff</button>
+        </div>
+    </div>
+
+    @if (!isResultsOnlyRole)
+    {
+        <div class="action-bar">
+            <button type="button" class="btn btn-info" id="verifyBtn">Verify Tables</button>
+            <button type="button" class="btn btn-success" id="runBtn">Run Rule 64</button>
+            <button type="button" class="btn btn-primary" id="sqlBtn">Generate SQL</button>
+        </div>
+    }
+
+    <div class="results-panel">
+        <div class="results-tabs">
+            <button class="tab-btn active" type="button" data-tab="analysis">Analysis</button>
+            <button class="tab-btn" type="button" data-tab="flagged">FLAGGED</button>
+            <button class="tab-btn" type="button" data-tab="clear">CLEAR</button>
+            <button class="tab-btn" type="button" data-tab="sql">SQL</button>
+            <button class="tab-btn" type="button" data-tab="downloads">Downloads</button>
+        </div>
+        <div class="tab-pane active" data-tab-panel="analysis"></div>
+        <div class="tab-pane" data-tab-panel="flagged"></div>
+        <div class="tab-pane" data-tab-panel="clear"></div>
+        <div class="tab-pane" data-tab-panel="sql">
+            <textarea id="sqlText" rows="20" readonly style="width:100%;font-family:monospace;font-size:12px"></textarea>
+        </div>
+        <div class="tab-pane" data-tab-panel="downloads">
+            <div class="alert alert--info" style="margin-bottom:12px">Download the full validated result set. Excel and CSV include both FLAGGED and CLEAR rows, even when the exception count is zero. SQL includes the audit query.</div>
+            <div class="action-bar" style="justify-content:flex-start;margin:0">
+                <button type="button" class="btn btn-info" id="downloadExcelBtn">Excel</button>
+                <button type="button" class="btn btn-info" id="downloadCsvBtn">CSV</button>
+                <button type="button" class="btn btn-secondary" id="downloadSqlBtn">SQL</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="spinner" class="spinner-overlay" style="display:none">
+        <div class="spinner-box">
+            <div class="spinner-ring"></div>
+            <p id="spinnerMsg">Processing...</p>
+        </div>
+    </div>
+</div>
+
+<form id="antiForgeryForm" method="post" style="display:none">
+    @Html.AntiForgeryToken()
+</form>
+
+<script>
+window.toggleAccordion = function (section) {
+    const body = document.getElementById(`body-${section}`);
+    if (body) body.style.display = body.style.display === 'none' ? '' : 'none';
+};
+
+(() => {
+    const apiBase = '/Rule64';
+    const currentSystemRole = '@currentSystemRole';
+    const isResultsOnlyRole = @(isResultsOnlyRole.ToString().ToLowerInvariant());
+    const token = document.querySelector('#antiForgeryForm input[name="__RequestVerificationToken"]')?.value || '';
+
+    const state = {
+        clientId: @(selectedClientId > 0 ? selectedClientId : 0),
+        currentRunId: null,
+        summary: null,
+        sql: '',
+        currentStatus: '',
+        currentUserEngagementRole: '',
+        currentUserHasSignedOff: false,
+        isWorkspaceSaved: false,
+        hasDataAnalystSignoff: false,
+        resultsVisible: false
+    };
+
+    const els = {
+        clientId: document.getElementById('clientId'),
+        server: document.getElementById('server'),
+        driver: document.getElementById('driver'),
+        database: document.getElementById('database'),
+        studTable: document.getElementById('studTable'),
+        cregTable: document.getElementById('cregTable'),
+        prodTable: document.getElementById('prodTable'),
+        connectionOutput: document.getElementById('connectionOutput'),
+        configOutput: document.getElementById('configOutput'),
+        analysisPane: document.querySelector('[data-tab-panel="analysis"]'),
+        flaggedPane: document.querySelector('[data-tab-panel="flagged"]'),
+        clearPane: document.querySelector('[data-tab-panel="clear"]'),
+        sqlText: document.getElementById('sqlText'),
+        workspaceInfo: document.getElementById('workspaceInfo'),
+        workspaceRunState: document.getElementById('workspaceRunState'),
+        workspaceRunLabel: document.getElementById('workspaceRunLabel'),
+        workspaceStatusLabel: document.getElementById('workspaceStatusLabel'),
+        workspaceEditedLabel: document.getElementById('workspaceEditedLabel'),
+        workspaceRoleLabel: document.getElementById('workspaceRoleLabel'),
+        workspaceSignoffComment: document.getElementById('workspaceSignoffComment'),
+        beginEditBtn: document.getElementById('beginEditBtn'),
+        saveWorkspaceBtn: document.getElementById('saveWorkspaceBtn'),
+        signoffBtn: document.getElementById('signoffBtn'),
+        removeSignoffBtn: document.getElementById('removeSignoffBtn'),
+        statusBadge: document.getElementById('statusBadge'),
+        spinner: document.getElementById('spinner'),
+        spinnerMsg: document.getElementById('spinnerMsg'),
+        cm_studStudentNoCol: document.getElementById('cm_studStudentNoCol'),
+        cm_cregStudentNoCol: document.getElementById('cm_cregStudentNoCol'),
+        cm_studCompareValueCol: document.getElementById('cm_studCompareValueCol'),
+        cm_cregCompareValueCol: document.getElementById('cm_cregCompareValueCol'),
+        cm_prodStudentNoCol: document.getElementById('cm_prodStudentNoCol')
+    };
+
+    const tabButtons = Array.from(document.querySelectorAll('.tab-btn'));
+    tabButtons.forEach(btn => btn.addEventListener('click', () => setActiveTab(btn.dataset.tab)));
+
+    function setActiveTab(tab) {
+        tabButtons.forEach(button => button.classList.toggle('active', button.dataset.tab === tab));
+        document.querySelectorAll('.tab-pane').forEach(pane => pane.classList.toggle('active', pane.dataset.tabPanel === tab));
+    }
+
+    function esc(value) {
+        return String(value ?? '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
+    function fmt(value) {
+        return Number(value || 0).toLocaleString();
+    }
+
+    function populateSelect(selectEl, items, selected) {
+        if (!selectEl) return;
+        selectEl.innerHTML = '';
+        items.forEach(item => {
+            const option = document.createElement('option');
+            option.value = item;
+            option.textContent = item;
+            if (selected && selected === item) option.selected = true;
+            selectEl.appendChild(option);
+        });
+    }
+
+    function populateColumnSelect(selectEl, columns, current, defaultValue) {
+        if (!selectEl) return;
+        const selected = current || selectEl.value || defaultValue;
+        const values = [...new Set([defaultValue, ...(columns || [])])].filter(Boolean);
+        selectEl.innerHTML = '';
+        values.forEach(value => {
+            const option = document.createElement('option');
+            option.value = value;
+            option.textContent = value;
+            if (value === selected) option.selected = true;
+            selectEl.appendChild(option);
+        });
+        if (!values.includes(selected)) {
+            const option = document.createElement('option');
+            option.value = selected;
+            option.textContent = selected;
+            option.selected = true;
+            selectEl.insertBefore(option, selectEl.firstChild);
+        }
+    }
+
+    function getColumnMapping() {
+        return {
+            studStudentNoCol: els.cm_studStudentNoCol?.value || '_007',
+            cregStudentNoCol: els.cm_cregStudentNoCol?.value || '_007',
+            studCompareValueCol: els.cm_studCompareValueCol?.value || '_001',
+            cregCompareValueCol: els.cm_cregCompareValueCol?.value || '_001',
+            prodStudentNoCol: els.cm_prodStudentNoCol?.value || 'IAGSTNO'
+        };
+    }
+
+    function restoreColumnMapping(mapping) {
+        if (!mapping) return;
+        const set = (el, value, fallback) => { if (el) el.value = value || fallback; };
+        set(els.cm_studStudentNoCol, mapping.studStudentNoCol, '_007');
+        set(els.cm_cregStudentNoCol, mapping.cregStudentNoCol, '_007');
+        set(els.cm_studCompareValueCol, mapping.studCompareValueCol, '_001');
+        set(els.cm_cregCompareValueCol, mapping.cregCompareValueCol, '_001');
+        set(els.cm_prodStudentNoCol, mapping.prodStudentNoCol, 'IAGSTNO');
+    }
+
+    async function loadColumnsForTable(tableName, groups) {
+        if (!tableName || !els.server?.value?.trim() || !els.database?.value) return;
+        try {
+            const data = await postJson(`${apiBase}/GetColumns`, {
+                server: els.server.value.trim(),
+                database: els.database.value,
+                driver: els.driver?.value || 'ODBC Driver 17 for SQL Server',
+                tableName
+            });
+            if (!data?.success || !Array.isArray(data.columns)) return;
+            groups.forEach(group => populateColumnSelect(group.selectEl, data.columns, null, group.defaultValue));
+        } catch {}
+    }
+
+    function getRequest() {
+        return {
+            clientId: Number(els.clientId?.value || state.clientId || 0),
+            runId: state.currentRunId,
+            server: els.server?.value?.trim() || '',
+            database: els.database?.value || '',
+            driver: els.driver?.value || 'ODBC Driver 17 for SQL Server',
+            studTable: els.studTable?.value || '',
+            cregTable: els.cregTable?.value || '',
+            prodTable: els.prodTable?.value || '',
+            columnMapping: getColumnMapping()
+        };
+    }
+
+    function setStatusBadge(status) {
+        if (!els.statusBadge) return;
+        if (!status) {
+            els.statusBadge.style.display = 'none';
+            return;
+        }
+        els.statusBadge.style.display = '';
+        els.statusBadge.textContent = status;
+        els.statusBadge.className = `rule-header__badge ${String(status).toUpperCase() === 'PASS' ? 'badge--pass' : 'badge--fail'}`;
+    }
+
+    function setWorkspaceState(message, type) {
+        els.workspaceInfo.className = `alert alert--${type}`;
+        els.workspaceInfo.textContent = message;
+        window.showWorkspaceActionToast?.(message, type);
+    }
+
+    function normalizeRole(value) {
+        return String(value || '').replace(/[^a-z0-9]+/gi, '').toLowerCase();
+    }
+
+    function updateWorkspaceButtons() {
+        const role = state.currentUserEngagementRole || currentSystemRole || '';
+        const normalizedRole = normalizeRole(role);
+        const normalizedSystemRole = normalizeRole(currentSystemRole);
+        const canEdit = !isResultsOnlyRole && (normalizedSystemRole === 'dataanalyst' || normalizedRole === 'dataanalyst');
+        const canSign = !!state.currentRunId && !!state.isWorkspaceSaved &&
+            (normalizedRole === 'dataanalyst' || (state.resultsVisible && (normalizedRole === 'manager' || normalizedRole === 'director')));
+        const signed = !!state.currentUserHasSignedOff;
+
+        window.ruleWorkspaceUi?.setReadonlyShell('app', !canEdit || signed);
+        window.ruleWorkspaceUi?.setFormSectionReadonly('.accordion-stack', !canEdit || signed);
+        window.ruleWorkspaceUi?.applyStates([
+            { target: 'connectBtn', disabled: !canEdit || signed },
+            { target: 'verifyBtn', disabled: !canEdit || signed },
+            { target: 'runBtn', disabled: !canEdit || signed },
+            { target: 'sqlBtn', disabled: !canEdit || signed },
+            { target: els.beginEditBtn, disabled: signed || !canEdit || !state.currentRunId },
+            { target: els.saveWorkspaceBtn, disabled: signed || !canEdit || !state.currentRunId || !state.summary },
+            {
+                target: els.signoffBtn,
+                disabled: signed || !canSign,
+                text: signed ? `Signed Off as ${role || currentSystemRole}` : 'Save Signoff'
+            },
+            { target: els.removeSignoffBtn, show: signed, display: '', disabled: !signed },
+            { target: els.workspaceSignoffComment, disabled: signed || !canSign }
+        ]);
+        window.ruleWorkspaceUi?.setButtonGroupReadonly(['.workspace-signoff-actions', '.action-bar'], signed, {
+            allow: ['#downloadExcelBtn', '#downloadCsvBtn', '#downloadSqlBtn', '#removeSignoffBtn']
+        });
+    }
+
+    function renderReviewRow(row) {
+        const result = String(row.validationResult || '').toUpperCase();
+        const badgeClass = result === 'PASS' ? 'badge--pass' : 'badge--fail';
+        return `<tr>
+            <td>${esc(row.rowNumber)}</td>
+            <td>${esc(row.sourceTable)}</td>
+            <td>${esc(row.studentNo)}</td>
+            <td>${esc(row.cregStudentNo || '-')}</td>
+            <td>${esc(row.studCompareValue || '-')}</td>
+            <td>${esc(row.cregCompareValue || '-')}</td>
+            <td>${esc(row.prodStudentNo || '-')}</td>
+            <td>${esc(row.errorCode || '-')}</td>
+            <td style="text-align:center"><span class="badge ${badgeClass}">${esc(row.validationResult)}</span></td>
+            <td style="font-size:11px;color:#E65100">${esc((row.exceptionCategory||'').replace(/_/g,' '))}</td>
+            <td style="font-size:11px">${esc(row.validationExplanation)}</td>
+        </tr>`;
+    }
+
+    function reviewTableHtml(rows, emptyMessage) {
+        if (!rows || !rows.length) {
+            return `<div class="empty-card"><p>${esc(emptyMessage)}</p></div>`;
+        }
+        return `<div style="overflow-x:auto"><table class="data-table" style="font-size:12px">
+            <thead><tr>
+                <th>#</th>
+                <th>Source Table</th>
+                <th>STUD Student No</th>
+                <th>CREG Student No</th>
+                <th>STUD Compare Value</th>
+                <th>CREG Compare Value</th>
+                <th>PRODUCTION Student No</th>
+                <th>Error Code</th>
+                <th>Result</th>
+                <th>Exception Category</th>
+                <th>Explanation</th>
+            </tr></thead>
+            <tbody>${rows.map(renderReviewRow).join('')}</tbody>
+        </table></div>`;
+    }
+
+    function renderExceptionCategories(summary) {
+        const categories = summary?.exceptionCategories || [];
+        if (!categories.length) {
+            return '';
+        }
+
+        return `
+            <div class="card" style="padding:20px;margin-top:20px;border-left:4px solid #F57C00">
+                <h3 class="section-title" style="margin-top:0;color:#E65100">Exception Category Breakdown</h3>
+                <table class="data-table" style="min-width:520px">
+                    <thead><tr>
+                        <th style="background:#F57C00;color:#fff">Category</th>
+                        <th style="background:#F57C00;color:#fff">Description</th>
+                        <th style="background:#F57C00;color:#fff;text-align:right">Count</th>
+                    </tr></thead>
+                    <tbody>
+                        ${categories.map(category => `<tr style="background:#FFF8E1">
+                            <td style="font-family:Consolas,monospace;font-size:12px;font-weight:700;color:#BF360C">${esc(category.category || '')}</td>
+                            <td style="font-size:13px">${esc(category.description || '')}</td>
+                            <td style="text-align:right;font-weight:700;font-size:14px;color:#BF360C">${fmt(category.count || 0)}</td>
+                        </tr>`).join('')}
+                    </tbody>
+                </table>
+            </div>`;
+    }
+
+    function renderAnalysis(summary) {
+        if (!summary) {
+            els.analysisPane.innerHTML = '<div class="empty-card"><p>No Rule 64 results loaded.</p></div>';
+            return;
+        }
+        const statusClass = String(summary.status).toUpperCase() === 'PASS' ? 'badge--pass' : 'badge--fail';
+        const mapping = summary.columnMapping || {};
+        const cats = summary.exceptionCategories || [];
+        const getCat = key => (cats.find(c => (c.category||'').toUpperCase() === key)||{}).count||0;
+        const notInCregNotInProd = getCat('NOT_FOUND_IN_CREG__NOT_IN_PRODUCTION');
+        const notInCregInProd    = getCat('NOT_FOUND_IN_CREG__FOUND_IN_PRODUCTION');
+        const notInCregTotal     = notInCregNotInProd + notInCregInProd;
+        const valueMismatch      = getCat('VALUE_MISMATCH__FOUND_IN_CREG');
+        els.analysisPane.innerHTML = `
+            <div class="stats-grid" style="margin-bottom:20px">
+                <div class="stat-card"><div class="stat-card__label">Total Tested</div><div class="stat-card__value">${fmt(summary.totalCount)}</div></div>
+                <div class="stat-card stat-card--pass"><div class="stat-card__label">PASS — Found in CREG</div><div class="stat-card__value">${fmt(summary.passCount)}</div></div>
+                <div class="stat-card stat-card--fail" style="border-left:4px solid #8B0000"><div class="stat-card__label">NOT FOUND IN CREG</div><div class="stat-card__value">${fmt(notInCregTotal)}</div></div>
+                <div class="stat-card stat-card--fail"><div class="stat-card__label">Not in CREG (Not in Prod)</div><div class="stat-card__value">${fmt(notInCregNotInProd)}</div></div>
+                <div class="stat-card stat-card--fail"><div class="stat-card__label">Not in CREG (In Prod)</div><div class="stat-card__value">${fmt(notInCregInProd)}</div></div>
+                <div class="stat-card stat-card--fail"><div class="stat-card__label">Value Mismatch</div><div class="stat-card__value">${fmt(valueMismatch)}</div></div>
+                <div class="stat-card"><div class="stat-card__label">Exception Rate</div><div class="stat-card__value">${esc(String(summary.exceptionRate))}%</div></div>
+                <div class="stat-card"><div class="stat-card__label">Status</div><div class="stat-card__value"><span class="badge ${statusClass}">${esc(summary.status)}</span></div></div>
+            </div>
+            <div class="card" style="padding:20px">
+                <div class="form-grid" style="margin-bottom:16px">
+                    <div><div class="stat-label">Database</div><div>${esc(summary.database)}</div></div>
+                    <div><div class="stat-label">Tables</div><div>STUD: ${esc(summary.studTable)} | CREG: ${esc(summary.cregTable)} | STUD PRODUCTION: ${esc(summary.prodTable)}</div></div>
+                    <div><div class="stat-label">Columns</div><div>STUD No: ${esc(mapping.studStudentNoCol || '_007')} | CREG No: ${esc(mapping.cregStudentNoCol || '_007')} | STUD Compare: ${esc(mapping.studCompareValueCol || '_001')} | CREG Compare: ${esc(mapping.cregCompareValueCol || '_001')} | PROD No: ${esc(mapping.prodStudentNoCol || 'IAGSTNO')}</div></div>
+                    <div><div class="stat-label">Timestamp</div><div>${esc(summary.timestamp)}</div></div>
+                    <div><div class="stat-label">Status</div><div><span class="badge ${statusClass}">${esc(summary.status)}</span></div></div>
+                </div>
+                ${summary.isPreviewOnly ? `<div class="alert alert--warning">Browser preview is limited to the first ${fmt(summary.previewLimit)} exception rows and ${fmt(summary.previewLimit)} clear rows. Download the result files for the full tested population.</div>` : ''}
+            </div>
+            ${renderExceptionCategories(summary)}`;
+    }
+
+    function renderFlagged(summary) {
+        if (!summary) {
+            els.flaggedPane.innerHTML = '<div class="empty-card"><p>No Rule 64 results loaded.</p></div>';
+            return;
+        }
+        const rows = summary.failRows || [];
+        els.flaggedPane.innerHTML = `
+            <div class="card" style="padding:16px;margin-bottom:12px">
+                <strong>FLAGGED Rows</strong> - ${fmt(summary.failCount)} row(s) where the STUD student number was not found in CREG, or the STUD and CREG compare values did not match.
+                ${summary.isPreviewOnly ? `<span class="badge badge--neutral">Preview limited to ${fmt(summary.previewLimit)} rows</span>` : ''}
+            </div>
+            ${reviewTableHtml(rows, 'No flagged rows were returned for this run.')}`;
+    }
+
+    function renderClear(summary) {
+        if (!summary) {
+            els.clearPane.innerHTML = '<div class="empty-card"><p>No Rule 64 results loaded.</p></div>';
+            return;
+        }
+        const rows = summary.passRows || [];
+        els.clearPane.innerHTML = `
+            <div class="card" style="padding:16px;margin-bottom:12px">
+                <strong>CLEAR Rows</strong> - ${fmt(summary.passCount)} row(s) where the STUD student number was found in CREG and the compare values matched.
+                ${rows.length < summary.passCount ? `<span class="badge badge--neutral">Sample of ${fmt(rows.length)} shown</span>` : ''}
+            </div>
+            ${reviewTableHtml(rows, 'No clear rows were returned for this run.')}`;
+    }
+
+    function applySummary(summary, options = {}) {
+        state.summary = summary;
+        if (!options.fromWorkspace) state.currentRunId = summary?.savedRunId || state.currentRunId;
+        state.currentStatus = summary?.status || state.currentStatus;
+        state.resultsVisible = !!summary || state.resultsVisible;
+        if (summary) {
+            els.workspaceRunState.textContent = state.currentRunId ? `Run #${state.currentRunId} | ${state.currentStatus}` : 'No saved run loaded';
+            els.workspaceRunLabel.textContent = state.currentRunId ? `Run #${state.currentRunId}` : 'No saved run yet';
+            els.workspaceStatusLabel.textContent = state.currentStatus || '-';
+        }
+        setStatusBadge(summary?.status || '');
+        renderAnalysis(summary);
+        renderFlagged(summary);
+        renderClear(summary);
+        updateWorkspaceButtons();
+    }
+
+    function applyWorkspace(workspace, resultsVisible, preserveExisting = false) {
+        if (!workspace) {
+            state.currentRunId = null;
+            state.currentStatus = '';
+            state.currentUserEngagementRole = '';
+            state.currentUserHasSignedOff = false;
+            state.isWorkspaceSaved = false;
+            state.hasDataAnalystSignoff = false;
+            state.resultsVisible = false;
+            setWorkspaceState('No saved Rule 64 workspace exists for this engagement yet.', 'info');
+            els.workspaceRunState.textContent = 'No saved run loaded';
+            els.workspaceRunLabel.textContent = 'No saved run yet';
+            els.workspaceStatusLabel.textContent = '-';
+            els.workspaceEditedLabel.textContent = '-';
+            applySummary(null);
+            updateWorkspaceButtons();
+            return;
+        }
+
+        state.clientId = workspace.clientId || state.clientId;
+        state.currentRunId = workspace.runId || null;
+        state.currentStatus = workspace.currentStatus || '';
+        state.currentUserEngagementRole = workspace.currentUserEngagementRole || currentSystemRole || '';
+        state.currentUserHasSignedOff = !!workspace.currentUserHasSignedOff;
+        state.isWorkspaceSaved = !!workspace.isWorkspaceSaved;
+        state.hasDataAnalystSignoff = !!workspace.hasDataAnalystSignoff;
+        state.resultsVisible = !!resultsVisible;
+
+        if (els.server) els.server.value = workspace.server || '';
+        if (els.driver) els.driver.value = workspace.driver || 'ODBC Driver 17 for SQL Server';
+        if (els.database) populateSelect(els.database, workspace.database ? [workspace.database] : [], workspace.database);
+        if (els.studTable) populateSelect(els.studTable, workspace.studTable ? [workspace.studTable] : [], workspace.studTable);
+        if (els.cregTable) populateSelect(els.cregTable, workspace.cregTable ? [workspace.cregTable] : [], workspace.cregTable);
+        if (els.prodTable) populateSelect(els.prodTable, workspace.prodTable ? [workspace.prodTable] : [], workspace.prodTable);
+        if (workspace.columnMapping) restoreColumnMapping(workspace.columnMapping);
+
+        els.workspaceRunState.textContent = workspace.runId ? `Run #${workspace.runId}` : 'No saved run loaded';
+        els.workspaceRunLabel.textContent = workspace.runId ? `Rule 64 Run #${workspace.runId}` : 'No saved run yet';
+        els.workspaceStatusLabel.textContent = workspace.currentStatus || '-';
+        els.workspaceEditedLabel.textContent = workspace.lastEditedAt ? new Date(workspace.lastEditedAt).toLocaleString() : '-';
+        els.workspaceRoleLabel.textContent = workspace.currentUserEngagementRole || currentSystemRole || '-';
+        els.workspaceSignoffComment.value = workspace.currentUserSignoffComment || '';
+
+        if (!resultsVisible) {
+            setWorkspaceState('Saved Rule 64 results are not available for your engagement role.', 'info');
+            if (!preserveExisting) applySummary(null);
+            else updateWorkspaceButtons();
+            return;
+        }
+
+        setWorkspaceState(workspace.summary ? 'Saved Rule 64 workspace loaded.' : 'Rule 64 workspace loaded. Run validation to generate results.', 'success');
+        if (workspace.summary) applySummary(workspace.summary, { fromWorkspace: true });
+        else if (!preserveExisting) applySummary(null);
+        else updateWorkspaceButtons();
+    }
+
+    async function postJson(url, payload) {
+        return await window.fetchJsonWithProgress(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token },
+            body: JSON.stringify(payload)
+        });
+    }
+
+    async function downloadBlob(url, payload, fileName) {
+        await window.downloadFileWithProgress({
+            url,
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token },
+            body: JSON.stringify(payload),
+            defaultFileName: fileName,
+            label: 'Downloading result'
+        });
+    }
+
+    function getSummaryDownloadPayload() {
+        if (state.currentRunId) {
+            return { savedRunId: state.currentRunId };
+        }
+
+        if (state.summary) {
+            return {
+                ...state.summary,
+                savedRunId: state.summary.savedRunId || state.currentRunId || null
+            };
+        }
+
+        return null;
+    }
+
+    function showSpinner(message) {
+        if (els.spinnerMsg) els.spinnerMsg.textContent = message;
+        if (els.spinner) els.spinner.style.display = 'flex';
+    }
+
+    function hideSpinner() {
+        if (els.spinner) els.spinner.style.display = 'none';
+    }
+
+    async function loadWorkspace() {
+        state.clientId = Number(els.clientId?.value || 0);
+        if (!state.clientId) {
+            applyWorkspace(null, false);
+            return;
+        }
+        const data = await window.fetchJsonWithProgress(`${apiBase}/GetWorkspaceState?clientId=${state.clientId}`, { method: 'GET' });
+        if (!data.success) throw new Error(data.error || 'Failed to load workspace.');
+        applyWorkspace(data.workspace, data.resultsVisible);
+    }
+
+    async function connect() {
+        const server = els.server?.value?.trim();
+        if (!server) throw new Error('Enter the SQL Server name first.');
+        showSpinner('Loading databases...');
+        try {
+            const data = await postJson(`${apiBase}/GetDatabases`, { server, driver: els.driver.value });
+            if (!data.success) throw new Error(data.error || 'Failed to load databases.');
+            populateSelect(els.database, data.databases || []);
+            els.connectionOutput.innerHTML = `<div class="alert alert--success">Loaded ${(data.databases || []).length} database(s).</div>`;
+            if ((data.databases || []).length) await loadTables();
+        } finally {
+            hideSpinner();
+        }
+    }
+
+    async function loadTables() {
+        if (!els.database?.value) return;
+        const data = await postJson(`${apiBase}/GetTables`, {
+            server: els.server.value.trim(),
+            database: els.database.value,
+            driver: els.driver.value
+        });
+        if (!data.success) throw new Error(data.error || 'Failed to load tables.');
+        populateSelect(els.studTable, data.tables || [], data.autoStudTable);
+        populateSelect(els.cregTable, data.tables || [], data.autoCregTable);
+        populateSelect(els.prodTable, data.tables || [], data.autoProdTable);
+        els.configOutput.innerHTML = `<div class="alert alert--success">Loaded ${(data.tables || []).length} table(s).</div>`;
+        await Promise.all([
+            loadColumnsForTable(els.studTable?.value, [
+                { selectEl: els.cm_studStudentNoCol, defaultValue: '_007' },
+                { selectEl: els.cm_studCompareValueCol, defaultValue: '_001' }
+            ]),
+            loadColumnsForTable(els.cregTable?.value, [
+                { selectEl: els.cm_cregStudentNoCol, defaultValue: '_007' },
+                { selectEl: els.cm_cregCompareValueCol, defaultValue: '_001' }
+            ]),
+            loadColumnsForTable(els.prodTable?.value, [
+                { selectEl: els.cm_prodStudentNoCol, defaultValue: 'IAGSTNO' }
+            ])
+        ]);
+    }
+
+    async function verifyTables() {
+        showSpinner('Verifying tables...');
+        try {
+            const data = await postJson(`${apiBase}/VerifyTables`, getRequest());
+            if (!data.success) throw new Error(data.error || 'Verification failed.');
+            els.configOutput.innerHTML = `<div class="alert alert--success">
+                STUD rows: <strong>${fmt(data.studCount)}</strong> |
+                CREG rows: <strong>${fmt(data.cregCount)}</strong> |
+                STUD PRODUCTION rows: <strong>${fmt(data.prodCount)}</strong>
+            </div>`;
+        } finally {
+            hideSpinner();
+        }
+    }
+
+    async function runValidation() {
+        const request = getRequest();
+        if (!request.clientId) {
+            setWorkspaceState('Select the approved engagement assigned to you before running.', 'warning');
+            return;
+        }
+        showSpinner('Running Rule 64...');
+        try {
+            const data = await postJson(`${apiBase}/RunValidation`, request);
+            if (!data.success) throw new Error(data.error || 'Rule 64 failed.');
+            state.currentUserHasSignedOff = false;
+            state.isWorkspaceSaved = false;
+            state.hasDataAnalystSignoff = false;
+            state.resultsVisible = true;
+            state.currentUserEngagementRole = state.currentUserEngagementRole || currentSystemRole || 'DataAnalyst';
+            applySummary(data);
+            setWorkspaceState(`Rule 64 completed. PASS: ${fmt(data.passCount)} | FAIL: ${fmt(data.failCount)}. Overall ${data.status}.`, 'success');
+        } finally {
+            hideSpinner();
+        }
+    }
+
+    async function generateSql() {
+        showSpinner('Generating SQL...');
+        try {
+            const data = await postJson(`${apiBase}/GenerateSql`, getRequest());
+            if (!data.success) throw new Error(data.error || 'SQL generation failed.');
+            state.sql = data.sql || '';
+            els.sqlText.value = state.sql;
+            setActiveTab('sql');
+        } finally {
+            hideSpinner();
+        }
+    }
+
+    async function saveWorkspace() {
+        showSpinner('Saving workspace...');
+        try {
+            const data = await postJson(`${apiBase}/SaveWorkspace`, getRequest());
+            if (!data.success) throw new Error(data.error || 'Workspace save failed.');
+            applyWorkspace(data.workspace, data.workspace?.resultsVisible ?? false, true);
+            setWorkspaceState(data.message || 'Workspace saved.', data.signoffsCleared ? 'warning' : 'success');
+        } finally {
+            hideSpinner();
+        }
+    }
+
+    async function beginEdit() {
+        showSpinner('Preparing workspace edit...');
+        try {
+            const data = await postJson(`${apiBase}/BeginWorkspaceEdit`, getRequest());
+            if (!data.success) throw new Error(data.error || 'Could not begin edit.');
+            applyWorkspace(data.workspace, data.workspace?.resultsVisible ?? false, true);
+            setWorkspaceState(data.message || 'Workspace ready for editing.', 'warning');
+        } finally {
+            hideSpinner();
+        }
+    }
+
+    async function signoffWorkspace() {
+        showSpinner('Saving signoff...');
+        try {
+            const data = await postJson(`${apiBase}/SignOffWorkspace`, {
+                clientId: Number(els.clientId.value || 0),
+                runId: state.currentRunId,
+                comment: els.workspaceSignoffComment.value || ''
+            });
+            if (!data.success) throw new Error(data.error || 'Signoff failed.');
+            state.currentUserHasSignedOff = true;
+            applyWorkspace(data.workspace, data.resultsVisible ?? false, true);
+            setWorkspaceState(data.message || 'Signoff saved.', 'success');
+        } finally {
+            hideSpinner();
+        }
+    }
+
+    async function removeSignoff() {
+        showSpinner('Removing signoff...');
+        try {
+            const data = await postJson(`${apiBase}/RemoveWorkspaceSignoff`, {
+                clientId: Number(els.clientId.value || 0),
+                runId: state.currentRunId,
+                comment: ''
+            });
+            if (!data.success) throw new Error(data.error || 'Signoff removal failed.');
+            state.currentUserHasSignedOff = false;
+            state.isWorkspaceSaved = false;
+            applyWorkspace(data.workspace, data.resultsVisible ?? false, false);
+            setWorkspaceState(data.message || 'Signoff removed.', 'warning');
+        } finally {
+            hideSpinner();
+        }
+    }
+
+    document.getElementById('connectBtn')?.addEventListener('click', () => connect().catch(error => {
+        hideSpinner();
+        els.connectionOutput.innerHTML = `<div class="alert alert--error">${esc(error.message)}</div>`;
+    }));
+    els.database?.addEventListener('change', () => loadTables().catch(error => {
+        els.configOutput.innerHTML = `<div class="alert alert--error">${esc(error.message)}</div>`;
+    }));
+    els.studTable?.addEventListener('change', () => loadColumnsForTable(els.studTable?.value, [
+        { selectEl: els.cm_studStudentNoCol, defaultValue: '_007' },
+        { selectEl: els.cm_studCompareValueCol, defaultValue: '_001' }
+    ]).catch(() => {}));
+    els.cregTable?.addEventListener('change', () => loadColumnsForTable(els.cregTable?.value, [
+        { selectEl: els.cm_cregStudentNoCol, defaultValue: '_007' },
+        { selectEl: els.cm_cregCompareValueCol, defaultValue: '_001' }
+    ]).catch(() => {}));
+    els.prodTable?.addEventListener('change', () => loadColumnsForTable(els.prodTable?.value, [
+        { selectEl: els.cm_prodStudentNoCol, defaultValue: 'IAGSTNO' }
+    ]).catch(() => {}));
+    document.getElementById('verifyBtn')?.addEventListener('click', () => verifyTables().catch(error => {
+        hideSpinner();
+        els.configOutput.innerHTML = `<div class="alert alert--error">${esc(error.message)}</div>`;
+    }));
+    document.getElementById('runBtn')?.addEventListener('click', () => runValidation().catch(error => {
+        hideSpinner();
+        setWorkspaceState(error.message, 'error');
+    }));
+    document.getElementById('sqlBtn')?.addEventListener('click', () => generateSql().catch(error => {
+        hideSpinner();
+        els.sqlText.value = error.message;
+    }));
+    document.getElementById('saveWorkspaceBtn')?.addEventListener('click', () => saveWorkspace().catch(error => {
+        hideSpinner();
+        setWorkspaceState(error.message, 'error');
+    }));
+    document.getElementById('beginEditBtn')?.addEventListener('click', () => beginEdit().catch(error => {
+        hideSpinner();
+        setWorkspaceState(error.message, 'error');
+    }));
+    document.getElementById('signoffBtn')?.addEventListener('click', () => signoffWorkspace().catch(error => {
+        hideSpinner();
+        setWorkspaceState(error.message, 'error');
+    }));
+    document.getElementById('removeSignoffBtn')?.addEventListener('click', () => removeSignoff().catch(error => {
+        hideSpinner();
+        setWorkspaceState(error.message, 'error');
+    }));
+
+    document.getElementById('downloadExcelBtn')?.addEventListener('click', () => {
+        const payload = getSummaryDownloadPayload();
+        if (!payload) {
+            setWorkspaceState('Run Rule 64 first before downloading Excel results.', 'warning');
+            return;
+        }
+
+        downloadBlob(`${apiBase}/DownloadExcel`, payload, 'Rule64_STUD_CREG_Student_Number_Validation.xlsx')
+            .catch(error => setWorkspaceState(error.message, 'error'));
+    });
+    document.getElementById('downloadCsvBtn')?.addEventListener('click', () => {
+        const payload = getSummaryDownloadPayload();
+        if (!payload) {
+            setWorkspaceState('Run Rule 64 first before downloading CSV results.', 'warning');
+            return;
+        }
+
+        downloadBlob(`${apiBase}/DownloadCsv`, payload, 'Rule64_STUD_CREG_Student_Number_Validation.csv')
+            .catch(error => setWorkspaceState(error.message, 'error'));
+    });
+    document.getElementById('downloadSqlBtn')?.addEventListener('click', () =>
+        downloadBlob(`${apiBase}/DownloadSql`, getRequest(), 'Rule64_STUD_CREG_Student_Number_Validation.sql').catch(error => setWorkspaceState(error.message, 'error')));
+
+    els.clientId?.addEventListener('change', () => loadWorkspace().catch(error => setWorkspaceState(error.message, 'error')));
+
+    renderAnalysis(null);
+    renderFlagged(null);
+    renderClear(null);
+    updateWorkspaceButtons();
+
+    if (state.clientId) loadWorkspace().catch(error => setWorkspaceState(error.message, 'error'));
+    else if (isResultsOnlyRole) setWorkspaceState('Select an engagement to load the saved Rule 64 results.', 'info');
+})();
+</script>

@@ -1,0 +1,438 @@
+@using HemisAudit.ViewModels
+@model Rule65RunReviewViewModel
+@{
+    ViewData["Title"] = $"Rule 65 Run {Model.RunId}";
+    Layout = "~/Views/Shared/_Layout.cshtml";
+    var canManageEngagement = ViewBag.CanManageEngagement is bool manageEngagement && manageEngagement;
+    var canOpenWorkspace = ViewBag.CanOpenWorkspace is bool openWorkspace && openWorkspace;
+    var isArchived = ViewBag.IsArchived is bool archived && archived;
+    var moduleNavigation = ViewBag.ModuleNavigation as ModuleSequenceNavigationViewModel;
+    var summary = Model.Summary;
+    var passRows = summary.PassRows ?? new List<Rule65ReviewRow>();
+    var failRows = summary.FailRows ?? new List<Rule65ReviewRow>();
+    var exceptionCategories = summary.ExceptionCategories ?? new List<Rule65ExceptionCategoryViewModel>();
+    var cancelEqualsCensus = exceptionCategories.FirstOrDefault(c => string.Equals(c.Category, "CANCEL_EQUALS_CENSUS", StringComparison.OrdinalIgnoreCase))?.Count ?? 0;
+    var currentCensusMatch = exceptionCategories.FirstOrDefault(c => string.Equals(c.Category, "CURRENT_CENSUS_MATCH", StringComparison.OrdinalIgnoreCase))?.Count ?? 0;
+    var bothMatches = exceptionCategories.FirstOrDefault(c => string.Equals(c.Category, "CANCEL_EQUALS_CENSUS_AND_CURRENT_CENSUS", StringComparison.OrdinalIgnoreCase))?.Count ?? 0;
+    var invalidCancel = exceptionCategories.FirstOrDefault(c => string.Equals(c.Category, "INVALID_CANCEL_DATE", StringComparison.OrdinalIgnoreCase))?.Count ?? 0;
+    var currentComment = Model.Signoffs.FirstOrDefault(s => s.IsCurrentUser)?.Comment ?? "";
+    var sqlRequestJson = System.Text.Json.JsonSerializer.Serialize(new Rule65ValidationRequest
+    {
+        ClientId = Model.ClientId,
+        Database = summary.Database,
+        CancellationTable = summary.CancellationTable,
+        ClientTable = summary.ClientTable,
+        ColumnMapping = summary.ColumnMapping
+    });
+    var summaryJson = System.Text.Json.JsonSerializer.Serialize(summary);
+}
+
+@if (TempData["Success"] != null)
+{
+    <div class="alert alert--success" style="margin-bottom:16px">@TempData["Success"]</div>
+}
+@if (TempData["Error"] != null)
+{
+    <div class="alert alert--error" style="margin-bottom:16px">@TempData["Error"]</div>
+}
+
+@if (moduleNavigation != null)
+{
+    @await Html.PartialAsync("_ModuleSequenceNav", moduleNavigation)
+}
+
+<div class="page-header">
+    <div>
+        <h1>Rule 65 - Saved Run #@Model.RunId</h1>
+        <p>
+            @Model.EngagementName
+            <span style="padding:0 8px">|</span>
+            @Model.MaconomyNumber
+            <span style="padding:0 8px">|</span>
+            @summary.Timestamp
+        </p>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+        @if (canOpenWorkspace)
+        {
+            <a href="/Rule65?clientId=@Model.ClientId" class="btn btn-secondary">Open Workspace</a>
+        }
+        <a asp-controller="Dashboard" asp-action="Index" class="btn btn-secondary">Back to Dashboard</a>
+        <a asp-controller="Admin" asp-action="ClientDetail" asp-route-id="@Model.ClientId" asp-fragment="validation-runs-panel" class="btn btn-secondary">Back to Validation Runs</a>
+        @if (canManageEngagement)
+        {
+            <a asp-controller="Admin" asp-action="ClientDetail" asp-route-id="@Model.ClientId" class="btn btn-secondary">Back to Engagement</a>
+        }
+    </div>
+</div>
+
+@if (isArchived)
+{
+    <div class="alert alert--info" style="margin-bottom:24px">This engagement is archived. The saved run is available for review only.</div>
+}
+@if (!Model.HasDataAnalystSignoff && !isArchived)
+{
+    <div class="alert alert--warning" style="margin-bottom:24px">The data analyst signoff is still outstanding. Manager and director review remains locked until analyst signoff is complete.</div>
+}
+@if (!Model.IsCurrentRun)
+{
+    <div class="alert alert--info" style="margin-bottom:24px">History results are read-only. Signoff is only available on the current run.</div>
+}
+
+<div class="card" style="padding:20px;margin-bottom:20px">
+    <h3 class="section-title" style="margin-top:0">Run Summary</h3>
+    <div class="stats-grid">
+        <div class="stat-card">
+            <div class="stat-card__label">Total Tested</div>
+            <div class="stat-card__value">@summary.TotalCount.ToString("N0")</div>
+        </div>
+        <div class="stat-card stat-card--pass">
+            <div class="stat-card__label">Clear Rows</div>
+            <div class="stat-card__value">@summary.PassCount.ToString("N0")</div>
+        </div>
+        <div class="stat-card stat-card--fail">
+            <div class="stat-card__label">Flagged Rows</div>
+            <div class="stat-card__value">@summary.FailCount.ToString("N0")</div>
+        </div>
+        <div class="stat-card stat-card--fail">
+            <div class="stat-card__label">Cancel = Census</div>
+            <div class="stat-card__value">@cancelEqualsCensus.ToString("N0")</div>
+        </div>
+        <div class="stat-card stat-card--pass">
+            <div class="stat-card__label">Cancel on Current Census</div>
+            <div class="stat-card__value">@currentCensusMatch.ToString("N0")</div>
+        </div>
+        <div class="stat-card stat-card--fail">
+            <div class="stat-card__label">Matched Both Checks</div>
+            <div class="stat-card__value">@bothMatches.ToString("N0")</div>
+        </div>
+        <div class="stat-card stat-card--fail">
+            <div class="stat-card__label">Invalid Cancel Date</div>
+            <div class="stat-card__value">@invalidCancel.ToString("N0")</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-card__label">Exception Rate</div>
+            <div class="stat-card__value">@summary.ExceptionRate.ToString("F2")%</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-card__label">Status</div>
+            <div class="stat-card__value"><span class="badge @(summary.Status == "PASS" ? "badge--pass" : "badge--fail")">@summary.Status</span></div>
+        </div>
+    </div>
+
+    <div class="form-grid" style="margin-top:18px">
+        <div>
+            <div style="color:#757575;font-size:12px;text-transform:uppercase;font-weight:700">Rule</div>
+            <div>Rule 65 - Cancellation Census Date Validation</div>
+        </div>
+        <div>
+            <div style="color:#757575;font-size:12px;text-transform:uppercase;font-weight:700">Database</div>
+            <div>@summary.Database</div>
+        </div>
+        <div>
+            <div style="color:#757575;font-size:12px;text-transform:uppercase;font-weight:700">Cancellation Table</div>
+            <div>@summary.CancellationTable</div>
+        </div>
+        <div>
+            <div style="color:#757575;font-size:12px;text-transform:uppercase;font-weight:700">Client Census Table</div>
+            <div>@summary.ClientTable</div>
+        </div>
+        <div style="grid-column:1/-1">
+            <div style="color:#757575;font-size:12px;text-transform:uppercase;font-weight:700">Columns</div>
+            <div>
+                STD_NO: <code>@summary.ColumnMapping.StudentNoCol</code> |
+                QUAL: <code>@summary.ColumnMapping.QualificationCol</code> |
+                SUBJ: <code>@summary.ColumnMapping.SubjectCol</code> |
+                CANCEL: <code>@summary.ColumnMapping.CancelDateCol</code> |
+                CENSUS: <code>@summary.ColumnMapping.CensusDateCol</code> |
+                CURRENT_CENSUS: <code>@summary.ColumnMapping.CurrentCensusCol</code>
+            </div>
+        </div>
+    </div>
+</div>
+
+@if (exceptionCategories.Any())
+{
+    <div class="card" style="padding:20px;margin-bottom:20px;border-left:4px solid #F57C00">
+        <h3 class="section-title" style="margin-top:0;color:#E65100">Exception Category Breakdown</h3>
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th style="background:#F57C00;color:#fff">Category</th>
+                    <th style="background:#F57C00;color:#fff">Description</th>
+                    <th style="background:#F57C00;color:#fff;text-align:right">Count</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var category in exceptionCategories)
+                {
+                    <tr style="background:#FFF8E1">
+                        <td style="font-family:Consolas,monospace;font-size:12px;font-weight:700;color:#BF360C">@category.Category</td>
+                        <td>@category.Description</td>
+                        <td style="text-align:right;font-weight:700;color:#BF360C">@category.Count.ToString("N0")</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+<div class="card" style="padding:20px;margin-bottom:20px">
+    <h3 class="section-title" style="margin-top:0">Downloads</h3>
+    <div class="action-bar" style="justify-content:flex-start;margin:0 0 12px">
+        <button type="button" class="btn btn-info" id="downloadExcelBtn">Excel</button>
+        <button type="button" class="btn btn-info" id="downloadCsvBtn">CSV</button>
+        <button type="button" class="btn btn-secondary" id="downloadSqlBtn">SQL</button>
+    </div>
+    <div id="downloadStatus" class="alert alert--info" style="margin:0">
+        Export the saved Rule 65 results or regenerate the audit SQL for this cancellation census check.
+    </div>
+</div>
+
+<div class="card" style="padding:20px;margin-bottom:20px">
+    <h3 class="section-title" style="margin-top:0">Signoffs</h3>
+
+    @if (Model.CanCurrentUserSignOff && !isArchived && Model.IsCurrentRun)
+    {
+        <div class="field-group" style="margin-bottom:12px">
+            <label for="signoffComment">Comment</label>
+            <textarea id="signoffComment" rows="3" placeholder="Add review or completion notes">@currentComment</textarea>
+        </div>
+        <div class="action-bar" style="justify-content:flex-start;margin:0 0 16px">
+            <button type="button" class="btn btn-primary" id="signoffBtn">@(Model.CurrentUserHasSignedOff ? "Update My Signoff" : $"Sign Off as {Model.CurrentUserEngagementRole}")</button>
+            @if (Model.CanCurrentUserRemoveSignoff)
+            {
+                <button type="button" class="btn btn-warning" id="removeSignoffBtn">Remove Signoff</button>
+            }
+        </div>
+    }
+    else if (isArchived)
+    {
+        <div class="alert alert--info" style="margin-bottom:16px">Signoff controls are disabled for archived engagements.</div>
+    }
+    else if (!Model.IsCurrentRun)
+    {
+        <div class="alert alert--info" style="margin-bottom:16px">This saved run is historical and cannot be signed off.</div>
+    }
+
+    <div id="signoffStatus" class="alert alert--info" style="margin-bottom:16px">
+        Current engagement role: <strong>@(string.IsNullOrWhiteSpace(Model.CurrentUserEngagementRole) ? "-" : Model.CurrentUserEngagementRole)</strong>
+    </div>
+
+    @if (Model.Signoffs.Any())
+    {
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Role</th>
+                    <th>Reviewer</th>
+                    <th>Comment</th>
+                    <th>Signed At</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var signoff in Model.Signoffs)
+                {
+                    <tr>
+                        <td><span class="badge badge--role">@signoff.SignoffRole</span></td>
+                        <td>
+                            <strong>@signoff.ReviewerName</strong><br />
+                            <small style="color:#757575">@signoff.ReviewerEmail</small>
+                        </td>
+                        <td>@(string.IsNullOrWhiteSpace(signoff.Comment) ? "-" : signoff.Comment)</td>
+                        <td>@signoff.SignedOffAt.ToString("dd MMM yyyy HH:mm")</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+    else
+    {
+        <div style="color:#757575">No signoffs recorded yet.</div>
+    }
+</div>
+
+<div class="card" style="padding:20px;margin-bottom:20px">
+    <h3 class="section-title" style="margin-top:0">Flagged Rows</h3>
+    @if (!failRows.Any())
+    {
+        <div class="alert alert--success" style="margin:0">No flagged rows were found.</div>
+    }
+    else
+    {
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>#</th>
+                    <th>STD_NO</th>
+                    <th>QUAL</th>
+                    <th>SUBJ</th>
+                    <th>CANCEL</th>
+                    <th>CENSUS</th>
+                    <th>CURRENT_CENSUS</th>
+                    <th>Code</th>
+                    <th>Explanation</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var row in failRows)
+                {
+                    <tr>
+                        <td>@row.RowNumber</td>
+                        <td><strong>@row.StudentNo</strong></td>
+                        <td><code>@(string.IsNullOrWhiteSpace(row.Qualification) ? "-" : row.Qualification)</code></td>
+                        <td><code>@(string.IsNullOrWhiteSpace(row.Subject) ? "-" : row.Subject)</code></td>
+                        <td><code>@(string.IsNullOrWhiteSpace(row.CancelDate) ? "-" : row.CancelDate)</code></td>
+                        <td><code>@(string.IsNullOrWhiteSpace(row.CensusDate) ? "-" : row.CensusDate)</code></td>
+                        <td><code>@(string.IsNullOrWhiteSpace(row.CurrentCensus) ? "-" : row.CurrentCensus)</code></td>
+                        <td><span class="badge badge--fail">@(string.IsNullOrWhiteSpace(row.ErrorCode) ? "FLAGGED" : row.ErrorCode)</span></td>
+                        <td>@row.ValidationExplanation</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+</div>
+
+<div class="card" style="padding:20px;margin-bottom:20px">
+    <h3 class="section-title" style="margin-top:0">Clear Rows</h3>
+    @if (!passRows.Any())
+    {
+        <div class="alert alert--info" style="margin:0">No clear rows are available in this saved preview.</div>
+    }
+    else
+    {
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>#</th>
+                    <th>STD_NO</th>
+                    <th>QUAL</th>
+                    <th>SUBJ</th>
+                    <th>CANCEL</th>
+                    <th>CENSUS</th>
+                    <th>CURRENT_CENSUS</th>
+                    <th>Result</th>
+                    <th>Explanation</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var row in passRows)
+                {
+                    <tr>
+                        <td>@row.RowNumber</td>
+                        <td><strong>@row.StudentNo</strong></td>
+                        <td><code>@(string.IsNullOrWhiteSpace(row.Qualification) ? "-" : row.Qualification)</code></td>
+                        <td><code>@(string.IsNullOrWhiteSpace(row.Subject) ? "-" : row.Subject)</code></td>
+                        <td><code>@(string.IsNullOrWhiteSpace(row.CancelDate) ? "-" : row.CancelDate)</code></td>
+                        <td><code>@(string.IsNullOrWhiteSpace(row.CensusDate) ? "-" : row.CensusDate)</code></td>
+                        <td><code>@(string.IsNullOrWhiteSpace(row.CurrentCensus) ? "-" : row.CurrentCensus)</code></td>
+                        <td><span class="badge badge--pass">@row.ValidationResult</span></td>
+                        <td>@row.ValidationExplanation</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+</div>
+
+<div class="card" style="padding:20px;margin-bottom:20px">
+    <h3 class="section-title" style="margin-top:0">SQL</h3>
+    <textarea rows="18" readonly style="width:100%;font-family:Consolas,monospace;font-size:12px">@Model.GeneratedSql</textarea>
+</div>
+
+<form id="antiForgeryForm" method="post" style="display:none">
+    @Html.AntiForgeryToken()
+</form>
+
+<script>
+(() => {
+    const token = document.querySelector('#antiForgeryForm input[name="__RequestVerificationToken"]')?.value || '';
+    const clientId = @Model.ClientId;
+    const runId = @Model.RunId;
+    const summaryPayload = @Html.Raw(summaryJson);
+    const sqlRequest = @Html.Raw(sqlRequestJson);
+
+    async function postJson(url, payload) {
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'RequestVerificationToken': token
+            },
+            body: JSON.stringify(payload)
+        });
+        const data = await response.json();
+        if (!response.ok || data?.success === false)
+            throw new Error(data?.error || data?.message || 'Request failed.');
+        return data;
+    }
+
+    async function downloadBlob(url, payload, filename) {
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'RequestVerificationToken': token
+            },
+            body: JSON.stringify(payload)
+        });
+
+        if (!response.ok)
+            throw new Error('Download failed.');
+
+        const blob = await response.blob();
+        const link = document.createElement('a');
+        const objectUrl = window.URL.createObjectURL(blob);
+        link.href = objectUrl;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        window.URL.revokeObjectURL(objectUrl);
+    }
+
+    document.getElementById('downloadExcelBtn')?.addEventListener('click', async () => {
+        try {
+            await downloadBlob('/Rule65/DownloadExcel', summaryPayload, 'Rule65_Cancellation_Census_Date_Validation.xlsx');
+        } catch (error) {
+            document.getElementById('downloadStatus').textContent = error.message || 'Excel download failed.';
+        }
+    });
+
+    document.getElementById('downloadCsvBtn')?.addEventListener('click', async () => {
+        try {
+            await downloadBlob('/Rule65/DownloadCsv', summaryPayload, 'Rule65_Cancellation_Census_Date_Validation.csv');
+        } catch (error) {
+            document.getElementById('downloadStatus').textContent = error.message || 'CSV download failed.';
+        }
+    });
+
+    document.getElementById('downloadSqlBtn')?.addEventListener('click', async () => {
+        try {
+            await downloadBlob('/Rule65/DownloadSql', sqlRequest, 'Rule65_Cancellation_Census_Date_Validation.sql');
+        } catch (error) {
+            document.getElementById('downloadStatus').textContent = error.message || 'SQL download failed.';
+        }
+    });
+
+    document.getElementById('signoffBtn')?.addEventListener('click', async () => {
+        try {
+            const comment = document.getElementById('signoffComment')?.value || '';
+            await postJson('/Rule65/SignOffWorkspace', { clientId, runId, comment });
+            window.location.reload();
+        } catch (error) {
+            document.getElementById('signoffStatus').textContent = error.message || 'Signoff failed.';
+        }
+    });
+
+    document.getElementById('removeSignoffBtn')?.addEventListener('click', async () => {
+        try {
+            await postJson('/Rule65/RemoveWorkspaceSignoff', { clientId, runId, comment: '' });
+            window.location.reload();
+        } catch (error) {
+            document.getElementById('signoffStatus').textContent = error.message || 'Remove signoff failed.';
+        }
+    });
+})();
+</script>

@@ -118,6 +118,21 @@
                     <div class="alert alert--info" style="margin-top:10px;font-size:12px">
                         <strong>Foreign National Exemption (_049 + _008):</strong> If a student's citizen/resident status (_049) is <strong>not</strong> in the SA/PR values list, their ID (_008) matches one of the Z-placeholder values, and PROD has no IADIDNO — the record is <strong>PASS (Foreign National Exempt)</strong>. If _049 <em>is</em> in the list (e.g. SA or PR), a matching IADIDNO <strong>must</strong> exist in PRODUCTION or the record FAILs.
                     </div>
+                    <div class="form-grid" style="margin-top:12px;border-top:1px solid var(--rule15-table-border);padding-top:12px">
+                        <div class="field-group">
+                            <label>CREG Table <small>(optional — for NOT IN CREG check)</small></label>
+                            <select id="cregTable"><option value="">— Not configured (skip CREG check) —</option></select>
+                        </div>
+                        <div class="field-group">
+                            <label>CREG Student No. Column <small>(student number col in CREG)</small></label>
+                            <select id="cregIdCol"><option value="_007">_007</option></select>
+                        </div>
+                    </div>
+                    <div class="alert alert--info" style="margin-top:10px;font-size:12px">
+                        <strong>CREG Not-In-Service Check (optional):</strong> If a VALPAC student is not found in PRODUCTION, the system will also check CREG.
+                        If the student does <strong>not</strong> exist in CREG either, this is <strong>not an exception</strong> — the university never provided a service for that student.
+                        Leave CREG Table blank to skip this check.
+                    </div>
                     <div class="action-bar" style="justify-content:flex-start;margin:10px 0 0">
                         <button type="button" class="btn btn-secondary" onclick="autoDetectColumns()">Auto-Detect Columns</button>
                     </div>
@@ -239,6 +254,7 @@ window.toggleAccordion = function (section) {
         prodColQual: document.getElementById('prodColQual'), prodColYear: document.getElementById('prodColYear'),
         valpacCol049: document.getElementById('valpacCol049'), saNationalValues: document.getElementById('saNationalValues'),
         valpacCol008ZPlaceholders: document.getElementById('valpacCol008ZPlaceholders'),
+        cregTable: document.getElementById('cregTable'), cregIdCol: document.getElementById('cregIdCol'),
         connectionOutput: document.getElementById('connectionOutput'), configOutput: document.getElementById('configOutput'),
         analysisPane: document.getElementById('analysisPane'), resultsPane: document.getElementById('resultsPane'),
         sqlText: document.getElementById('sqlText'), downloadAllBtn: document.getElementById('downloadAllBtn'),
@@ -313,7 +329,9 @@ window.toggleAccordion = function (section) {
             prodColYear:  els.prodColYear?.value||'IAGCYR',
             valpacCol049: els.valpacCol049?.value||'_049',
             saNationalValues: els.saNationalValues?.value||'SA,PR',
-            valpacCol008ZPlaceholders: els.valpacCol008ZPlaceholders?.value||'ZZZZZZZZZZZZZ'
+            valpacCol008ZPlaceholders: els.valpacCol008ZPlaceholders?.value||'ZZZZZZZZZZZZZ',
+            cregTable: els.cregTable?.value||'',
+            cregIdCol: els.cregIdCol?.value||'_007'
         };
     }
 
@@ -328,6 +346,8 @@ window.toggleAccordion = function (section) {
                 fillColSel(els.valpacCol007, cols, '_007'); fillColSel(els.valpacCol008, cols, '_008');
                 fillColSel(els.valpacCol001, cols, '_001'); fillColSel(els.valpacColYear, cols, 'ColYear');
                 fillColSel(els.valpacCol049, cols, '_049');
+            } else if (role === 'creg') {
+                fillColSel(els.cregIdCol, cols, '_007');
             } else {
                 fillColSel(els.prodColStNo, cols, 'IAGSTNO'); fillColSel(els.prodColIdNo, cols, 'IADIDNO');
                 fillColSel(els.prodColQual, cols, 'IAGQUAL'); fillColSel(els.prodColYear, cols, 'IAGCYR');
@@ -400,6 +420,20 @@ window.toggleAccordion = function (section) {
         }
         if (els.saNationalValues) els.saNationalValues.value = workspace.saNationalValues || workspace.summary?.saNationalValues || 'SA,PR';
         if (els.valpacCol008ZPlaceholders) els.valpacCol008ZPlaceholders.value = workspace.valpacCol008ZPlaceholders || workspace.summary?.valpacCol008ZPlaceholders || 'ZZZZZZZZZZZZZ';
+        if (els.cregTable) {
+            const savedCregTable = workspace.cregTable || workspace.summary?.cregTable || '';
+            if (savedCregTable && ![...els.cregTable.options].some(o => o.value === savedCregTable)) {
+                const o = document.createElement('option'); o.value = o.textContent = savedCregTable; els.cregTable.appendChild(o);
+            }
+            els.cregTable.value = savedCregTable;
+        }
+        if (els.cregIdCol) {
+            const savedCregIdCol = workspace.cregIdCol || workspace.summary?.cregIdCol || '_007';
+            if (![...els.cregIdCol.options].some(o => o.value === savedCregIdCol)) {
+                const o = document.createElement('option'); o.value = o.textContent = savedCregIdCol; els.cregIdCol.appendChild(o);
+            }
+            els.cregIdCol.value = savedCregIdCol;
+        }
         els.workspaceRunState.textContent=workspace.runId?`Run #${workspace.runId}`:'No saved run loaded';
         els.workspaceRunLabel.textContent=workspace.runId?`Rule 51 Run #${workspace.runId}`:'No saved run yet';
         els.workspaceStatusLabel.textContent=workspace.currentStatus||'-';
@@ -439,6 +473,16 @@ window.toggleAccordion = function (section) {
         if (!data.success) throw new Error(data.error||'Could not load tables.');
         populateSelect(els.valpacTable, data.tables||[], data.autoValpacTable);
         populateSelect(els.prodTable, data.tables||[], data.autoProdTable);
+        // CREG: populate with blank option + all tables; auto-select dbo_CREG if present
+        if (els.cregTable) {
+            const cregCur = els.cregTable.value;
+            els.cregTable.innerHTML = '<option value="">— Not configured (skip CREG check) —</option>';
+            (data.tables||[]).forEach(t => { const o = document.createElement('option'); o.value = o.textContent = t; els.cregTable.appendChild(o); });
+            const autoCreg = (data.tables||[]).find(t => /creg/i.test(t)) || '';
+            els.cregTable.value = cregCur || autoCreg;
+            // Also populate cregIdCol with CREG columns if available
+            if (els.cregIdCol && els.cregTable.value) loadCols('creg', els.cregTable.value).catch(()=>{});
+        }
         setAlert(els.configOutput,'success',`Loaded ${data.tables.length} table(s).`);
     }
 
@@ -497,7 +541,8 @@ window.toggleAccordion = function (section) {
         const failRows       = (summary.reviewRows||[]).filter(r=>String(r.validationResult||'').toUpperCase()==='FAIL');
         const passRows       = (summary.reviewRows||[]).filter(r=>String(r.validationResult||'').toUpperCase()==='PASS');
         const passReviewRows = (summary.reviewRows||[]).filter(r=>String(r.validationResult||'').toUpperCase()==='PASS_REVIEW');
-        const purePassCount  = (summary.passCount||0) - (summary.passWithReviewCount||0);
+        const notInCregRows  = (summary.reviewRows||[]).filter(r=>String(r.validationResult||'').toUpperCase()==='NOT_IN_CREG');
+        const purePassCount  = (summary.passCount||0) - (summary.passWithReviewCount||0) - (summary.notInCregCount||0);
         const v007=summary.valpacCol007||'_007';const v008=summary.valpacCol008||'_008';
         const v001=summary.valpacCol001||'_001';const vYear=summary.valpacColYear||'ColYear';
         const pSt=summary.prodColStNo||'IAGSTNO';const pId=summary.prodColIdNo||'IADIDNO';
@@ -564,6 +609,21 @@ window.toggleAccordion = function (section) {
             </tr>`;
         }).join('');
 
+        const notInCregRowHtml = notInCregRows.map(row=>{
+            const v=Object.fromEntries(Object.entries(row.displayValues||{}).map(([k,val])=>[k.toUpperCase(),val]));
+            const note = row.validationExplanation || v.EXCEPTION_REASON || '';
+            return `<tr style="background:#E1F5FE">
+                <td>${row.validationNumber}</td>
+                <td style="font-weight:700;color:#01579B">${escapeHtml(v.VALPAC_COL_1||'')}</td>
+                <td>${escapeHtml(v.VALPAC_COL_2||'')}</td>
+                <td>${escapeHtml(v.VALPAC_COL_3||'')}</td>
+                <td>${escapeHtml(v.VALPAC_COL_4||'')}</td>
+                <td style="font-style:italic;color:#6A1B9A">${escapeHtml(v.VALPAC_049_DISP||'')}</td>
+                <td colspan="4" style="color:#0277BD;font-style:italic;font-size:12px">— Student not found in CREG —</td>
+                <td style="font-size:11px;color:#01579B;max-width:280px;white-space:normal;line-height:1.4">${escapeHtml(note)}</td>
+            </tr>`;
+        }).join('');
+
         els.analysisPane.innerHTML = `
             ${summary.isPreviewOnly?`<div class="alert alert--warning" style="margin-bottom:16px">Browser shows a preview of ${summary.previewLimit.toLocaleString()} rows prioritising FAIL records. Download Excel/CSV for the complete result set.</div>`:''}
             <div class="R51-summary-grid">
@@ -573,6 +633,7 @@ window.toggleAccordion = function (section) {
                 <div class="stat-card stat-card--pass"><div class="stat-card__label">Found in PRODUCTION</div><div class="stat-card__value">${purePassCount.toLocaleString()}</div></div>
                 <div class="stat-card stat-card--fail"><div class="stat-card__label">Missing from PRODUCTION</div><div class="stat-card__value">${summary.failCount.toLocaleString()}</div></div>
                 ${(summary.passWithReviewCount||0)>0?`<div class="stat-card" style="border-left:4px solid #F57C00;background:#FFF3E0"><div class="stat-card__label" style="color:#E65100">Pass with Review Note</div><div class="stat-card__value" style="color:#E65100">${(summary.passWithReviewCount||0).toLocaleString()}</div></div>`:''}
+                ${(summary.notInCregCount||0)>0?`<div class="stat-card" style="border-left:4px solid #0288D1;background:#E1F5FE"><div class="stat-card__label" style="color:#01579B">Not in CREG (No Service)</div><div class="stat-card__value" style="color:#01579B">${(summary.notInCregCount||0).toLocaleString()}</div></div>`:''}
                 ${(summary.foreignNationalExemptCount||0)>0?`<div class="stat-card" style="border-left:4px solid #AB47BC;background:#F3E5F5"><div class="stat-card__label" style="color:#6A1B9A">Foreign National Exempt</div><div class="stat-card__value" style="color:#6A1B9A">${(summary.foreignNationalExemptCount||0).toLocaleString()}</div></div>`:''}
             </div>
 
@@ -673,6 +734,40 @@ window.toggleAccordion = function (section) {
                 }
             </div>` : ''}
 
+            ${(summary.notInCregCount||0) > 0 ? `
+            <div class="card" style="padding:20px;margin-top:20px;border-left:4px solid #0288D1">
+                <h3 class="section-title" style="margin-top:0;color:#01579B">
+                    Not in CREG — No University Service (NOT_IN_CREG) — ${formatNumber(summary.notInCregCount)} record(s): student absent from CREG, not expected in PRODUCTION
+                    ${summary.isPreviewOnly ? `<small style="font-weight:normal;font-size:13px"> (showing ${notInCregRows.length} in preview)</small>` : ''}
+                </h3>
+                <div class="alert" style="background:#E1F5FE;border-left:4px solid #0288D1;color:#01579B;margin-bottom:12px;padding:10px 14px;font-size:13px">
+                    These VALPAC records belong to students who do <strong>not appear in the CREG table</strong>.
+                    The university never provided a service for these students, so their absence from PRODUCTION is <strong>expected — not an exception</strong>.
+                </div>
+                ${notInCregRows.length === 0
+                    ? `<div class="alert alert--info">No NOT_IN_CREG rows in this browser preview. Download Excel/CSV to see all ${formatNumber(summary.notInCregCount)} record(s).</div>`
+                    : `<div class="table-wrapper" style="overflow-x:auto">
+                        <table class="data-table" style="min-width:900px;font-size:12px;font-family:Consolas,monospace">
+                            <thead><tr>
+                                <th rowspan="2">#</th>
+                                <th colspan="4" style="background:#0288D1;color:#fff;text-align:center">VALPAC</th>
+                                <th rowspan="2" style="background:#6A1B9A;color:#fff">${escapeHtml(v049)}</th>
+                                <th colspan="4" style="background:#546E7A;color:#fff;text-align:center">PRODUCTION (no match)</th>
+                                <th rowspan="2">Note</th>
+                            </tr><tr>
+                                <th style="background:#0288D1;color:#fff">${escapeHtml(v007)}</th>
+                                <th>${escapeHtml(v008)}</th><th>${escapeHtml(v001)}</th><th>${escapeHtml(vYear)}</th>
+                                <th style="background:#546E7A;color:#fff">${escapeHtml(pSt)}</th>
+                                <th style="background:#546E7A;color:#fff">${escapeHtml(pId)}</th>
+                                <th style="background:#546E7A;color:#fff">${escapeHtml(pQual)}</th>
+                                <th style="background:#546E7A;color:#fff">${escapeHtml(pYear)}</th>
+                            </tr></thead>
+                            <tbody>${notInCregRowHtml}</tbody>
+                        </table>
+                    </div>`
+                }
+            </div>` : ''}
+
             ${purePassCount > 0 ? `
             <div class="card" style="padding:20px;margin-top:20px;border-left:4px solid var(--rule15-pass,#2e7d32)">
                 <h3 class="section-title" style="margin-top:0;color:var(--rule15-pass,#2e7d32)">
@@ -720,7 +815,7 @@ window.toggleAccordion = function (section) {
         if (!state.summary) { els.resultsPane.innerHTML='<div class="empty-card"><p>No Rule 51 results loaded.</p></div>'; return; }
         if (!force && getActiveTab()!=='results') { els.resultsPane.innerHTML='<div class="empty-card"><p>Open the Results tab to load the browser preview.</p></div>'; return; }
         const summary = state.summary;
-        const purePassCount = (summary.passCount||0) - (summary.passWithReviewCount||0);
+        const purePassCount = (summary.passCount||0) - (summary.passWithReviewCount||0) - (summary.notInCregCount||0);
         const rows = (summary.reviewRows||[]).filter(r => state.resultFilter==='ALL'||String(r.validationResult||'').toUpperCase()===state.resultFilter);
         const valpacTable = summary.valpacTable||'STUD VALPAC';
         const prodTable   = summary.prodTable||'STUD PRODUCTION';
@@ -735,6 +830,7 @@ window.toggleAccordion = function (section) {
             const resultUc=String(row.validationResult||'').toUpperCase();
             const isFail=resultUc==='FAIL';
             const isPassReview=resultUc==='PASS_REVIEW';
+            const isNotInCreg=resultUc==='NOT_IN_CREG';
             const partialFound = v.PARTIAL_MATCH_FOUND === '1';
             const prodTd = (idx, valpacVal) => {
                 const pk = `PROD_COL_${idx+1}`;
@@ -747,10 +843,10 @@ window.toggleAccordion = function (section) {
             const vv=[v.VALPAC_COL_1||'',v.VALPAC_COL_2||'',v.VALPAC_COL_3||'',v.VALPAC_COL_4||''];
             const v049cell = v.VALPAC_049_DISP||'';
             const reason = row.validationExplanation || v.EXCEPTION_REASON || '';
-            const trStyle = isPassReview ? ' style="background:#FFF8E1"' : '';
-            const resultLabel = isFail ? 'FAIL' : isPassReview ? 'PASS (Review)' : 'PASS';
-            const resultCls = isFail ? 'is-fail' : isPassReview ? '' : 'is-pass';
-            const resultColor = isPassReview ? 'color:#E65100;font-weight:700' : '';
+            const trStyle = isPassReview ? ' style="background:#FFF8E1"' : isNotInCreg ? ' style="background:#E1F5FE"' : '';
+            const resultLabel = isFail ? 'FAIL' : isPassReview ? 'PASS (Review)' : isNotInCreg ? 'PASS (Not in CREG)' : 'PASS';
+            const resultCls = isFail ? 'is-fail' : isPassReview || isNotInCreg ? '' : 'is-pass';
+            const resultColor = isPassReview ? 'color:#E65100;font-weight:700' : isNotInCreg ? 'color:#01579B;font-weight:700' : '';
             return `<tr${trStyle}>
                 <td class="group-valpac">${escapeHtml(vv[0])}</td>
                 <td class="group-valpac">${escapeHtml(vv[1])}</td>
@@ -770,8 +866,9 @@ window.toggleAccordion = function (section) {
                 <div class="field-group" style="margin:0;min-width:180px">
                     <label>Result Filter</label>
                     <select id="liveResultFilter">
-                        <option value="ALL">All results (PASS, FAIL &amp; Review)</option>
+                        <option value="ALL">All results (PASS, FAIL, Review &amp; Not in CREG)</option>
                         <option value="FAIL">FAIL — Missing from PRODUCTION</option>
+                        <option value="NOT_IN_CREG">PASS (Not in CREG) — No university service</option>
                         <option value="PASS_REVIEW">PASS (Review) — Primary qual matched</option>
                         <option value="PASS">PASS — Found in PRODUCTION</option>
                     </select>
@@ -780,11 +877,13 @@ window.toggleAccordion = function (section) {
             <div class="alert alert--${rows.length === 0 && state.resultFilter === 'FAIL' ? 'success' : 'info'}" style="margin-bottom:16px">
                 ${state.resultFilter === 'FAIL'
                     ? `Showing <strong>${formatNumber(rows.length)}</strong> record(s) missing from PRODUCTION (FAIL).${summary.isPreviewOnly ? ' <em>Browser preview — download for full list.</em>' : ''}`
-                    : state.resultFilter === 'PASS_REVIEW'
-                        ? `Showing <strong>${formatNumber(rows.length)}</strong> record(s) with review note — student passed on primary qualification.${summary.isPreviewOnly ? ' <em>Browser preview — download for full list.</em>' : ''}`
-                        : state.resultFilter === 'PASS'
-                            ? `Showing <strong>${formatNumber(rows.length)}</strong> record(s) found in PRODUCTION (PASS).${summary.isPreviewOnly ? ' <em>Browser preview — download for full list.</em>' : ''}`
-                            : `Showing <strong>${formatNumber(rows.length)}</strong> result row(s) — <span style="color:var(--rule15-pass,#2e7d32);font-weight:700">${formatNumber(purePassCount||0)} PASS</span>${(summary.passWithReviewCount||0)>0?` / <span style="color:#E65100;font-weight:700">${formatNumber(summary.passWithReviewCount||0)} PASS (Review)</span>`:''}  / <span style="color:var(--rule15-fail,#c62828);font-weight:700">${formatNumber(summary.failCount||0)} FAIL</span>.${summary.isPreviewOnly ? ' <em>Browser preview — download for full list.</em>' : ''}`
+                    : state.resultFilter === 'NOT_IN_CREG'
+                        ? `Showing <strong>${formatNumber(rows.length)}</strong> record(s) where student was not found in CREG — no university service, not an exception.${summary.isPreviewOnly ? ' <em>Browser preview — download for full list.</em>' : ''}`
+                        : state.resultFilter === 'PASS_REVIEW'
+                            ? `Showing <strong>${formatNumber(rows.length)}</strong> record(s) with review note — student passed on primary qualification.${summary.isPreviewOnly ? ' <em>Browser preview — download for full list.</em>' : ''}`
+                            : state.resultFilter === 'PASS'
+                                ? `Showing <strong>${formatNumber(rows.length)}</strong> record(s) found in PRODUCTION (PASS).${summary.isPreviewOnly ? ' <em>Browser preview — download for full list.</em>' : ''}`
+                                : `Showing <strong>${formatNumber(rows.length)}</strong> result row(s) — <span style="color:var(--rule15-pass,#2e7d32);font-weight:700">${formatNumber(purePassCount||0)} PASS</span>${(summary.passWithReviewCount||0)>0?` / <span style="color:#E65100;font-weight:700">${formatNumber(summary.passWithReviewCount||0)} PASS (Review)</span>`:''}${(summary.notInCregCount||0)>0?` / <span style="color:#01579B;font-weight:700">${formatNumber(summary.notInCregCount||0)} Not in CREG</span>`:''} / <span style="color:var(--rule15-fail,#c62828);font-weight:700">${formatNumber(summary.failCount||0)} FAIL</span>.${summary.isPreviewOnly ? ' <em>Browser preview — download for full list.</em>' : ''}`
                 }
             </div>
             ${summary.isPreviewOnly?`<div class="alert alert--warning" style="margin-bottom:12px">Only the browser preview is shown here. Downloads keep the full result set.</div>`:''}

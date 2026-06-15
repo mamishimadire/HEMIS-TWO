@@ -1,7 +1,11 @@
 {
   "permissions": {
     "allow": [
-      "PowerShell(Start-Process \"cmd.exe\" -ArgumentList \"/c cd `\"c:\\\\Users\\\\Mamishi.Madire\\\\Desktop\\\\2026 hemis system`\" && dotnet run --project HemisAudit\\\\HemisAudit.csproj --no-build\" -WindowStyle Normal)"
+      "PowerShell(Start-Process \"cmd.exe\" -ArgumentList \"/c cd `\"c:\\\\Users\\\\Mamishi.Madire\\\\Desktop\\\\2026 hemis system`\" && dotnet run --project HemisAudit\\\\HemisAudit.csproj --no-build\" -WindowStyle Normal)",
+      "PowerShell($proc = Get-Process -Name \"HemisAudit\" -ErrorAction SilentlyContinue; if \\($proc\\) { \"Running PID: $\\($proc.Id\\)\" } else { \"Not running\" })",
+      "PowerShell(& \"c:\\\\Users\\\\Mamishi.Madire\\\\Desktop\\\\2026 hemis system\\\\HemisAudit\\\\Scripts\\\\run system.ps1\")",
+      "Bash(dotnet run *)",
+      "Bash(python add_rscript_endpoints.py)"
     ]
   }
 }

@@ -1,0 +1,472 @@
+@using HemisAudit.ViewModels
+@model Rule64RunReviewViewModel
+@{
+    ViewData["Title"] = $"Rule 64 Run {Model.RunId}";
+    Layout = "~/Views/Shared/_Layout.cshtml";
+    var canManageEngagement = ViewBag.CanManageEngagement is bool manageEngagement && manageEngagement;
+    var canOpenWorkspace = ViewBag.CanOpenWorkspace is bool openWorkspace && openWorkspace;
+    var isArchived = ViewBag.IsArchived is bool archived && archived;
+    var moduleNavigation = ViewBag.ModuleNavigation as ModuleSequenceNavigationViewModel;
+    var summary = Model.Summary;
+    var passRows = summary.PassRows ?? new List<Rule64ReviewRow>();
+    var failRows = summary.FailRows ?? new List<Rule64ReviewRow>();
+    var exceptionCategories = summary.ExceptionCategories ?? new List<Rule64ExceptionCategoryViewModel>();
+    var notInCregNotInProd = exceptionCategories.FirstOrDefault(c => string.Equals(c.Category, "NOT_FOUND_IN_CREG__NOT_IN_PRODUCTION", StringComparison.OrdinalIgnoreCase))?.Count ?? 0;
+    var notInCregInProd    = exceptionCategories.FirstOrDefault(c => string.Equals(c.Category, "NOT_FOUND_IN_CREG__FOUND_IN_PRODUCTION", StringComparison.OrdinalIgnoreCase))?.Count ?? 0;
+    var notInCregTotal     = notInCregNotInProd + notInCregInProd;
+    var valueMismatch      = exceptionCategories.FirstOrDefault(c => string.Equals(c.Category, "VALUE_MISMATCH__FOUND_IN_CREG", StringComparison.OrdinalIgnoreCase))?.Count ?? 0;
+    var currentComment = Model.Signoffs.FirstOrDefault(s => s.IsCurrentUser)?.Comment ?? "";
+    var sqlRequestJson = System.Text.Json.JsonSerializer.Serialize(new Rule64ValidationRequest
+    {
+        ClientId = Model.ClientId,
+        Database = summary.Database,
+        StudTable = summary.StudTable,
+        CregTable = summary.CregTable,
+        ProdTable = summary.ProdTable,
+        ColumnMapping = summary.ColumnMapping
+    });
+}
+
+@if (TempData["Success"] != null)
+{
+    <div class="alert alert--success" style="margin-bottom:16px">@TempData["Success"]</div>
+}
+@if (TempData["Error"] != null)
+{
+    <div class="alert alert--error" style="margin-bottom:16px">@TempData["Error"]</div>
+}
+
+@if (moduleNavigation != null)
+{
+    @await Html.PartialAsync("_ModuleSequenceNav", moduleNavigation)
+}
+
+<div class="page-header">
+    <div>
+        <h1>Rule 64 - Saved Run #@Model.RunId</h1>
+        <p>
+            @Model.EngagementName
+            <span style="padding:0 8px">|</span>
+            @Model.MaconomyNumber
+            <span style="padding:0 8px">|</span>
+            @summary.Timestamp
+        </p>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+        @if (canOpenWorkspace)
+        {
+            <a href="/Rule64?clientId=@Model.ClientId" class="btn btn-secondary">Open Workspace</a>
+        }
+        <a asp-controller="Dashboard" asp-action="Index" class="btn btn-secondary">Back to Dashboard</a>
+        <a asp-controller="Admin" asp-action="ClientDetail" asp-route-id="@Model.ClientId" asp-fragment="validation-runs-panel" class="btn btn-secondary">Back to Validation Runs</a>
+        @if (canManageEngagement)
+        {
+            <a asp-controller="Admin" asp-action="ClientDetail" asp-route-id="@Model.ClientId" class="btn btn-secondary">Back to Engagement</a>
+        }
+    </div>
+</div>
+
+@if (isArchived)
+{
+    <div class="alert alert--info" style="margin-bottom:24px">
+        This engagement is archived. The saved run is available for review only.
+    </div>
+}
+@if (!Model.HasDataAnalystSignoff && !isArchived)
+{
+    <div class="alert alert--warning" style="margin-bottom:24px">
+        The data analyst signoff is still outstanding. Manager and director review remains locked until analyst signoff is complete.
+    </div>
+}
+@if (!Model.IsCurrentRun)
+{
+    <div class="alert alert--info" style="margin-bottom:24px">
+        History results are read-only. Signoff is only available on the current run.
+    </div>
+}
+
+<div class="card" style="padding:20px;margin-bottom:20px">
+    <h3 class="section-title" style="margin-top:0">Run Summary</h3>
+    <div class="stats-grid">
+        <div class="stat-card">
+            <div class="stat-card__label">Total Tested</div>
+            <div class="stat-card__value">@summary.TotalCount.ToString("N0")</div>
+        </div>
+        <div class="stat-card stat-card--pass">
+            <div class="stat-card__label">PASS — Found in CREG</div>
+            <div class="stat-card__value">@summary.PassCount.ToString("N0")</div>
+        </div>
+        <div class="stat-card stat-card--fail" style="border-left:4px solid #8B0000">
+            <div class="stat-card__label">NOT FOUND IN CREG</div>
+            <div class="stat-card__value">@notInCregTotal.ToString("N0")</div>
+        </div>
+        <div class="stat-card stat-card--fail">
+            <div class="stat-card__label">Not in CREG (Not in Prod)</div>
+            <div class="stat-card__value">@notInCregNotInProd.ToString("N0")</div>
+        </div>
+        <div class="stat-card stat-card--fail">
+            <div class="stat-card__label">Not in CREG (In Prod)</div>
+            <div class="stat-card__value">@notInCregInProd.ToString("N0")</div>
+        </div>
+        <div class="stat-card stat-card--fail">
+            <div class="stat-card__label">Value Mismatch</div>
+            <div class="stat-card__value">@valueMismatch.ToString("N0")</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-card__label">Exception Rate</div>
+            <div class="stat-card__value">@summary.ExceptionRate.ToString("F2")%</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-card__label">Status</div>
+            <div class="stat-card__value"><span class="badge @(summary.Status == "PASS" ? "badge--pass" : "badge--fail")">@summary.Status</span></div>
+        </div>
+    </div>
+
+    <div class="form-grid" style="margin-top:18px">
+        <div>
+            <div style="color:#757575;font-size:12px;text-transform:uppercase;font-weight:700">Rule</div>
+            <div>Rule 64 - STUD to CREG Student Number Validation</div>
+        </div>
+        <div>
+            <div style="color:#757575;font-size:12px;text-transform:uppercase;font-weight:700">Database</div>
+            <div>@summary.Database</div>
+        </div>
+        <div>
+            <div style="color:#757575;font-size:12px;text-transform:uppercase;font-weight:700">STUD Table</div>
+            <div>@summary.StudTable</div>
+        </div>
+        <div>
+            <div style="color:#757575;font-size:12px;text-transform:uppercase;font-weight:700">CREG Table</div>
+            <div>@summary.CregTable</div>
+        </div>
+        <div>
+            <div style="color:#757575;font-size:12px;text-transform:uppercase;font-weight:700">STUD PRODUCTION Table</div>
+            <div>@summary.ProdTable</div>
+        </div>
+        <div>
+            <div style="color:#757575;font-size:12px;text-transform:uppercase;font-weight:700">Columns</div>
+            <div>STUD No: <code>@summary.ColumnMapping.StudStudentNoCol</code> | CREG No: <code>@summary.ColumnMapping.CregStudentNoCol</code> | STUD Compare: <code>@summary.ColumnMapping.StudCompareValueCol</code> | CREG Compare: <code>@summary.ColumnMapping.CregCompareValueCol</code> | PROD No: <code>@summary.ColumnMapping.ProdStudentNoCol</code></div>
+        </div>
+        <div>
+            <div style="color:#757575;font-size:12px;text-transform:uppercase;font-weight:700">Exceptions</div>
+            <div><code>NOTE - student should not appear in production</code> | <code>MISMATCH - compare values differ</code></div>
+        </div>
+    </div>
+</div>
+
+@if (exceptionCategories.Any())
+{
+    <div class="card" style="padding:20px;margin-bottom:20px;border-left:4px solid #F57C00">
+        <h3 class="section-title" style="margin-top:0;color:#E65100">Exception Category Breakdown</h3>
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th style="background:#F57C00;color:#fff">Category</th>
+                    <th style="background:#F57C00;color:#fff">Description</th>
+                    <th style="background:#F57C00;color:#fff;text-align:right">Count</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var category in exceptionCategories)
+                {
+                    <tr style="background:#FFF8E1">
+                        <td style="font-family:Consolas,monospace;font-size:12px;font-weight:700;color:#BF360C">@category.Category</td>
+                        <td>@category.Description</td>
+                        <td style="text-align:right;font-weight:700;color:#BF360C">@category.Count.ToString("N0")</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+<div class="card" style="padding:20px;margin-bottom:20px">
+    <h3 class="section-title" style="margin-top:0">Downloads</h3>
+    <div class="action-bar" style="justify-content:flex-start;margin:0 0 12px">
+        <button type="button" class="btn btn-info" id="downloadExcelBtn">Excel</button>
+        <button type="button" class="btn btn-info" id="downloadCsvBtn">CSV</button>
+        <button type="button" class="btn btn-secondary" id="downloadSqlBtn">SQL</button>
+    </div>
+    <div id="downloadStatus" class="alert alert--info" style="margin:0">
+        Export the saved Rule 64 results or regenerate the audit SQL for this STUD to CREG run configuration.
+    </div>
+</div>
+
+<div class="card" style="padding:20px;margin-bottom:20px">
+    <h3 class="section-title" style="margin-top:0">Signoffs</h3>
+
+    @if (Model.CanCurrentUserSignOff && !isArchived && Model.IsCurrentRun)
+    {
+        <div class="field-group" style="margin-bottom:12px">
+            <label for="signoffComment">Comment</label>
+            <textarea id="signoffComment" rows="3" placeholder="Add review or completion notes">@currentComment</textarea>
+        </div>
+        <div class="action-bar" style="justify-content:flex-start;margin:0 0 16px">
+            <button type="button" class="btn btn-primary" id="signoffBtn">
+                @(Model.CurrentUserHasSignedOff ? "Update My Signoff" : $"Sign Off as {Model.CurrentUserEngagementRole}")
+            </button>
+            @if (Model.CanCurrentUserRemoveSignoff)
+            {
+                <button type="button" class="btn btn-warning" id="removeSignoffBtn">Remove Signoff</button>
+            }
+        </div>
+    }
+    else if (isArchived)
+    {
+        <div class="alert alert--info" style="margin-bottom:16px">Signoff controls are disabled for archived engagements.</div>
+    }
+    else if (!Model.IsCurrentRun)
+    {
+        <div class="alert alert--info" style="margin-bottom:16px">This saved run is historical and cannot be signed off.</div>
+    }
+
+    <div id="signoffStatus" class="alert alert--info" style="margin-bottom:16px">
+        Current engagement role: <strong>@(string.IsNullOrWhiteSpace(Model.CurrentUserEngagementRole) ? "-" : Model.CurrentUserEngagementRole)</strong>
+    </div>
+
+    @if (Model.Signoffs.Any())
+    {
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Role</th>
+                    <th>Reviewer</th>
+                    <th>Comment</th>
+                    <th>Signed At</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var signoff in Model.Signoffs)
+                {
+                    <tr>
+                        <td><span class="badge badge--role">@signoff.SignoffRole</span></td>
+                        <td>
+                            <strong>@signoff.ReviewerName</strong><br />
+                            <small style="color:#757575">@signoff.ReviewerEmail</small>
+                        </td>
+                        <td>@(string.IsNullOrWhiteSpace(signoff.Comment) ? "-" : signoff.Comment)</td>
+                        <td>@signoff.SignedOffAt.ToString("dd MMM yyyy HH:mm")</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+    else
+    {
+        <div style="color:#757575">No signoffs recorded yet.</div>
+    }
+</div>
+
+<div class="card" style="padding:20px;margin-bottom:20px">
+    <h3 class="section-title" style="margin-top:0">Exception Rows</h3>
+    <div style="margin-bottom:12px;color:#616161">
+        Rule 64 now flags both missing CREG student numbers and cases where the mapped STUD and CREG compare values do not match.
+    </div>
+
+    @if (summary.IsPreviewOnly)
+    {
+        <div class="alert alert--warning" style="margin-bottom:16px">
+            Browser preview is limited to the first @summary.PreviewLimit exception row(s) and @summary.PreviewLimit clear row(s). Use exports for the saved browser result set.
+        </div>
+    }
+
+    @if (failRows.Any())
+    {
+        <div style="overflow:auto;margin-bottom:20px">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Source Table</th>
+                        <th>STUD Student No</th>
+                        <th>CREG Student No</th>
+                        <th>STUD Compare Value</th>
+                        <th>CREG Compare Value</th>
+                        <th>PRODUCTION Student No</th>
+                        <th>Error Code</th>
+                        <th>Result</th>
+                        <th>Explanation</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var row in failRows)
+                    {
+                        <tr>
+                            <td>@row.SourceTable</td>
+                            <td><strong>@row.StudentNo</strong></td>
+                            <td><code>@(string.IsNullOrWhiteSpace(row.CregStudentNo) ? "-" : row.CregStudentNo)</code></td>
+                            <td><code>@(string.IsNullOrWhiteSpace(row.StudCompareValue) ? "-" : row.StudCompareValue)</code></td>
+                            <td><code>@(string.IsNullOrWhiteSpace(row.CregCompareValue) ? "-" : row.CregCompareValue)</code></td>
+                            <td><code>@(string.IsNullOrWhiteSpace(row.ProdStudentNo) ? "-" : row.ProdStudentNo)</code></td>
+                            <td><code>@row.ErrorCode</code></td>
+                            <td><span class="badge badge--fail">@row.ValidationResult</span></td>
+                            <td style="text-align:left">@row.ValidationExplanation</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+    else
+    {
+        <div class="empty-state" style="margin-bottom:20px"><p>No exception rows recorded for this run.</p></div>
+    }
+
+    <h4 style="margin:0 0 12px">Clear Rows</h4>
+    @if (passRows.Any())
+    {
+        <div style="overflow:auto">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Source Table</th>
+                        <th>STUD Student No</th>
+                        <th>CREG Student No</th>
+                        <th>STUD Compare Value</th>
+                        <th>CREG Compare Value</th>
+                        <th>PRODUCTION Student No</th>
+                        <th>Error Code</th>
+                        <th>Result</th>
+                        <th>Explanation</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var row in passRows)
+                    {
+                        <tr>
+                            <td>@row.SourceTable</td>
+                            <td><strong>@row.StudentNo</strong></td>
+                            <td><code>@(string.IsNullOrWhiteSpace(row.CregStudentNo) ? "-" : row.CregStudentNo)</code></td>
+                            <td><code>@(string.IsNullOrWhiteSpace(row.StudCompareValue) ? "-" : row.StudCompareValue)</code></td>
+                            <td><code>@(string.IsNullOrWhiteSpace(row.CregCompareValue) ? "-" : row.CregCompareValue)</code></td>
+                            <td><code>@(string.IsNullOrWhiteSpace(row.ProdStudentNo) ? "-" : row.ProdStudentNo)</code></td>
+                            <td>-</td>
+                            <td><span class="badge badge--pass">@row.ValidationResult</span></td>
+                            <td style="text-align:left">@row.ValidationExplanation</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+    else
+    {
+        <div class="empty-state"><p>No clear rows recorded for this run.</p></div>
+    }
+</div>
+
+<div class="card" style="padding:20px;margin-bottom:24px">
+    <h3 class="section-title" style="margin-top:0">Generated SQL</h3>
+    <pre style="white-space:pre-wrap;word-break:break-word;background:#0f172a;color:#e2e8f0;padding:16px;border-radius:12px;overflow:auto">@Model.GeneratedSql</pre>
+</div>
+
+<form id="antiForgeryForm" method="post" style="display:none">
+    @Html.AntiForgeryToken()
+</form>
+
+<script>
+(() => {
+    const token = document.querySelector('#antiForgeryForm input[name="__RequestVerificationToken"]')?.value || '';
+    const signoffStatus = document.getElementById('signoffStatus');
+    const downloadStatus = document.getElementById('downloadStatus');
+    const signoffComment = document.getElementById('signoffComment');
+    const summaryPayload = { savedRunId: @Model.RunId };
+    const sqlRequest = @Html.Raw(sqlRequestJson);
+
+    function setStatus(target, message, tone) {
+        if (!target) {
+            return;
+        }
+
+        const toneMap = {
+            success: 'alert--success',
+            warning: 'alert--warning',
+            error: 'alert--error',
+            info: 'alert--info'
+        };
+        target.className = `alert ${toneMap[tone] || toneMap.info}`;
+        target.textContent = message || '';
+    }
+
+    async function postJson(url, payload) {
+        return await window.fetchJsonWithProgress(url, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'RequestVerificationToken': token
+            },
+            body: JSON.stringify(payload)
+        });
+    }
+
+    async function downloadBlob(url, payload, fileName) {
+        await window.downloadFileWithProgress({
+            url,
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'RequestVerificationToken': token
+            },
+            body: JSON.stringify(payload),
+            defaultFileName: fileName,
+            label: 'Downloading result'
+        });
+    }
+
+    document.getElementById('signoffBtn')?.addEventListener('click', async () => {
+        try {
+            const data = await postJson('/Rule64/SignOffWorkspace', {
+                clientId: @Model.ClientId,
+                runId: @Model.RunId,
+                comment: signoffComment?.value || ''
+            });
+
+            if (!data.success) {
+                throw new Error(data.error || 'Signoff failed.');
+            }
+
+            setStatus(signoffStatus, data.message || 'Signoff saved. Reloading...', 'success');
+            window.location.reload();
+        } catch (error) {
+            setStatus(signoffStatus, error.message || 'Signoff failed.', 'error');
+        }
+    });
+
+    document.getElementById('removeSignoffBtn')?.addEventListener('click', async () => {
+        if (!confirm('Remove the signoff for this validation run?')) {
+            return;
+        }
+
+        try {
+            const data = await postJson('/Rule64/RemoveWorkspaceSignoff', {
+                clientId: @Model.ClientId,
+                runId: @Model.RunId,
+                comment: ''
+            });
+
+            if (!data.success) {
+                throw new Error(data.error || 'Could not remove signoff.');
+            }
+
+            setStatus(signoffStatus, data.message || 'Signoff removed. Reloading...', 'warning');
+            window.location.reload();
+        } catch (error) {
+            setStatus(signoffStatus, error.message || 'Could not remove signoff.', 'error');
+        }
+    });
+
+    document.getElementById('downloadExcelBtn')?.addEventListener('click', () =>
+        downloadBlob('/Rule64/DownloadExcel', summaryPayload, 'Rule64_STUD_CREG_Student_Number_Validation.xlsx')
+            .then(() => setStatus(downloadStatus, 'Excel download started.', 'success'))
+            .catch(error => setStatus(downloadStatus, error.message || 'Excel download failed.', 'error')));
+
+    document.getElementById('downloadCsvBtn')?.addEventListener('click', () =>
+        downloadBlob('/Rule64/DownloadCsv', summaryPayload, 'Rule64_STUD_CREG_Student_Number_Validation.csv')
+            .then(() => setStatus(downloadStatus, 'CSV download started.', 'success'))
+            .catch(error => setStatus(downloadStatus, error.message || 'CSV download failed.', 'error')));
+
+    document.getElementById('downloadSqlBtn')?.addEventListener('click', () =>
+        downloadBlob('/Rule64/DownloadSql', sqlRequest, 'Rule64_STUD_CREG_Student_Number_Validation.sql')
+            .then(() => setStatus(downloadStatus, 'SQL download started.', 'success'))
+            .catch(error => setStatus(downloadStatus, error.message || 'SQL download failed.', 'error')));
+})();
+</script>

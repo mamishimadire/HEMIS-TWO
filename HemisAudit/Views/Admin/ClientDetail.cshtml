@@ -1,4 +1,4 @@
-@using HemisAudit.Helpers
+ï»¿@using HemisAudit.Helpers
 @model HemisAudit.ViewModels.ClientDetailViewModel
 @{
     ViewData["Title"] = Model.EngagementName;
@@ -225,7 +225,7 @@
                 <span class="collapsible-trigger__title">Modules</span>
                 <span class="collapsible-trigger__subtitle">Open the validation workspaces or review module availability for this engagement.</span>
             </div>
-            <span class="collapsible-trigger__meta">Rules 1–10, 11–32, 34–36, 37, 38, 39, 40, 41, 44, 45, 46, 47, 48, 51, 52, 53, 54, 55, 57, 58, 59, 60, 61, 62 and 63</span>
+            <span class="collapsible-trigger__meta">Rules 1-10, 11-32, 34-36, 37, 38, 39, 40, 41, 44, 45, 46, 47, 48, 51, 52, 53, 54, 55, 57, 58, 59, 60, 61, 62, 63, 64 and 65</span>
             <span class="collapsible-trigger__icon" aria-hidden="true"></span>
         </summary>
         <div class="collapsible-panel">
@@ -248,7 +248,7 @@
                         <article class="module-card">
                             <div class="module-card__eyebrow">Rule 11</div>
                             <h4 class="module-card__title">QUAL vs CESM vs PQM Validation</h4>
-                            <p class="module-card__text">Joins <code>dbo_QUAL</code> and <code>dbo_CESM</code> on <code>_001</code>, then validates each qualification name (<code>QUAL._003</code> vs PQM <code>Authorised_Qualification_Name</code>) and HEQF type (<code>QUAL._005</code> vs PQM <code>HEQF_Qual_Type</code>) on the same PQM row. PASS when both match. EL §5.1.2.</p>
+                            <p class="module-card__text">Joins <code>dbo_QUAL</code> and <code>dbo_CESM</code> on <code>_001</code>, then validates each qualification name (<code>QUAL._003</code> vs PQM <code>Authorised_Qualification_Name</code>) and HEQF type (<code>QUAL._005</code> vs PQM <code>HEQF_Qual_Type</code>) on the same PQM row. PASS when both match. EL ï¿½5.1.2.</p>
                             <div class="module-card__actions">
                                 <a href="/Rule11?clientId=@Model.Id" class="btn btn-success">Open Rule 11</a>
                             </div>
@@ -594,7 +594,7 @@
                         <article class="module-card">
                             <div class="module-card__eyebrow">Rule 55</div>
                             <h4 class="module-card__title">Graduate W-Code Validation</h4>
-                            <p class="module-card__text">Identifies all students where Element 025='W' (certificate withheld) in <code>dbo_STUD</code> and validates their qualification is approved in <code>dbo_QUAL</code> (<code>_004='A'</code>). Per DHET §1.5, W-coded students must be treated identically to 'F' graduates for Teaching and Research Output calculations. PASS when the qualification is found and approved; FAIL when missing or not approved for state funding.</p>
+                            <p class="module-card__text">Identifies all students where Element 025='W' (certificate withheld) in <code>dbo_STUD</code> and validates their qualification is approved in <code>dbo_QUAL</code> (<code>_004='A'</code>). Per DHET ï¿½1.5, W-coded students must be treated identically to 'F' graduates for Teaching and Research Output calculations. PASS when the qualification is found and approved; FAIL when missing or not approved for state funding.</p>
                             <div class="module-card__actions">
                                 <a href="/Rule55?clientId=@Model.Id" class="btn btn-success">Open Rule 55</a>
                             </div>
@@ -659,6 +659,22 @@
                             <p class="module-card__text">Tests <code>STUD._001</code> and <code>CREG._001</code> against <code>QUAL._001</code>, returns the source table for each row, uses <code>_007</code> as the student key, and surfaces SQLVALPAC exception <code>00103 / E001</code> when the qualification code is missing from the Qualification Table.</p>
                             <div class="module-card__actions">
                                 <a href="/Rule63?clientId=@Model.Id" class="btn btn-success">Open Rule 63</a>
+                            </div>
+                        </article>
+                        <article class="module-card">
+                            <div class="module-card__eyebrow">Rule 64</div>
+                            <h4 class="module-card__title">STUD to CREG Student Number Validation</h4>
+                            <p class="module-card__text">Checks whether every <code>STUD._007</code> student number exists in <code>CREG._007</code>. PASS when the student number is found in CREG; FAIL when it is missing, with a note that the student should not appear in production.</p>
+                            <div class="module-card__actions">
+                                <a href="/Rule64?clientId=@Model.Id" class="btn btn-success">Open Rule 64</a>
+                            </div>
+                        </article>
+                        <article class="module-card">
+                            <div class="module-card__eyebrow">Rule 65</div>
+                            <h4 class="module-card__title">Cancellation Census Date Validation</h4>
+                            <p class="module-card__text">Checks the cancellation list for rows where <code>CANCEL</code> equals the row <code>CENSUS</code> date, and where any <code>CANCEL</code> date also matches <code>CURRENT_CENSUS</code> in <code>CENSUS_LIST_CLIENT</code>.</p>
+                            <div class="module-card__actions">
+                                <a href="/Rule65?clientId=@Model.Id" class="btn btn-success">Open Rule 65</a>
                             </div>
                         </article>
                     </div>
@@ -1104,7 +1120,7 @@ else
     <div class="empty-card">
         @if (canOpenModule)
         {
-            <p>No validation runs yet. <a href="@RuleRouteHelper.GetWorkspaceUrl(1, Model.Id)">Open Rule 1</a>, <a href="@RuleRouteHelper.GetWorkspaceUrl(2, Model.Id)">Open Rule 2</a>, <a href="@RuleRouteHelper.GetWorkspaceUrl(3, Model.Id)">Open Rule 3</a>, <a href="@RuleRouteHelper.GetWorkspaceUrl(4, Model.Id)">Open Rule 4</a>, <a href="@RuleRouteHelper.GetWorkspaceUrl(5, Model.Id)">Open Rule 5</a>, <a href="@RuleRouteHelper.GetWorkspaceUrl(6, Model.Id)">Open Rule 6</a>, <a href="@RuleRouteHelper.GetWorkspaceUrl(7, Model.Id)">Open Rule 7</a>, <a href="@RuleRouteHelper.GetWorkspaceUrl(8, Model.Id)">Open Rule 8</a>, <a href="@RuleRouteHelper.GetWorkspaceUrl(9, Model.Id)">Open Rule 9</a>, <a href="@RuleRouteHelper.GetWorkspaceUrl(10, Model.Id)">Open Rule 10</a>, <a href="/Rule11?clientId=@Model.Id">Open Rule 11</a>, <a href="/Rule12?clientId=@Model.Id">Open Rule 12</a>, <a href="/Rule13?clientId=@Model.Id">Open Rule 13</a>, <a href="/Rule14?clientId=@Model.Id">Open Rule 14</a>, <a href="/Rule15?clientId=@Model.Id">Open Rule 15</a>, <a href="/Rule16?clientId=@Model.Id">Open Rule 16</a>, <a href="/Rule17?clientId=@Model.Id">Open Rule 17</a>, <a href="/Rule18?clientId=@Model.Id">Open Rule 18</a>, <a href="/Rule21?clientId=@Model.Id">Open Rule 21</a>, <a href="/Rule22?clientId=@Model.Id">Open Rule 22</a>, <a href="/Rule23?clientId=@Model.Id">Open Rule 23</a>, <a href="/Rule24?clientId=@Model.Id">Open Rule 24</a>, <a href="/Rule25?clientId=@Model.Id">Open Rule 25</a>, <a href="/Rule26?clientId=@Model.Id">Open Rule 26</a>, <a href="/Rule27?clientId=@Model.Id">Open Rule 27</a>, <a href="/Rule28?clientId=@Model.Id">Open Rule 28</a>, <a href="/Rule29?clientId=@Model.Id">Open Rule 29</a>, <a href="/Rule30?clientId=@Model.Id">Open Rule 30</a>, <a href="/Rule31?clientId=@Model.Id">Open Rule 31</a>, <a href="/Rule32?clientId=@Model.Id">Open Rule 32</a>, <a href="/Rule34?clientId=@Model.Id">Open Rule 34</a>, <a href="/Rule35?clientId=@Model.Id">Open Rule 35</a>, <a href="/Rule36?clientId=@Model.Id">Open Rule 36</a>, <a href="/Rule60?clientId=@Model.Id">Open Rule 60</a>, <a href="/Rule61?clientId=@Model.Id">Open Rule 61</a>, <a href="/Rule62?clientId=@Model.Id">Open Rule 62</a>, or <a href="/Rule63?clientId=@Model.Id">Open Rule 63</a></p>
+            <p>No validation runs yet. <a href="@RuleRouteHelper.GetWorkspaceUrl(1, Model.Id)">Open Rule 1</a>, <a href="@RuleRouteHelper.GetWorkspaceUrl(2, Model.Id)">Open Rule 2</a>, <a href="@RuleRouteHelper.GetWorkspaceUrl(3, Model.Id)">Open Rule 3</a>, <a href="@RuleRouteHelper.GetWorkspaceUrl(4, Model.Id)">Open Rule 4</a>, <a href="@RuleRouteHelper.GetWorkspaceUrl(5, Model.Id)">Open Rule 5</a>, <a href="@RuleRouteHelper.GetWorkspaceUrl(6, Model.Id)">Open Rule 6</a>, <a href="@RuleRouteHelper.GetWorkspaceUrl(7, Model.Id)">Open Rule 7</a>, <a href="@RuleRouteHelper.GetWorkspaceUrl(8, Model.Id)">Open Rule 8</a>, <a href="@RuleRouteHelper.GetWorkspaceUrl(9, Model.Id)">Open Rule 9</a>, <a href="@RuleRouteHelper.GetWorkspaceUrl(10, Model.Id)">Open Rule 10</a>, <a href="/Rule11?clientId=@Model.Id">Open Rule 11</a>, <a href="/Rule12?clientId=@Model.Id">Open Rule 12</a>, <a href="/Rule13?clientId=@Model.Id">Open Rule 13</a>, <a href="/Rule14?clientId=@Model.Id">Open Rule 14</a>, <a href="/Rule15?clientId=@Model.Id">Open Rule 15</a>, <a href="/Rule16?clientId=@Model.Id">Open Rule 16</a>, <a href="/Rule17?clientId=@Model.Id">Open Rule 17</a>, <a href="/Rule18?clientId=@Model.Id">Open Rule 18</a>, <a href="/Rule21?clientId=@Model.Id">Open Rule 21</a>, <a href="/Rule22?clientId=@Model.Id">Open Rule 22</a>, <a href="/Rule23?clientId=@Model.Id">Open Rule 23</a>, <a href="/Rule24?clientId=@Model.Id">Open Rule 24</a>, <a href="/Rule25?clientId=@Model.Id">Open Rule 25</a>, <a href="/Rule26?clientId=@Model.Id">Open Rule 26</a>, <a href="/Rule27?clientId=@Model.Id">Open Rule 27</a>, <a href="/Rule28?clientId=@Model.Id">Open Rule 28</a>, <a href="/Rule29?clientId=@Model.Id">Open Rule 29</a>, <a href="/Rule30?clientId=@Model.Id">Open Rule 30</a>, <a href="/Rule31?clientId=@Model.Id">Open Rule 31</a>, <a href="/Rule32?clientId=@Model.Id">Open Rule 32</a>, <a href="/Rule34?clientId=@Model.Id">Open Rule 34</a>, <a href="/Rule35?clientId=@Model.Id">Open Rule 35</a>, <a href="/Rule36?clientId=@Model.Id">Open Rule 36</a>, <a href="/Rule60?clientId=@Model.Id">Open Rule 60</a>, <a href="/Rule61?clientId=@Model.Id">Open Rule 61</a>, <a href="/Rule62?clientId=@Model.Id">Open Rule 62</a>, <a href="/Rule63?clientId=@Model.Id">Open Rule 63</a>, or <a href="/Rule64?clientId=@Model.Id">Open Rule 64</a></p>
         }
         else if (Model.IsArchived)
         {

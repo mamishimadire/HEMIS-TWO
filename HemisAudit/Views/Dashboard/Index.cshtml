@@ -741,6 +741,24 @@
                     <a href="/Rule61" class="btn btn-success">Open Rule 61</a>
                 </div>
             </article>
+
+            <article class="module-card">
+                <div class="module-card__eyebrow">Rule 64</div>
+                <h4 class="module-card__title">STUD to CREG Student Number Validation</h4>
+                <p class="module-card__text">Checks whether every <code>STUD._007</code> student number exists in <code>CREG._007</code>. PASS when the student number is found in CREG; FAIL when it is missing, with a note that the student should not appear in production.</p>
+                <div class="module-card__actions">
+                    <a href="/Rule64" class="btn btn-success">Open Rule 64</a>
+                </div>
+            </article>
+
+            <article class="module-card">
+                <div class="module-card__eyebrow">Rule 65</div>
+                <h4 class="module-card__title">Cancellation Census Date Validation</h4>
+                <p class="module-card__text">Checks the cancellation list for rows where <code>CANCEL</code> equals the row <code>CENSUS</code> date, and where any <code>CANCEL</code> date also matches <code>CURRENT_CENSUS</code> in <code>CENSUS_LIST_CLIENT</code>.</p>
+                <div class="module-card__actions">
+                    <a href="/Rule65" class="btn btn-success">Open Rule 65</a>
+                </div>
+            </article>
         </div>
 
         <div class="empty-card" style="margin-top:16px">

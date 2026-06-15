@@ -501,10 +501,11 @@ window.toggleAccordion = function (section) {
             { key: 'FINAL_RESULT_MESSAGE', label: 'Results' }
         ],
         9: [
-            { key: 'LEFT_STUDENT_COLUMN_VALUE', label: 'CREG Student Number' },
-            { key: 'LEFT_COLUMN_VALUE', label: 'CREG Course Value' },
-            { key: 'RIGHT_STUDENT_COLUMN_VALUE', label: 'STUD Student Number' },
-            { key: 'RIGHT_COLUMN_VALUE', label: 'STUD Course Value' },
+            { key: 'RowNo', label: 'Row No' },
+            { key: 'StudentNo', label: 'CREG Student Number' },
+            { key: 'InstCode', label: 'Institution Code' },
+            { key: 'ColYear', label: 'Collection Year' },
+            { key: 'Exception_Type', label: 'Reason' },
             { key: 'FINAL_RESULT_MESSAGE', label: 'Results' }
         ],
         10: [
@@ -735,7 +736,7 @@ window.toggleAccordion = function (section) {
         const preferredKeys = preferredProfile.filter(item => allKeys.includes(item.key));
         const visibleKeys = preferredKeys.length
             ? preferredKeys.map(item => item.key)
-            : (preferredProfile.length ? preferredProfile.map(item => item.key) : allKeys);
+            : (allKeys.length ? allKeys : preferredProfile.map(item => item.key));
         const keyLabels = Object.fromEntries(preferredProfile.map(item => [item.key, item.label]));
         return { visibleKeys, keyLabels };
     }
@@ -1013,8 +1014,8 @@ window.toggleAccordion = function (section) {
                 };
             case 9:
                 return {
-                    logic: `Check whether student number ${cregTable}.${cregColumn} exists in ${studTable}.${studColumn}, then compare course value ${cregTable}.${rule9CregCourseColumn || '...'} with ${studTable}.${rule9StudCourseColumn || '...'} for that same student number.`,
-                    criteria: `${cregTable}.${cregColumn} = ${studTable}.${studColumn} AND ${cregTable}.${rule9CregCourseColumn || '...'} = ${studTable}.${rule9StudCourseColumn || '...'}`
+                    logic: `Check whether student number ${cregTable}.${cregColumn} is blank or does not exist in ${studTable}.${studColumn}. Flag each CREG row that points to a ghost student.`,
+                    criteria: `ISBLANK(${cregTable}.${cregColumn}) OR ${cregTable}.${cregColumn} <> ${studTable}.${studColumn}`
                 };
             default:
                 return {
