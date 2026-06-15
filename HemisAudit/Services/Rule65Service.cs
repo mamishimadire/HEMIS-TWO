@@ -382,6 +382,7 @@ SELECT
     CASE
         WHEN P.CancelDateParsed IS NULL THEN 'FAIL'
         WHEN P.CensusDateParsed IS NOT NULL AND P.CancelDateParsed = P.CensusDateParsed THEN 'FAIL'
+        WHEN CC.CurrentCensusDate IS NOT NULL THEN 'FAIL'
         ELSE 'PASS'
     END AS ValidationResult,
     CASE
@@ -392,7 +393,7 @@ SELECT
         WHEN P.CensusDateParsed IS NOT NULL AND P.CancelDateParsed = P.CensusDateParsed
             THEN 'FAIL: CANCEL date ''' + CONVERT(varchar(10), P.CancelDateParsed, 23) + ''' equals the row CENSUS date ''' + CONVERT(varchar(10), P.CensusDateParsed, 23) + '''.'
         WHEN CC.CurrentCensusDate IS NOT NULL
-            THEN 'PASS: CANCEL date ''' + CONVERT(varchar(10), P.CancelDateParsed, 23) + ''' is a recognised CURRENT_CENSUS date but does not equal the row CENSUS date - cancellation is valid.'
+            THEN 'FAIL: CANCEL date ''' + CONVERT(varchar(10), P.CancelDateParsed, 23) + ''' matches CURRENT_CENSUS date ''' + CONVERT(varchar(10), CC.CurrentCensusDate, 23) + ''' from CENSUS_LIST_CLIENT.'
         ELSE 'PASS: CANCEL date ''' + CONVERT(varchar(10), P.CancelDateParsed, 23) + ''' does not equal the row CENSUS date and does not appear in CURRENT_CENSUS.'
     END AS ValidationExplanation
 FROM #R65Population P
@@ -402,6 +403,7 @@ ORDER BY
     CASE
         WHEN P.CancelDateParsed IS NULL THEN 0
         WHEN P.CensusDateParsed IS NOT NULL AND P.CancelDateParsed = P.CensusDateParsed THEN 0
+        WHEN CC.CurrentCensusDate IS NOT NULL THEN 0
         ELSE 1
     END,
     P.StudentNo,

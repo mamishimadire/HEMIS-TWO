@@ -490,7 +490,8 @@ namespace HemisAudit.Controllers
             if (passRows.Count > 0)
                 WriteWorksheet(workbook, "Clear Rows", passRows);
 
-            var groupedRows = failRows
+            var allRows = failRows.Concat(passRows).ToList();
+            var groupedRows = allRows
                 .GroupBy(GetCategoryKey, StringComparer.OrdinalIgnoreCase)
                 .ToDictionary(group => group.Key, group => group.ToList(), StringComparer.OrdinalIgnoreCase);
 
@@ -499,7 +500,8 @@ namespace HemisAudit.Controllers
                 "CANCEL_EQUALS_CENSUS_AND_CURRENT_CENSUS",
                 "CANCEL_EQUALS_CENSUS",
                 "CURRENT_CENSUS_MATCH",
-                "INVALID_CANCEL_DATE"
+                "INVALID_CANCEL_DATE",
+                "PASS_NOT_ON_CENSUS"
             };
 
             foreach (var category in categorySheetOrder)
@@ -571,6 +573,7 @@ namespace HemisAudit.Controllers
                 "CANCEL_EQUALS_CENSUS" => "Cancel Equals Census",
                 "CURRENT_CENSUS_MATCH" => "Matches Current Census",
                 "INVALID_CANCEL_DATE" => "Invalid Cancel Date",
+                "PASS_NOT_ON_CENSUS" => "Pass Not On Census",
                 _ => "Rule65 Category"
             };
 

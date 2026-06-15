@@ -516,7 +516,7 @@ window.toggleAccordion = function (section) {
                 <div class="stat-card stat-card--pass"><div class="stat-card__label">Clear Rows</div><div class="stat-card__value">${fmt(summary.passCount ?? summary.PassCount)}</div></div>
                 <div class="stat-card stat-card--fail"><div class="stat-card__label">Flagged Rows</div><div class="stat-card__value">${fmt(summary.failCount ?? summary.FailCount)}</div></div>
                 <div class="stat-card stat-card--fail"><div class="stat-card__label">Cancel = Census</div><div class="stat-card__value">${fmt(cancelEqualsCensus)}</div></div>
-                <div class="stat-card stat-card--pass"><div class="stat-card__label">Cancel on Current Census</div><div class="stat-card__value">${fmt(currentCensusMatch)}</div></div>
+                <div class="stat-card stat-card--fail"><div class="stat-card__label">Cancel on Current Census</div><div class="stat-card__value">${fmt(currentCensusMatch)}</div></div>
                 <div class="stat-card stat-card--fail"><div class="stat-card__label">Matched Both Checks</div><div class="stat-card__value">${fmt(bothMatches)}</div></div>
                 <div class="stat-card stat-card--fail"><div class="stat-card__label">Invalid Cancel Date</div><div class="stat-card__value">${fmt(invalidCancel)}</div></div>
                 <div class="stat-card"><div class="stat-card__label">Exception Rate</div><div class="stat-card__value">${escapeHtml(String(summary.exceptionRate ?? summary.ExceptionRate ?? 0))}%</div></div>
