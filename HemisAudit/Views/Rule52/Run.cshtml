@@ -48,6 +48,7 @@
         <div><div style="color:var(--text-muted);font-size:12px;text-transform:uppercase;font-weight:700">Source Table (dbo_QUAL)</div><div>@Model.Summary.ValpacTable</div></div>
         <div><div style="color:var(--text-muted);font-size:12px;text-transform:uppercase;font-weight:700">Target Table (MT-audit-prod-QUAL)</div><div>@Model.Summary.ProdTable</div></div>
         <div><div style="color:var(--text-muted);font-size:12px;text-transform:uppercase;font-weight:700">Column Mapping</div><div style="font-size:12px">@Model.Summary.TableLinkageText</div></div>
+        <div><div style="color:var(--text-muted);font-size:12px;text-transform:uppercase;font-weight:700">Approval Status Filter</div><div style="font-size:12px"><code>@Model.Summary.ApprovalStatusCol</code> IN (@(string.IsNullOrWhiteSpace(Model.Summary.ApprovalStatusValues) ? "ALL — no filter applied" : Model.Summary.ApprovalStatusValues))</div></div>
         <div><div style="color:var(--text-muted);font-size:12px;text-transform:uppercase;font-weight:700">Timestamp</div><div>@Model.Summary.Timestamp</div></div>
         <div><div style="color:var(--text-muted);font-size:12px;text-transform:uppercase;font-weight:700">Status</div><div><span class="badge @(Model.Summary.Status == "PASS" ? "badge--pass" : "badge--fail")">@Model.Summary.Status</span></div></div>
     </div>
@@ -110,6 +111,7 @@
                 <tr>
                     <th>#</th>
                     <th>@Model.Summary.ValpacSubjCol (dbo_QUAL)</th>
+                    <th>Approval Status (@Model.Summary.ApprovalStatusCol)</th>
                     <th>@Model.Summary.ProdSubjCol (MT-audit-prod-QUAL)</th>
                     <th>Result</th>
                 </tr>
@@ -122,6 +124,7 @@
                     <tr style="background:@(row.ValidationResult == "FAIL" ? "#FFF3F3" : "#F3FFF3")">
                         <td>@row.ValidationNumber</td>
                         <td>@DV("VALPAC_SUBJ")</td>
+                        <td>@DV("VALPAC_APPROVAL_STATUS")</td>
                         <td>@DV("PROD_SUBJ")</td>
                         <td><span class="badge @(row.ValidationResult == "FAIL" ? "badge--fail" : "badge--pass")">@row.ValidationResult</span></td>
                     </tr>

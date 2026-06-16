@@ -120,7 +120,8 @@ namespace HemisAudit.Controllers
             {
                 ClientId = review.ClientId, Server = review.SourceServer, Database = review.Summary.Database,
                 ValpacTable = review.Summary.ValpacTable, ProdTable = review.Summary.ProdTable,
-                ValpacSubjCol = review.Summary.ValpacSubjCol, ProdSubjCol = review.Summary.ProdSubjCol
+                ValpacSubjCol = review.Summary.ValpacSubjCol, ProdSubjCol = review.Summary.ProdSubjCol,
+                ApprovalStatusCol = review.Summary.ApprovalStatusCol, ApprovalStatusValues = review.Summary.ApprovalStatusValues
             });
 
             return View(review);
@@ -351,7 +352,8 @@ namespace HemisAudit.Controllers
             {
                 ClientId = review.ClientId, Server = review.SourceServer, Database = review.Summary.Database,
                 ValpacTable = review.Summary.ValpacTable, ProdTable = review.Summary.ProdTable,
-                ValpacSubjCol = review.Summary.ValpacSubjCol, ProdSubjCol = review.Summary.ProdSubjCol
+                ValpacSubjCol = review.Summary.ValpacSubjCol, ProdSubjCol = review.Summary.ProdSubjCol,
+                ApprovalStatusCol = review.Summary.ApprovalStatusCol, ApprovalStatusValues = review.Summary.ApprovalStatusValues
             });
             return File(_export.ExportSql(sql), "application/sql", $"Rule52_dbo_QUAL_{runId}.sql");
         }

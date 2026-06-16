@@ -89,13 +89,15 @@ namespace HemisAudit.Services
 
                 var valpacTable = Sanitise(request.ValpacTable);
                 var prodTable   = Sanitise(request.ProdTable);
+                var approvalCol = Sanitise(string.IsNullOrWhiteSpace(request.ApprovalStatusCol) ? "_004" : request.ApprovalStatusCol);
+                var approvalValues = ParseApprovalValues(request.ApprovalStatusValues);
 
                 var valpacCount = await CountAsync(conn, $"SELECT COUNT(*) FROM [{valpacTable}];");
                 var prodCount   = await CountAsync(conn, $"SELECT COUNT(*) FROM [{prodTable}];");
 
                 await using var cmd = conn.CreateConfiguredCommand();
                 cmd.CommandText = BuildPopulationCountSql(valpacTable, prodTable,
-                    Sanitise(request.ValpacSubjCol), Sanitise(request.ProdSubjCol));
+                    Sanitise(request.ValpacSubjCol), Sanitise(request.ProdSubjCol), approvalCol, approvalValues);
                 await using var reader = await cmd.ExecuteReaderAsync();
 
                 var result = new Rule52VerifyResult { Success = true, ValpacRecordCount = valpacCount, ProdRecordCount = prodCount };
@@ -233,6 +235,8 @@ ORDER BY vr.RunTimestamp DESC, vr.RunID DESC;";
                 ProdTable            = deserializedSummary?.ProdTable ?? prodTable,
                 ValpacSubjCol        = deserializedSummary?.ValpacSubjCol ?? "_001",
                 ProdSubjCol          = deserializedSummary?.ProdSubjCol ?? "IAIQUAL",
+                ApprovalStatusCol    = deserializedSummary?.ApprovalStatusCol ?? "_004",
+                ApprovalStatusValues = deserializedSummary?.ApprovalStatusValues ?? "A",
                 CurrentStatus        = currentStatus,
                 LastEditedByUserName = lastEditedByUserName,
                 LastEditedAt         = lastEditedAt,
@@ -447,16 +451,20 @@ ELSE
             var prodTable   = Sanitise(request.ProdTable);
             var vSubj = Sanitise(request.ValpacSubjCol);
             var pSubj = Sanitise(request.ProdSubjCol);
+            var approvalCol = Sanitise(string.IsNullOrWhiteSpace(request.ApprovalStatusCol) ? "_004" : request.ApprovalStatusCol);
+            var approvalValues = ParseApprovalValues(request.ApprovalStatusValues);
+            var approvalValuesText = approvalValues.Count > 0 ? string.Join(", ", approvalValues.Select(v => $"'{v}'")) : "ALL — no filter applied";
 
             var sql = $@"-- HEMIS RULE 52: dbo_QUAL QUALIFICATION CODE IN MT-audit-prod-QUAL
 -- Check: All values in [{valpacTable}].[{vSubj}] must exist as [{pSubj}] in [{prodTable}]
 -- Mapped column: [{valpacTable}].[{vSubj}] <> [{prodTable}].[{pSubj}]
+-- Filter: [{valpacTable}].[{approvalCol}] IN ({approvalValuesText}) -- only approved qualifications are tested
 -- PASS when match found; FAIL when missing
 
-{BuildSourceCtes(valpacTable, prodTable, vSubj, pSubj)}
+{BuildSourceCtes(valpacTable, prodTable, vSubj, pSubj, approvalCol, approvalValues)}
 SELECT
     'Control_1' AS Control_Type,
-    'CONTROL 1: [{valpacTable}].[{vSubj}] values exist in [{prodTable}].[{pSubj}]' AS Control_Label,
+    'CONTROL 1: [{valpacTable}].[{vSubj}] values (where [{approvalCol}] IN ({approvalValuesText})) exist in [{prodTable}].[{pSubj}]' AS Control_Label,
     VALPAC_SUBJ, PROD_SUBJ,
     CASE WHEN PROD_SUBJ IS NOT NULL THEN 'PASS' ELSE 'FAIL' END AS Validation_Result
 FROM ValidationResults
@@ -482,12 +490,15 @@ SELECT
             var prodTable   = Sanitise(request.ProdTable);
             var vSubj = Sanitise(request.ValpacSubjCol);
             var pSubj = Sanitise(request.ProdSubjCol);
+            var approvalCol = Sanitise(string.IsNullOrWhiteSpace(request.ApprovalStatusCol) ? "_004" : request.ApprovalStatusCol);
+            var approvalValues = ParseApprovalValues(request.ApprovalStatusValues);
+            var approvalValuesText = approvalValues.Count > 0 ? string.Join(", ", approvalValues) : "ALL — no filter applied";
 
             var valpacCount = await CountAsync(conn, $"SELECT COUNT(*) FROM [{valpacTable}];");
             var prodCount   = await CountAsync(conn, $"SELECT COUNT(*) FROM [{prodTable}];");
 
             await using var countCmd = conn.CreateConfiguredCommand();
-            countCmd.CommandText = BuildPopulationCountSql(valpacTable, prodTable, vSubj, pSubj);
+            countCmd.CommandText = BuildPopulationCountSql(valpacTable, prodTable, vSubj, pSubj, approvalCol, approvalValues);
             await using var countReader = await countCmd.ExecuteReaderAsync();
 
             int totalTested = 0, matched = 0, missing = 0;
@@ -499,10 +510,10 @@ SELECT
             }
             await countReader.CloseAsync();
 
-            var reviewRows = await LoadRowsAsync(conn, valpacTable, prodTable, includeAllReviewRows ? null : BrowserPreviewRowLimit, vSubj, pSubj);
+            var reviewRows = await LoadRowsAsync(conn, valpacTable, prodTable, includeAllReviewRows ? null : BrowserPreviewRowLimit, vSubj, pSubj, approvalCol, approvalValues);
             reviewRows = NormalizeRows(reviewRows);
 
-            var controlSummaries = BuildControlSummaries(totalTested, matched, valpacTable, prodTable, vSubj, pSubj);
+            var controlSummaries = BuildControlSummaries(totalTested, matched, valpacTable, prodTable, vSubj, pSubj, approvalCol, approvalValuesText);
             var totalValidated   = controlSummaries.Sum(x => x.TotalCount);
             var passCount        = controlSummaries.Sum(x => x.PassCount);
             var failCount        = controlSummaries.Sum(x => x.FailCount);
@@ -528,9 +539,11 @@ SELECT
                 ProdTable        = request.ProdTable,
                 ValpacSubjCol    = vSubj,
                 ProdSubjCol      = pSubj,
-                TableLinkageText = $"{request.ValpacTable}.{vSubj} <> {request.ProdTable}.{pSubj}",
-                RuleModeText     = $"100% population testing: all [{vSubj}] values in {request.ValpacTable} must exist as [{pSubj}] in {request.ProdTable}",
-                ProcedureSteps   = BuildProcedureSteps(request.ValpacTable, request.ProdTable, vSubj, pSubj),
+                ApprovalStatusCol    = approvalCol,
+                ApprovalStatusValues = approvalValues.Count > 0 ? string.Join(",", approvalValues) : "",
+                TableLinkageText = $"{request.ValpacTable}.{vSubj} <> {request.ProdTable}.{pSubj} (filtered to [{approvalCol}] IN {approvalValuesText})",
+                RuleModeText     = $"Population testing of approved qualifications: all [{vSubj}] values in {request.ValpacTable} where [{approvalCol}] IN ({approvalValuesText}) must exist as [{pSubj}] in {request.ProdTable}",
+                ProcedureSteps   = BuildProcedureSteps(request.ValpacTable, request.ProdTable, vSubj, pSubj, approvalCol, approvalValuesText),
                 ClientId         = request.ClientId,
                 ControlSummaries = controlSummaries,
                 ReviewRows       = reviewRows,
@@ -542,13 +555,14 @@ SELECT
 
         // ─── SQL Builders ────────────────────────────────────────────────────
 
-        private static string BuildSourceCtes(string valpacTable, string prodTable, string vSubj, string pSubj) => $@"
+        private static string BuildSourceCtes(string valpacTable, string prodTable, string vSubj, string pSubj, string approvalCol, IReadOnlyList<string> approvalValues) => $@"
 WITH ValpacData AS
 (
     SELECT DISTINCT UPPER(LTRIM(RTRIM(CONVERT(nvarchar(255), V.[{vSubj}])))) AS VALPAC_SUBJ
     FROM [{valpacTable}] V
     WHERE V.[{vSubj}] IS NOT NULL
       AND LTRIM(RTRIM(CONVERT(nvarchar(255), V.[{vSubj}]))) <> ''
+      {BuildApprovalFilterSql("V", approvalCol, approvalValues)}
 ),
 ValidationResults AS
 (
@@ -558,26 +572,32 @@ ValidationResults AS
             SELECT TOP 1 CONVERT(nvarchar(255), P.[{pSubj}])
             FROM [{prodTable}] P
             WHERE UPPER(LTRIM(RTRIM(CONVERT(nvarchar(255), P.[{pSubj}])))) = VD.VALPAC_SUBJ
-        ) AS PROD_SUBJ
+        ) AS PROD_SUBJ,
+        (
+            SELECT TOP 1 CONVERT(nvarchar(255), V2.[{approvalCol}])
+            FROM [{valpacTable}] V2
+            WHERE UPPER(LTRIM(RTRIM(CONVERT(nvarchar(255), V2.[{vSubj}])))) = VD.VALPAC_SUBJ
+              {BuildApprovalFilterSql("V2", approvalCol, approvalValues)}
+        ) AS VALPAC_APPROVAL_STATUS
     FROM ValpacData VD
 )";
 
-        private static string BuildPopulationCountSql(string valpacTable, string prodTable, string vSubj, string pSubj) => $@"
-{BuildSourceCtes(valpacTable, prodTable, vSubj, pSubj)}
+        private static string BuildPopulationCountSql(string valpacTable, string prodTable, string vSubj, string pSubj, string approvalCol, IReadOnlyList<string> approvalValues) => $@"
+{BuildSourceCtes(valpacTable, prodTable, vSubj, pSubj, approvalCol, approvalValues)}
 SELECT
     COUNT(1)                                                             AS TotalTested,
     SUM(CASE WHEN PROD_SUBJ IS NOT NULL THEN 1 ELSE 0 END)              AS MatchedCount,
     SUM(CASE WHEN PROD_SUBJ IS NULL     THEN 1 ELSE 0 END)              AS MissingCount
 FROM ValidationResults;";
 
-        private static string BuildAllRowsSql(string valpacTable, string prodTable, int? maxRows, string vSubj, string pSubj)
+        private static string BuildAllRowsSql(string valpacTable, string prodTable, int? maxRows, string vSubj, string pSubj, string approvalCol, IReadOnlyList<string> approvalValues)
         {
             var top = maxRows.HasValue && maxRows.Value > 0 ? $"TOP {maxRows.Value}" : string.Empty;
             var orderBy = maxRows.HasValue && maxRows.Value > 0
                 ? "CASE WHEN PROD_SUBJ IS NULL THEN 0 ELSE 1 END, VALPAC_SUBJ"
                 : "VALPAC_SUBJ";
             return $@"
-{BuildSourceCtes(valpacTable, prodTable, vSubj, pSubj)}
+{BuildSourceCtes(valpacTable, prodTable, vSubj, pSubj, approvalCol, approvalValues)}
 SELECT {top}
     1 AS Control_Sort, 'Control_1' AS Control_Type,
     'CONTROL 1: [{valpacTable}].[{vSubj}] values exist in [{prodTable}].[{pSubj}]' AS Control_Label,
@@ -586,15 +606,15 @@ SELECT {top}
         THEN 'Qualification code found in PRODUCTION.'
         ELSE 'Qualification code not found in PRODUCTION.'
     END AS Validation_Explanation,
-    VALPAC_SUBJ, PROD_SUBJ
+    VALPAC_SUBJ, PROD_SUBJ, VALPAC_APPROVAL_STATUS
 FROM ValidationResults
 ORDER BY {orderBy};";
         }
 
-        private async Task<List<Rule52ValidationRowRecord>> LoadRowsAsync(SqlConnection connection, string valpacTable, string prodTable, int? maxRows, string vSubj, string pSubj)
+        private async Task<List<Rule52ValidationRowRecord>> LoadRowsAsync(SqlConnection connection, string valpacTable, string prodTable, int? maxRows, string vSubj, string pSubj, string approvalCol, IReadOnlyList<string> approvalValues)
         {
             await using var command = connection.CreateConfiguredCommand();
-            command.CommandText = BuildAllRowsSql(valpacTable, prodTable, maxRows, vSubj, pSubj);
+            command.CommandText = BuildAllRowsSql(valpacTable, prodTable, maxRows, vSubj, pSubj, approvalCol, approvalValues);
             await using var reader = await command.ExecuteReaderAsync();
             var rows = new List<Rule52ValidationRowRecord>();
             while (await reader.ReadAsync())
@@ -630,7 +650,7 @@ ORDER BY {orderBy};";
             row.ValidationExplanation = ReadValue(v, "FINAL_RESULT_MESSAGE");
         }
 
-        private static List<Rule52ControlSummaryItemViewModel> BuildControlSummaries(int total, int matched, string valpacTable, string prodTable, string vSubj, string pSubj)
+        private static List<Rule52ControlSummaryItemViewModel> BuildControlSummaries(int total, int matched, string valpacTable, string prodTable, string vSubj, string pSubj, string approvalCol, string approvalValuesText)
         {
             var fail = Math.Max(total - matched, 0);
             return new List<Rule52ControlSummaryItemViewModel>
@@ -639,7 +659,7 @@ ORDER BY {orderBy};";
                 {
                     ControlType  = "Control_1",
                     ControlLabel = "Control 1",
-                    CriteriaText = $"All [{vSubj}] values in {valpacTable} exist as [{pSubj}] in {prodTable}",
+                    CriteriaText = $"All [{vSubj}] values in {valpacTable} where [{approvalCol}] IN ({approvalValuesText}) exist as [{pSubj}] in {prodTable}",
                     TotalCount   = total,
                     PassCount    = matched,
                     FailCount    = fail,
@@ -648,12 +668,13 @@ ORDER BY {orderBy};";
             };
         }
 
-        private static List<string> BuildProcedureSteps(string valpacTable, string prodTable, string vSubj, string pSubj) => new()
+        private static List<string> BuildProcedureSteps(string valpacTable, string prodTable, string vSubj, string pSubj, string approvalCol, string approvalValuesText) => new()
         {
-            $"Select all distinct [{vSubj}] qualification codes from {valpacTable} as the population to test.",
+            $"Filter {valpacTable} to rows where [{approvalCol}] IN ({approvalValuesText}) — only approved qualifications are tested.",
+            $"Select all distinct [{vSubj}] qualification codes from the filtered population as the population to test.",
             $"For each code, attempt to find a matching row in {prodTable} on column [{pSubj}].",
             "Mark PASS when a matching code exists; FAIL when no match is found.",
-            $"All [{vSubj}] values in {valpacTable} are expected to be present as [{pSubj}] in {prodTable}."
+            $"All [{vSubj}] values from the approved population in {valpacTable} are expected to be present as [{pSubj}] in {prodTable}."
         };
 
         // ─── Save / Persist ───────────────────────────────────────────────────
@@ -749,6 +770,7 @@ SELECT CAST(SCOPE_IDENTITY() AS int);";
             IsPreviewOnly = s.IsPreviewOnly, PreviewLimit = s.PreviewLimit, PassCount = s.PassCount, FailCount = s.FailCount,
             ExceptionRate = s.ExceptionRate, Status = s.Status, Timestamp = s.Timestamp, Database = s.Database,
             ValpacTable = s.ValpacTable, ProdTable = s.ProdTable, ValpacSubjCol = s.ValpacSubjCol, ProdSubjCol = s.ProdSubjCol,
+            ApprovalStatusCol = s.ApprovalStatusCol, ApprovalStatusValues = s.ApprovalStatusValues,
             TableLinkageText = s.TableLinkageText, RuleModeText = s.RuleModeText, ProcedureSteps = s.ProcedureSteps.ToList(),
             ClientId = s.ClientId, SavedRunId = s.SavedRunId,
             ControlSummaries = s.ControlSummaries.Select(i => new Rule52ControlSummaryItemViewModel
@@ -768,7 +790,8 @@ SELECT CAST(SCOPE_IDENTITY() AS int);";
         private static Rule52ValidationRequest CloneRequest(Rule52ValidationRequest r) => new()
         {
             ClientId = r.ClientId, RunId = r.RunId, Server = r.Server, Database = r.Database, Driver = r.Driver,
-            ValpacTable = r.ValpacTable, ProdTable = r.ProdTable, ValpacSubjCol = r.ValpacSubjCol, ProdSubjCol = r.ProdSubjCol
+            ValpacTable = r.ValpacTable, ProdTable = r.ProdTable, ValpacSubjCol = r.ValpacSubjCol, ProdSubjCol = r.ProdSubjCol,
+            ApprovalStatusCol = r.ApprovalStatusCol, ApprovalStatusValues = r.ApprovalStatusValues
         };
 
         private static bool RequestsMatch(Rule52ValidationRequest a, Rule52ValidationRequest b) =>
@@ -776,7 +799,9 @@ SELECT CAST(SCOPE_IDENTITY() AS int);";
             string.Equals(a.Server?.Trim(), b.Server?.Trim(), StringComparison.OrdinalIgnoreCase) &&
             string.Equals(a.Database?.Trim(), b.Database?.Trim(), StringComparison.OrdinalIgnoreCase) &&
             string.Equals(a.ValpacTable?.Trim(), b.ValpacTable?.Trim(), StringComparison.OrdinalIgnoreCase) &&
-            string.Equals(a.ProdTable?.Trim(), b.ProdTable?.Trim(), StringComparison.OrdinalIgnoreCase);
+            string.Equals(a.ProdTable?.Trim(), b.ProdTable?.Trim(), StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(a.ApprovalStatusCol?.Trim(), b.ApprovalStatusCol?.Trim(), StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(a.ApprovalStatusValues?.Trim(), b.ApprovalStatusValues?.Trim(), StringComparison.OrdinalIgnoreCase);
 
         private static List<Rule52ValidationRowRecord> NormalizeRows(IEnumerable<Rule52ValidationRowRecord> rows) =>
             rows.Select((r, i) => { r.ValidationNumber = i + 1; return r; }).ToList();
@@ -793,7 +818,8 @@ SELECT CAST(SCOPE_IDENTITY() AS int);";
                 {
                     ClientId = summary.ClientId, RunId = summary.SavedRunId, Server = server, Database = summary.Database,
                     Driver = "ODBC Driver 17 for SQL Server", ValpacTable = summary.ValpacTable, ProdTable = summary.ProdTable,
-                    ValpacSubjCol = summary.ValpacSubjCol, ProdSubjCol = summary.ProdSubjCol
+                    ValpacSubjCol = summary.ValpacSubjCol, ProdSubjCol = summary.ProdSubjCol,
+                    ApprovalStatusCol = summary.ApprovalStatusCol, ApprovalStatusValues = summary.ApprovalStatusValues
                 }, includeAllReviewRows: true);
                 expanded.Timestamp = string.IsNullOrWhiteSpace(summary.Timestamp) ? expanded.Timestamp : summary.Timestamp;
                 expanded.ClientId  = summary.ClientId;
@@ -819,6 +845,7 @@ SELECT CAST(SCOPE_IDENTITY() AS int);";
             if (string.IsNullOrWhiteSpace(request.ValpacTable)) throw new InvalidOperationException("dbo_QUAL table is required.");
             if (string.IsNullOrWhiteSpace(request.ProdTable)) throw new InvalidOperationException("MT-audit-prod-QUAL table is required.");
             ValidateObjectName(request.ValpacTable); ValidateObjectName(request.ProdTable);
+            if (!string.IsNullOrWhiteSpace(request.ApprovalStatusCol)) ValidateObjectName(request.ApprovalStatusCol);
         }
 
         private static void ValidateRequest(Rule52VerifyRequest request)
@@ -828,6 +855,28 @@ SELECT CAST(SCOPE_IDENTITY() AS int);";
             if (string.IsNullOrWhiteSpace(request.ValpacTable)) throw new InvalidOperationException("dbo_QUAL table is required.");
             if (string.IsNullOrWhiteSpace(request.ProdTable)) throw new InvalidOperationException("MT-audit-prod-QUAL table is required.");
             ValidateObjectName(request.ValpacTable); ValidateObjectName(request.ProdTable);
+            if (!string.IsNullOrWhiteSpace(request.ApprovalStatusCol)) ValidateObjectName(request.ApprovalStatusCol);
+        }
+
+        private static List<string> ParseApprovalValues(string? raw)
+        {
+            if (string.IsNullOrWhiteSpace(raw)) return new List<string>();
+            return raw.Split(',', StringSplitOptions.RemoveEmptyEntries)
+                .Select(SanitiseFilterValue)
+                .Where(v => v.Length > 0)
+                .Select(v => v.ToUpperInvariant())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
+        private static string SanitiseFilterValue(string value) =>
+            value.Replace("'", "").Replace(";", "").Replace("--", "").Replace("[", "").Replace("]", "").Trim();
+
+        private static string BuildApprovalFilterSql(string alias, string approvalCol, IReadOnlyList<string> approvalValues)
+        {
+            if (approvalValues.Count == 0) return "";
+            var list = string.Join(",", approvalValues.Select(v => $"'{v}'"));
+            return $"AND UPPER(LTRIM(RTRIM(CONVERT(nvarchar(255), {alias}.[{approvalCol}])))) IN ({list})";
         }
 
         private static void ValidateObjectName(string value)

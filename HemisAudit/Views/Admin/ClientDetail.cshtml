@@ -558,7 +558,7 @@
                         <article class="module-card">
                             <div class="module-card__eyebrow">Rule 51</div>
                             <h4 class="module-card__title">VALPAC Data in Production</h4>
-                            <p class="module-card__text">Checks that every record in STUD VALPAC exists in STUD PRODUCTION using 4 mapped columns: _007?IAGSTNO, _008?IADIDNO, _001?IAGQUAL, ColYear?IAGCYR. PASS when all 4 columns match; FAIL when the record is missing from Production.</p>
+                            <p class="module-card__text">Checks that every record in STUD VALPAC exists in STUD PRODUCTION using 4 mapped columns: _007?IAGSTNO, _008?IADIDNO, _001?IAGQUAL, ColYear?IAGCYR. PASS when all 4 columns match; FAIL when the record is missing from Production. <strong>Reminder — HEMIS element 032 (Course completion status) on CREG:</strong> C=completed, S=still in progress, W=withdrew after registration, F=failed/refused admission/absent. If a student is missing from Production but is in CREG with completion status matching the configured filter (default W — withdrew), this is not an exception.</p>
                             <div class="module-card__actions">
                                 <a href="/Rule51?clientId=@Model.Id" class="btn btn-success">Open Rule 51</a>
                             </div>

@@ -251,6 +251,10 @@ ORDER BY vr.RunTimestamp DESC, vr.RunID DESC;";
                 ProdColIdNo          = deserializedSummary?.ProdColIdNo ?? mappings.ElementAtOrDefault(1)?.ProdColumn ?? "IADIDNO",
                 ProdColQual          = deserializedSummary?.ProdColQual ?? mappings.ElementAtOrDefault(2)?.ProdColumn ?? "IAGQUAL",
                 ProdColYear          = deserializedSummary?.ProdColYear ?? mappings.ElementAtOrDefault(3)?.ProdColumn ?? "IAGCYR",
+                CregTable            = deserializedSummary?.CregTable ?? "",
+                CregIdCol            = deserializedSummary?.CregIdCol ?? "_007",
+                CregCompletionStatusCol    = deserializedSummary?.CregCompletionStatusCol ?? "_032",
+                CregCompletionStatusValues = deserializedSummary?.CregCompletionStatusValues ?? "W",
                 ColumnMappings       = CloneMappings(mappings),
                 CurrentStatus        = currentStatus,
                 LastEditedByUserName = lastEditedByUserName,
@@ -555,30 +559,33 @@ SELECT
             var zPlaceholders = ParseZPlaceholders(request.ValpacCol008ZPlaceholders);
             var cregTable     = !string.IsNullOrWhiteSpace(request.CregTable) ? Sanitise(request.CregTable) : null;
             var cregIdCol     = !string.IsNullOrWhiteSpace(request.CregIdCol) ? Sanitise(request.CregIdCol) : null;
+            var cregCompletionCol    = !string.IsNullOrWhiteSpace(request.CregCompletionStatusCol) ? Sanitise(request.CregCompletionStatusCol) : null;
+            var cregCompletionValues = ParseFilterValues(request.CregCompletionStatusValues);
 
             var valpacCount = await CountAsync(conn, $"SELECT COUNT(*) FROM [{valpacTable}];");
             var prodCount   = await CountAsync(conn, $"SELECT COUNT(*) FROM [{prodTable}];");
             var cregCount   = cregTable != null ? await CountAsync(conn, $"SELECT COUNT(*) FROM [{cregTable}];") : 0;
 
-            int totalTested, matched, missing, passReviewCount, notInCregCount;
+            int totalTested, matched, missing, passReviewCount, notInCregCount, cregWithdrawnCount;
             List<Rule51ValidationRowRecord> reviewRows;
 
             if (includeAllReviewRows)
             {
-                reviewRows      = await LoadRowsAsync(conn, valpacTable, prodTable, null, mappings, col049, saValues, zPlaceholders, cregTable, cregIdCol);
+                reviewRows      = await LoadRowsAsync(conn, valpacTable, prodTable, null, mappings, col049, saValues, zPlaceholders, cregTable, cregIdCol, cregCompletionCol, cregCompletionValues);
                 reviewRows      = NormalizeRows(reviewRows);
                 totalTested     = reviewRows.Count;
                 passReviewCount = reviewRows.Count(r => string.Equals(r.ValidationResult, "PASS_REVIEW", StringComparison.OrdinalIgnoreCase));
                 notInCregCount  = reviewRows.Count(r => string.Equals(r.ValidationResult, "NOT_IN_CREG", StringComparison.OrdinalIgnoreCase));
-                matched         = reviewRows.Count(r => string.Equals(r.ValidationResult, "PASS", StringComparison.OrdinalIgnoreCase)) + passReviewCount + notInCregCount;
+                cregWithdrawnCount = reviewRows.Count(r => string.Equals(r.ValidationResult, "CREG_WITHDRAWN", StringComparison.OrdinalIgnoreCase));
+                matched         = reviewRows.Count(r => string.Equals(r.ValidationResult, "PASS", StringComparison.OrdinalIgnoreCase)) + passReviewCount + notInCregCount + cregWithdrawnCount;
                 missing         = reviewRows.Count(r => string.Equals(r.ValidationResult, "FAIL", StringComparison.OrdinalIgnoreCase));
             }
             else
             {
                 await using var countCmd = conn.CreateConfiguredCommand();
-                countCmd.CommandText = BuildPopulationCountSql(valpacTable, prodTable, mappings, col049, saValues, zPlaceholders, cregTable, cregIdCol);
+                countCmd.CommandText = BuildPopulationCountSql(valpacTable, prodTable, mappings, col049, saValues, zPlaceholders, cregTable, cregIdCol, cregCompletionCol, cregCompletionValues);
                 await using var countReader = await countCmd.ExecuteReaderAsync();
-                totalTested = 0; matched = 0; missing = 0; passReviewCount = 0; notInCregCount = 0;
+                totalTested = 0; matched = 0; missing = 0; passReviewCount = 0; notInCregCount = 0; cregWithdrawnCount = 0;
                 if (await countReader.ReadAsync())
                 {
                     totalTested     = GetInt(countReader, 0);
@@ -586,9 +593,10 @@ SELECT
                     missing         = GetInt(countReader, 2);
                     passReviewCount = GetInt(countReader, 3);
                     notInCregCount  = GetInt(countReader, 4);
+                    cregWithdrawnCount = GetInt(countReader, 5);
                 }
                 await countReader.CloseAsync();
-                reviewRows = await LoadRowsAsync(conn, valpacTable, prodTable, BrowserPreviewRowLimit, mappings, col049, saValues, zPlaceholders, cregTable, cregIdCol);
+                reviewRows = await LoadRowsAsync(conn, valpacTable, prodTable, BrowserPreviewRowLimit, mappings, col049, saValues, zPlaceholders, cregTable, cregIdCol, cregCompletionCol, cregCompletionValues);
                 reviewRows = NormalizeRows(reviewRows);
             }
 
@@ -625,8 +633,11 @@ SELECT
                 ForeignNationalExemptCount = foreignExemptCount,
                 PassWithReviewCount = passReviewCount,
                 NotInCregCount   = notInCregCount,
+                CregWithdrawnCount = cregWithdrawnCount,
                 CregTable        = request.CregTable ?? "",
                 CregIdCol        = request.CregIdCol ?? "_007",
+                CregCompletionStatusCol    = request.CregCompletionStatusCol ?? "_032",
+                CregCompletionStatusValues = request.CregCompletionStatusValues ?? "W",
                 ColumnMappings   = CloneMappings(mappings),
                 TableLinkageText = BuildTableLinkageText(request.ValpacTable, request.ProdTable, mappings),
                 RuleModeText     = $"100% population testing of {request.ValpacTable} against {request.ProdTable} on {mappings.Count} mapped column pair{(mappings.Count == 1 ? "" : "s")}",
@@ -750,10 +761,13 @@ ValidationResults AS
             IReadOnlyList<string>? saNationalValues = null,
             IReadOnlyList<string>? zPlaceholders = null,
             string? cregTable = null,
-            string? cregIdCol = null)
+            string? cregIdCol = null,
+            string? cregCompletionCol = null,
+            IReadOnlyList<string>? cregCompletionValues = null)
         {
             var exemptWhen = BuildForeignNationalExemptWhen(col049, saNationalValues, mappings, zPlaceholders);
             var hasCregCheck = !string.IsNullOrWhiteSpace(cregTable) && !string.IsNullOrWhiteSpace(cregIdCol);
+            var hasCregCompletionCheck = hasCregCheck && !string.IsNullOrWhiteSpace(cregCompletionCol) && cregCompletionValues != null && cregCompletionValues.Count > 0;
             var passExpr = string.IsNullOrEmpty(exemptWhen)
                 ? $"{MatchMarkerAlias} IS NOT NULL"
                 : $"({MatchMarkerAlias} IS NOT NULL OR ({exemptWhen}))";
@@ -781,24 +795,56 @@ CregStudents AS
     FROM [{cregTable}]
 )"
                 : "";
+            var cregWithdrawnCte = hasCregCompletionCheck
+                ? $@",
+CregWithdrawnStudents AS
+(
+    SELECT DISTINCT UPPER(LTRIM(RTRIM(CONVERT(nvarchar(255), [{cregIdCol}])))) AS CREG_WD_STUDENT_KEY
+    FROM [{cregTable}]
+    WHERE UPPER(LTRIM(RTRIM(CONVERT(nvarchar(255), [{cregCompletionCol}])))) IN ({BuildInClauseSql(cregCompletionValues!)})
+)"
+                : "";
             var cregJoin = hasCregCheck ? $"\nLEFT JOIN CregStudents ON CREG_STUDENT_KEY = {ValpacKeyAlias(0)}" : "";
+            var cregWithdrawnJoin = hasCregCompletionCheck ? $"\nLEFT JOIN CregWithdrawnStudents ON CREG_WD_STUDENT_KEY = {ValpacKeyAlias(0)}" : "";
             var notInCregExpr = hasCregCheck
                 ? $",\n    SUM(CASE WHEN NOT ({passExpr}) AND SPF_STUDENT_KEY IS NULL AND CREG_STUDENT_KEY IS NULL THEN 1 ELSE 0 END) AS NotInCregCount"
                 : ",\n    0 AS NotInCregCount";
+            var cregWithdrawnExpr = hasCregCompletionCheck
+                ? $",\n    SUM(CASE WHEN NOT ({passExpr}) AND SPF_STUDENT_KEY IS NULL AND CREG_STUDENT_KEY IS NOT NULL AND CREG_WD_STUDENT_KEY IS NOT NULL THEN 1 ELSE 0 END) AS CregWithdrawnCount"
+                : ",\n    0 AS CregWithdrawnCount";
             var missingExpr = hasCregCheck
-                ? $"CASE WHEN NOT ({passExpr}) AND SPF_STUDENT_KEY IS NULL AND CREG_STUDENT_KEY IS NOT NULL THEN 1 ELSE 0 END"
+                ? (hasCregCompletionCheck
+                    ? $"CASE WHEN NOT ({passExpr}) AND SPF_STUDENT_KEY IS NULL AND CREG_STUDENT_KEY IS NOT NULL AND CREG_WD_STUDENT_KEY IS NULL THEN 1 ELSE 0 END"
+                    : $"CASE WHEN NOT ({passExpr}) AND SPF_STUDENT_KEY IS NULL AND CREG_STUDENT_KEY IS NOT NULL THEN 1 ELSE 0 END")
                 : $"CASE WHEN NOT ({passExpr}) AND SPF_STUDENT_KEY IS NULL THEN 1 ELSE 0 END";
 
             return $@"
-{BuildSourceCtes(valpacTable, prodTable, mappings, col049)}{studentPassFlagsCte}{cregStudentsCte}
+{BuildSourceCtes(valpacTable, prodTable, mappings, col049)}{studentPassFlagsCte}{cregStudentsCte}{cregWithdrawnCte}
 SELECT
     COUNT(1) AS TotalTested,
     SUM(CASE WHEN {passExpr} OR SPF_STUDENT_KEY IS NOT NULL THEN 1 ELSE 0 END) AS MatchedCount,
     SUM({missingExpr}) AS MissingCount,
-    SUM(CASE WHEN NOT ({passExpr}) AND SPF_STUDENT_KEY IS NOT NULL THEN 1 ELSE 0 END) AS PassReviewCount{notInCregExpr}
+    SUM(CASE WHEN NOT ({passExpr}) AND SPF_STUDENT_KEY IS NOT NULL THEN 1 ELSE 0 END) AS PassReviewCount{notInCregExpr}{cregWithdrawnExpr}
 FROM ValidationResults
-LEFT JOIN StudentPassFlags ON SPF_STUDENT_KEY = {ValpacKeyAlias(0)}{cregJoin};";
+LEFT JOIN StudentPassFlags ON SPF_STUDENT_KEY = {ValpacKeyAlias(0)}{cregJoin}{cregWithdrawnJoin};";
         }
+
+        private static string BuildInClauseSql(IReadOnlyList<string> values) =>
+            string.Join(",", values.Select(v => $"'{v}'"));
+
+        private static List<string> ParseFilterValues(string? raw)
+        {
+            if (string.IsNullOrWhiteSpace(raw)) return new List<string>();
+            return raw.Split(',', StringSplitOptions.RemoveEmptyEntries)
+                .Select(SanitiseFilterValue)
+                .Where(v => v.Length > 0)
+                .Select(v => v.ToUpperInvariant())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
+        private static string SanitiseFilterValue(string value) =>
+            value.Replace("'", "").Replace(";", "").Replace("--", "").Replace("[", "").Replace("]", "").Trim();
 
         private static string BuildAllRowsSql(
             string valpacTable,
@@ -809,11 +855,14 @@ LEFT JOIN StudentPassFlags ON SPF_STUDENT_KEY = {ValpacKeyAlias(0)}{cregJoin};";
             IReadOnlyList<string>? saNationalValues = null,
             IReadOnlyList<string>? zPlaceholders = null,
             string? cregTable = null,
-            string? cregIdCol = null)
+            string? cregIdCol = null,
+            string? cregCompletionCol = null,
+            IReadOnlyList<string>? cregCompletionValues = null)
         {
             var top = maxRows.HasValue && maxRows.Value > 0 ? $"TOP {maxRows.Value}" : string.Empty;
             var exemptWhen = BuildForeignNationalExemptWhen(col049, saNationalValues, mappings, zPlaceholders);
             var hasCregCheck = !string.IsNullOrWhiteSpace(cregTable) && !string.IsNullOrWhiteSpace(cregIdCol);
+            var hasCregCompletionCheck = hasCregCheck && !string.IsNullOrWhiteSpace(cregCompletionCol) && cregCompletionValues != null && cregCompletionValues.Count > 0;
 
             // StudentPassFlags: students with at least one fully-matched (or exempt) PASS row.
             var studentPassFlagsCte = string.IsNullOrEmpty(exemptWhen)
@@ -843,65 +892,49 @@ CregStudents AS
 )"
                 : "";
 
-            string validationResultExpr, validationExplanationExpr;
-            if (string.IsNullOrEmpty(exemptWhen))
+            // CregWithdrawnStudents: one row per student in CREG whose completion status (e.g. _032) matches the configured filter (e.g. 'W'),
+            // pre-aggregated here (GROUP BY) so the main query only needs a single hash join — not a per-row correlated subquery.
+            var cregWithdrawnCte = hasCregCompletionCheck
+                ? $@",
+CregWithdrawnStudents AS
+(
+    SELECT
+        UPPER(LTRIM(RTRIM(CONVERT(nvarchar(255), [{cregIdCol}])))) AS CREG_WD_STUDENT_KEY,
+        MIN(CONVERT(nvarchar(255), [{cregCompletionCol}])) AS CREG_WD_STATUS_DISP
+    FROM [{cregTable}]
+    WHERE UPPER(LTRIM(RTRIM(CONVERT(nvarchar(255), [{cregCompletionCol}])))) IN ({BuildInClauseSql(cregCompletionValues!)})
+    GROUP BY UPPER(LTRIM(RTRIM(CONVERT(nvarchar(255), [{cregIdCol}]))))
+)"
+                : "";
+
+            // Build the Validation_Result / Validation_Explanation CASE expressions as ordered WHEN clauses:
+            // PASS > Foreign-national exempt PASS > PASS_REVIEW (passed on primary qual) > NOT_IN_CREG > CREG_WITHDRAWN > FAIL
+            var resultWhens = new List<string> { $"WHEN {MatchMarkerAlias} IS NOT NULL THEN 'PASS'" };
+            var explanationWhens = new List<string> { $"WHEN {MatchMarkerAlias} IS NOT NULL THEN 'VALPAC record found in PRODUCTION.'" };
+
+            if (!string.IsNullOrEmpty(exemptWhen))
             {
-                validationResultExpr = hasCregCheck
-                    ? $@"CASE
-        WHEN {MatchMarkerAlias} IS NOT NULL THEN 'PASS'
-        WHEN SPF_STUDENT_KEY IS NOT NULL THEN 'PASS_REVIEW'
-        WHEN CREG_STUDENT_KEY IS NULL THEN 'NOT_IN_CREG'
-        ELSE 'FAIL'
-    END"
-                    : $@"CASE
-        WHEN {MatchMarkerAlias} IS NOT NULL THEN 'PASS'
-        WHEN SPF_STUDENT_KEY IS NOT NULL THEN 'PASS_REVIEW'
-        ELSE 'FAIL'
-    END";
-                validationExplanationExpr = hasCregCheck
-                    ? $@"CASE
-        WHEN {MatchMarkerAlias} IS NOT NULL THEN 'VALPAC record found in PRODUCTION.'
-        WHEN SPF_STUDENT_KEY IS NOT NULL THEN 'Student passed on primary qualification in PRODUCTION. This additional VALPAC qualification record is not an exception.'
-        WHEN CREG_STUDENT_KEY IS NULL THEN 'Student not found in CREG table [{cregTable}]. The university did not provide a service for this student, so absence from PRODUCTION is expected. Not an exception.'
-        ELSE 'VALPAC record not found in PRODUCTION.'
-    END"
-                    : $@"CASE
-        WHEN {MatchMarkerAlias} IS NOT NULL THEN 'VALPAC record found in PRODUCTION.'
-        WHEN SPF_STUDENT_KEY IS NOT NULL THEN 'Student passed on primary qualification in PRODUCTION. This additional VALPAC qualification record is not an exception.'
-        ELSE 'VALPAC record not found in PRODUCTION.'
-    END";
+                resultWhens.Add($"WHEN {exemptWhen} THEN 'PASS'");
+                explanationWhens.Add($"WHEN {exemptWhen} THEN 'Foreign national exemption: {col049} is not SA/PR, ID is all-Z placeholder, PROD IADIDNO is blank.'");
             }
-            else
+
+            resultWhens.Add("WHEN SPF_STUDENT_KEY IS NOT NULL THEN 'PASS_REVIEW'");
+            explanationWhens.Add("WHEN SPF_STUDENT_KEY IS NOT NULL THEN 'Student passed on primary qualification in PRODUCTION. This additional VALPAC qualification record is not an exception.'");
+
+            if (hasCregCheck)
             {
-                validationResultExpr = hasCregCheck
-                    ? $@"CASE
-        WHEN {MatchMarkerAlias} IS NOT NULL THEN 'PASS'
-        WHEN {exemptWhen} THEN 'PASS'
-        WHEN SPF_STUDENT_KEY IS NOT NULL THEN 'PASS_REVIEW'
-        WHEN CREG_STUDENT_KEY IS NULL THEN 'NOT_IN_CREG'
-        ELSE 'FAIL'
-    END"
-                    : $@"CASE
-        WHEN {MatchMarkerAlias} IS NOT NULL THEN 'PASS'
-        WHEN {exemptWhen} THEN 'PASS'
-        WHEN SPF_STUDENT_KEY IS NOT NULL THEN 'PASS_REVIEW'
-        ELSE 'FAIL'
-    END";
-                validationExplanationExpr = hasCregCheck
-                    ? $@"CASE
-        WHEN {MatchMarkerAlias} IS NOT NULL THEN 'VALPAC record found in PRODUCTION.'
-        WHEN {exemptWhen} THEN 'Foreign national exemption: {col049} is not SA/PR, ID is all-Z placeholder, PROD IADIDNO is blank.'
-        WHEN SPF_STUDENT_KEY IS NOT NULL THEN 'Student passed on primary qualification in PRODUCTION. This additional VALPAC qualification record is not an exception.'
-        WHEN CREG_STUDENT_KEY IS NULL THEN 'Student not found in CREG table [{cregTable}]. The university did not provide a service for this student, so absence from PRODUCTION is expected. Not an exception.'
-        ELSE 'VALPAC record not found in PRODUCTION.'
-    END"
-                    : $@"CASE
-        WHEN {MatchMarkerAlias} IS NOT NULL THEN 'VALPAC record found in PRODUCTION.'
-        WHEN {exemptWhen} THEN 'Foreign national exemption: {col049} is not SA/PR, ID is all-Z placeholder, PROD IADIDNO is blank.'
-        WHEN SPF_STUDENT_KEY IS NOT NULL THEN 'Student passed on primary qualification in PRODUCTION. This additional VALPAC qualification record is not an exception.'
-        ELSE 'VALPAC record not found in PRODUCTION.'
-    END";
+                resultWhens.Add("WHEN CREG_STUDENT_KEY IS NULL THEN 'NOT_IN_CREG'");
+                explanationWhens.Add($"WHEN CREG_STUDENT_KEY IS NULL THEN 'Student not found in CREG table [{cregTable}]. The university did not provide a service for this student, so absence from PRODUCTION is expected. Not an exception.'");
             }
+
+            if (hasCregCompletionCheck)
+            {
+                resultWhens.Add("WHEN CREG_WD_STUDENT_KEY IS NOT NULL THEN 'CREG_WITHDRAWN'");
+                explanationWhens.Add($"WHEN CREG_WD_STUDENT_KEY IS NOT NULL THEN 'Student found in CREG with completion status [{cregCompletionCol}] matching the configured withdrawal filter. The student withdrew from the course registration, so absence from PRODUCTION is expected. Not an exception.'");
+            }
+
+            var validationResultExpr = $"CASE\n        {string.Join("\n        ", resultWhens)}\n        ELSE 'FAIL'\n    END";
+            var validationExplanationExpr = $"CASE\n        {string.Join("\n        ", explanationWhens)}\n        ELSE 'VALPAC record not found in PRODUCTION.'\n    END";
 
             var isForeignExemptExpr = string.IsNullOrEmpty(exemptWhen)
                 ? "0"
@@ -922,18 +955,23 @@ CregStudents AS
             selectItems.Add($"{isForeignExemptExpr} AS FOREIGN_NATIONAL_EXEMPT");
             if (!string.IsNullOrWhiteSpace(col049))
                 selectItems.Add("VALPAC_049_DISP");
+            if (hasCregCompletionCheck)
+                selectItems.Add("CREG_WD_STATUS_DISP AS CREG_COMPLETION_STATUS_DISP");
 
             var cregJoin = hasCregCheck
                 ? $"\nLEFT JOIN CregStudents ON CREG_STUDENT_KEY = {ValpacKeyAlias(0)}"
                 : "";
+            var cregWithdrawnJoin = hasCregCompletionCheck
+                ? $"\nLEFT JOIN CregWithdrawnStudents ON CREG_WD_STUDENT_KEY = {ValpacKeyAlias(0)}"
+                : "";
 
             return $@"
-{BuildSourceCtes(valpacTable, prodTable, mappings, col049)}{studentPassFlagsCte}{cregStudentsCte}
+{BuildSourceCtes(valpacTable, prodTable, mappings, col049)}{studentPassFlagsCte}{cregStudentsCte}{cregWithdrawnCte}
 SELECT {top}
 {BuildIndentedList(selectItems, "    ")}
 FROM ValidationResults
-LEFT JOIN StudentPassFlags ON SPF_STUDENT_KEY = {ValpacKeyAlias(0)}{cregJoin}
-ORDER BY {BuildOrderByClause(mappings.Count, maxRows.HasValue && maxRows.Value > 0, hasCregCheck)};";
+LEFT JOIN StudentPassFlags ON SPF_STUDENT_KEY = {ValpacKeyAlias(0)}{cregJoin}{cregWithdrawnJoin}
+ORDER BY {BuildOrderByClause(mappings.Count, maxRows.HasValue && maxRows.Value > 0, hasCregCheck, hasCregCompletionCheck)};";
         }
 
         // Returns the SQL WHEN condition (without the WHEN keyword) for the foreign-national exemption.
@@ -973,10 +1011,12 @@ ORDER BY {BuildOrderByClause(mappings.Count, maxRows.HasValue && maxRows.Value >
             IReadOnlyList<string>? saValues = null,
             IReadOnlyList<string>? zPlaceholders = null,
             string? cregTable = null,
-            string? cregIdCol = null)
+            string? cregIdCol = null,
+            string? cregCompletionCol = null,
+            IReadOnlyList<string>? cregCompletionValues = null)
         {
             await using var command = connection.CreateConfiguredCommand();
-            command.CommandText = BuildAllRowsSql(valpacTable, prodTable, maxRows, mappings, col049, saValues, zPlaceholders, cregTable, cregIdCol);
+            command.CommandText = BuildAllRowsSql(valpacTable, prodTable, maxRows, mappings, col049, saValues, zPlaceholders, cregTable, cregIdCol, cregCompletionCol, cregCompletionValues);
             await using var reader = await command.ExecuteReaderAsync();
             var rows = new List<Rule51ValidationRowRecord>();
             while (await reader.ReadAsync())
@@ -1006,6 +1046,7 @@ ORDER BY {BuildOrderByClause(mappings.Count, maxRows.HasValue && maxRows.Value >
             var isPass = string.Equals(result, "PASS", StringComparison.OrdinalIgnoreCase);
             var isPassReview  = string.Equals(result, "PASS_REVIEW",  StringComparison.OrdinalIgnoreCase);
             var isNotInCreg   = string.Equals(result, "NOT_IN_CREG",  StringComparison.OrdinalIgnoreCase);
+            var isCregWithdrawn = string.Equals(result, "CREG_WITHDRAWN", StringComparison.OrdinalIgnoreCase);
             var valpacRef = BuildDisplayReference(v, mappings, useProdValues: false);
 
             if (isPass)
@@ -1046,6 +1087,15 @@ ORDER BY {BuildOrderByClause(mappings.Count, maxRows.HasValue && maxRows.Value >
                 v["FINAL_RESULT_MESSAGE"] = $"NOT IN CREG: Student No ({mappings[0].ValpacColumn} = '{stNo}') not found in CREG. The university did not provide a service for this student — absence from PRODUCTION is expected. Not an exception.";
                 v["EXCEPTION_REASON"] = $"Student ({label0} = '{stNo}') does not exist in the CREG table. The university never registered a service record for this student, so the student is not expected to appear in PRODUCTION.";
                 v["EXCEPTION_CATEGORY"] = "NOT_IN_CREG";
+            }
+            else if (isCregWithdrawn)
+            {
+                var stNo = ReadValue(v, ValpacDisplayAlias(0)) ?? "";
+                var label0 = mappings.Count > 0 ? mappings[0].Label : mappings[0].ValpacColumn;
+                var completionVal = ReadValue(v, "CREG_COMPLETION_STATUS_DISP") ?? "";
+                v["FINAL_RESULT_MESSAGE"] = $"WITHDREW (CREG): {label0} ({mappings[0].ValpacColumn} = '{stNo}') not found in PRODUCTION, but is in CREG with completion status = '{completionVal}'. The completion status for this student on CREG is withdrew from the course registration, so absence from PRODUCTION is expected. Not an exception.";
+                v["EXCEPTION_REASON"] = $"{label0} ({mappings[0].ValpacColumn} = '{stNo}') does not exist in PRODUCTION table, but was found in CREG with completion status = '{completionVal}', matching the configured withdrawal filter. The student withdrew from the course registration, so the student is not expected to appear in PRODUCTION.";
+                v["EXCEPTION_CATEGORY"] = "CREG_WITHDRAWN";
             }
             else
             {
@@ -1101,11 +1151,12 @@ ORDER BY {BuildOrderByClause(mappings.Count, maxRows.HasValue && maxRows.Value >
             foreach (var row in rows)
             {
                 var cat = ReadValue(row.DisplayValues, "EXCEPTION_CATEGORY") ?? "";
-                // Skip PASS, PASS_REVIEW and NOT_IN_CREG (not exceptions); include PASS__FOREIGN_NATIONAL for auditor visibility
+                // Skip PASS, PASS_REVIEW, NOT_IN_CREG and CREG_WITHDRAWN (not exceptions); include PASS__FOREIGN_NATIONAL for auditor visibility
                 if (string.IsNullOrEmpty(cat)
                     || string.Equals(cat, "PASS", StringComparison.OrdinalIgnoreCase)
                     || string.Equals(cat, "PASS_REVIEW", StringComparison.OrdinalIgnoreCase)
-                    || string.Equals(cat, "NOT_IN_CREG", StringComparison.OrdinalIgnoreCase))
+                    || string.Equals(cat, "NOT_IN_CREG", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(cat, "CREG_WITHDRAWN", StringComparison.OrdinalIgnoreCase))
                     continue;
 
                 string desc;
@@ -1271,6 +1322,9 @@ SELECT CAST(SCOPE_IDENTITY() AS int);";
             ValpacCol049 = s.ValpacCol049, SaNationalValues = s.SaNationalValues,
             ValpacCol008ZPlaceholders = s.ValpacCol008ZPlaceholders,
             ForeignNationalExemptCount = s.ForeignNationalExemptCount,
+            PassWithReviewCount = s.PassWithReviewCount, NotInCregCount = s.NotInCregCount, CregWithdrawnCount = s.CregWithdrawnCount,
+            CregTable = s.CregTable, CregIdCol = s.CregIdCol,
+            CregCompletionStatusCol = s.CregCompletionStatusCol, CregCompletionStatusValues = s.CregCompletionStatusValues,
             ColumnMappings = CloneMappings(s.ColumnMappings),
             TableLinkageText = s.TableLinkageText, RuleModeText = s.RuleModeText, ProcedureSteps = s.ProcedureSteps.ToList(),
             ClientId = s.ClientId, SavedRunId = s.SavedRunId,
@@ -1300,6 +1354,8 @@ SELECT CAST(SCOPE_IDENTITY() AS int);";
             ProdColStNo = r.ProdColStNo, ProdColIdNo = r.ProdColIdNo, ProdColQual = r.ProdColQual, ProdColYear = r.ProdColYear,
             ValpacCol049 = r.ValpacCol049, SaNationalValues = r.SaNationalValues,
             ValpacCol008ZPlaceholders = r.ValpacCol008ZPlaceholders,
+            CregTable = r.CregTable, CregIdCol = r.CregIdCol,
+            CregCompletionStatusCol = r.CregCompletionStatusCol, CregCompletionStatusValues = r.CregCompletionStatusValues,
             ColumnMappings = CloneMappings(r.ColumnMappings)
         };
 
@@ -1350,6 +1406,8 @@ SELECT CAST(SCOPE_IDENTITY() AS int);";
                     ProdColStNo = summary.ProdColStNo, ProdColIdNo = summary.ProdColIdNo, ProdColQual = summary.ProdColQual, ProdColYear = summary.ProdColYear,
                     ValpacCol049 = summary.ValpacCol049, SaNationalValues = summary.SaNationalValues,
                     ValpacCol008ZPlaceholders = summary.ValpacCol008ZPlaceholders,
+                    CregTable = summary.CregTable, CregIdCol = summary.CregIdCol,
+                    CregCompletionStatusCol = summary.CregCompletionStatusCol, CregCompletionStatusValues = summary.CregCompletionStatusValues,
                     ColumnMappings = CloneMappings(summary.ColumnMappings)
                 }, includeAllReviewRows: true);
                 expanded.Timestamp = string.IsNullOrWhiteSpace(summary.Timestamp) ? expanded.Timestamp : summary.Timestamp;
@@ -1616,14 +1674,16 @@ SELECT CAST(SCOPE_IDENTITY() AS int);";
             return materialized.Count == 0 ? indent : indent + string.Join("," + Environment.NewLine + indent, materialized);
         }
 
-        private static string BuildOrderByClause(int mappingCount, bool failFirst, bool hasCregCheck = false)
+        private static string BuildOrderByClause(int mappingCount, bool failFirst, bool hasCregCheck = false, bool hasCregCompletionCheck = false)
         {
             var items = new List<string>();
             if (failFirst)
             {
-                // FAIL first (0), NOT_IN_CREG second (1), PASS_REVIEW third (2), PASS last (3)
+                // FAIL first (0), NOT_IN_CREG (1), CREG_WITHDRAWN (2), PASS_REVIEW (3), PASS last (4)
                 var failExpr = hasCregCheck
-                    ? $"CASE WHEN {MatchMarkerAlias} IS NULL AND SPF_STUDENT_KEY IS NULL AND CREG_STUDENT_KEY IS NOT NULL THEN 0 WHEN {MatchMarkerAlias} IS NULL AND SPF_STUDENT_KEY IS NULL AND CREG_STUDENT_KEY IS NULL THEN 1 WHEN {MatchMarkerAlias} IS NULL THEN 2 ELSE 3 END"
+                    ? (hasCregCompletionCheck
+                        ? $"CASE WHEN {MatchMarkerAlias} IS NULL AND SPF_STUDENT_KEY IS NULL AND CREG_STUDENT_KEY IS NOT NULL AND CREG_WD_STUDENT_KEY IS NULL THEN 0 WHEN {MatchMarkerAlias} IS NULL AND SPF_STUDENT_KEY IS NULL AND CREG_STUDENT_KEY IS NULL THEN 1 WHEN {MatchMarkerAlias} IS NULL AND SPF_STUDENT_KEY IS NULL AND CREG_WD_STUDENT_KEY IS NOT NULL THEN 2 WHEN {MatchMarkerAlias} IS NULL THEN 3 ELSE 4 END"
+                        : $"CASE WHEN {MatchMarkerAlias} IS NULL AND SPF_STUDENT_KEY IS NULL AND CREG_STUDENT_KEY IS NOT NULL THEN 0 WHEN {MatchMarkerAlias} IS NULL AND SPF_STUDENT_KEY IS NULL AND CREG_STUDENT_KEY IS NULL THEN 1 WHEN {MatchMarkerAlias} IS NULL THEN 2 ELSE 3 END")
                     : $"CASE WHEN {MatchMarkerAlias} IS NULL AND SPF_STUDENT_KEY IS NULL THEN 0 WHEN {MatchMarkerAlias} IS NULL THEN 1 ELSE 2 END";
                 items.Add(failExpr);
             }

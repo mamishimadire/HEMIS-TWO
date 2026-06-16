@@ -20,6 +20,8 @@ namespace HemisAudit.ViewModels
         public string ProdTable    { get; set; } = "MT-audit-prod-QUAL";
         public string ValpacSubjCol { get; set; } = "_001";
         public string ProdSubjCol   { get; set; } = "IAIQUAL";
+        public string ApprovalStatusCol { get; set; } = "_004";
+        public string ApprovalStatusValues { get; set; } = "A";
     }
 
     public class Rule52VerifyResult
@@ -44,6 +46,8 @@ namespace HemisAudit.ViewModels
         public string ProdTable     { get; set; } = "MT-audit-prod-QUAL";
         public string ValpacSubjCol { get; set; } = "_001";
         public string ProdSubjCol   { get; set; } = "IAIQUAL";
+        public string ApprovalStatusCol { get; set; } = "_004";
+        public string ApprovalStatusValues { get; set; } = "A";
     }
 
     public class Rule52ControlSummaryItemViewModel
@@ -87,6 +91,8 @@ namespace HemisAudit.ViewModels
         public string ProdTable     { get; set; } = "MT-audit-prod-QUAL";
         public string ValpacSubjCol { get; set; } = "_001";
         public string ProdSubjCol   { get; set; } = "IAIQUAL";
+        public string ApprovalStatusCol { get; set; } = "_004";
+        public string ApprovalStatusValues { get; set; } = "A";
         public string TableLinkageText { get; set; } = "";
         public string RuleModeText { get; set; } = "";
         public List<string> ProcedureSteps { get; set; } = new();
@@ -110,6 +116,8 @@ namespace HemisAudit.ViewModels
         public string ProdTable     { get; set; } = "MT-audit-prod-QUAL";
         public string ValpacSubjCol { get; set; } = "_001";
         public string ProdSubjCol   { get; set; } = "IAIQUAL";
+        public string ApprovalStatusCol { get; set; } = "_004";
+        public string ApprovalStatusValues { get; set; } = "A";
         public string CurrentUserEngagementRole { get; set; } = "";
         public bool HasDataAnalystSignoff { get; set; }
         public bool CurrentUserHasSignedOff { get; set; }

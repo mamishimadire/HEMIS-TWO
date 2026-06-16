@@ -93,8 +93,8 @@
                 <div class="accordion-body" id="body-config" style="display:none">
                     <div class="info-box info-box--red">
                         <strong>Rule 52 Logic:</strong><br />
-                        Select all distinct <code>_001</code> values from <strong>dbo_QUAL</strong> and check if each exists as <code>IAIQUAL</code> in <strong>MT-audit-prod-QUAL</strong>.<br />
-                        Mapped column: <code>_001 &lt;&gt; IAIQUAL</code>
+                        Filter <strong>dbo_QUAL</strong> to approved qualifications using <code>_004</code>, then select all distinct <code>_001</code> values from that filtered population and check if each exists as <code>IAIQUAL</code> in <strong>MT-audit-prod-QUAL</strong>.<br />
+                        Mapped column: <code>_001 &lt;&gt; IAIQUAL</code> | Filter column: <code>_004</code>
                     </div>
                     <div class="form-grid">
                         <div class="field-group"><label for="valpacTable">Source Table <small>(dbo_QUAL)</small></label><select id="valpacTable" onchange="loadCols('valpac', this.value)"></select></div>
@@ -104,12 +104,16 @@
                         <div class="field-group"><label>Source Qualification Column <small>(_001)</small></label><select id="valpacSubjCol"><option value="_001">_001</option></select></div>
                         <div class="field-group"><label>Target Qualification Column <small>(IAIQUAL)</small></label><select id="prodSubjCol"><option value="IAIQUAL">IAIQUAL</option></select></div>
                     </div>
+                    <div class="form-grid" style="margin-top:12px">
+                        <div class="field-group"><label>Approval Status Column <small>(_004)</small></label><select id="approvalStatusCol"><option value="_004">_004</option></select></div>
+                        <div class="field-group"><label for="approvalStatusValues">Approval Status Filter <small>(comma separated, e.g. A,N)</small></label><input id="approvalStatusValues" type="text" value="A" placeholder="e.g. A,N" /></div>
+                    </div>
                     <div class="action-bar" style="justify-content:flex-start;margin:10px 0 0">
                         <button type="button" class="btn btn-secondary" onclick="autoDetectColumns()">Auto-Detect Columns</button>
                     </div>
                     <div class="alert alert--info" style="margin-top:16px">
-                        <strong>Control 1:</strong> All distinct <code>[_001]</code> values in <code>dbo_QUAL</code> must exist as <code>[IAIQUAL]</code> in <code>MT-audit-prod-QUAL</code>.<br />
-                        Use Auto-Detect after connecting to populate column dropdowns.
+                        <strong>Control 1:</strong> All distinct <code>[_001]</code> values in <code>dbo_QUAL</code> where <code>[_004]</code> is in the approval status filter must exist as <code>[IAIQUAL]</code> in <code>MT-audit-prod-QUAL</code>.<br />
+                        Use Auto-Detect after connecting to populate column dropdowns. Enter one or more approval status codes separated by commas (e.g. <code>A,N</code>) — leave blank to test all qualifications regardless of approval status.
                     </div>
                     <div id="configOutput" class="status-output"></div>
                 </div>
@@ -220,6 +224,7 @@ window.toggleAccordion = function (section) {
         server: document.getElementById('server'), driver: document.getElementById('driver'), database: document.getElementById('database'),
         valpacTable: document.getElementById('valpacTable'), prodTable: document.getElementById('prodTable'),
         valpacSubjCol: document.getElementById('valpacSubjCol'), prodSubjCol: document.getElementById('prodSubjCol'),
+        approvalStatusCol: document.getElementById('approvalStatusCol'), approvalStatusValues: document.getElementById('approvalStatusValues'),
         connectionOutput: document.getElementById('connectionOutput'), configOutput: document.getElementById('configOutput'),
         analysisPane: document.getElementById('analysisPane'), resultsPane: document.getElementById('resultsPane'),
         sqlText: document.getElementById('sqlText'), downloadAllBtn: document.getElementById('downloadAllBtn'),
@@ -290,7 +295,9 @@ window.toggleAccordion = function (section) {
             valpacTable:   els.valpacTable?.value||'dbo_QUAL',
             prodTable:     els.prodTable?.value||'MT-audit-prod-QUAL',
             valpacSubjCol: els.valpacSubjCol?.value||'_001',
-            prodSubjCol:   els.prodSubjCol?.value||'IAIQUAL'
+            prodSubjCol:   els.prodSubjCol?.value||'IAIQUAL',
+            approvalStatusCol:    els.approvalStatusCol?.value||'_004',
+            approvalStatusValues: els.approvalStatusValues?.value?.trim()||'A'
         };
     }
 
@@ -301,7 +308,7 @@ window.toggleAccordion = function (section) {
             const data = await postJson(`${apiBase}/GetColumns`, { server, database: db, driver: els.driver?.value||'ODBC Driver 17 for SQL Server', valpacTable: tableName });
             if (!data.success || !data.columns) return;
             const cols = data.columns || [];
-            if (role === 'valpac') fillColSel(els.valpacSubjCol, cols, '_001');
+            if (role === 'valpac') { fillColSel(els.valpacSubjCol, cols, '_001'); fillColSel(els.approvalStatusCol, cols, '_004'); }
             else fillColSel(els.prodSubjCol, cols, 'IAIQUAL');
             setAlert(els.configOutput, 'success', `Columns loaded for ${tableName}.`);
         } catch (e) { /* silently ignore */ }
@@ -364,6 +371,8 @@ window.toggleAccordion = function (section) {
         populateSelect(els.prodTable, [workspace.prodTable||'MT-audit-prod-QUAL'], workspace.prodTable||'MT-audit-prod-QUAL');
         if (workspace.valpacSubjCol) setColSel(els.valpacSubjCol, workspace.valpacSubjCol);
         if (workspace.prodSubjCol)   setColSel(els.prodSubjCol,   workspace.prodSubjCol);
+        if (workspace.approvalStatusCol) setColSel(els.approvalStatusCol, workspace.approvalStatusCol);
+        if (els.approvalStatusValues) els.approvalStatusValues.value = workspace.approvalStatusValues ?? 'A';
         els.workspaceRunState.textContent=workspace.runId?`Run #${workspace.runId}`:'No saved run loaded';
         els.workspaceRunLabel.textContent=workspace.runId?`Rule 52 Run #${workspace.runId}`:'No saved run yet';
         els.workspaceStatusLabel.textContent=workspace.currentStatus||'-';
@@ -543,6 +552,7 @@ window.toggleAccordion = function (section) {
                     <div><div style="color:var(--text-muted);font-size:12px;text-transform:uppercase;font-weight:700">Database</div><div>${escapeHtml(summary.database)}</div></div>
                     <div><div style="color:var(--text-muted);font-size:12px;text-transform:uppercase;font-weight:700">Source Table</div><div>${escapeHtml(summary.valpacTable||'')}</div></div>
                     <div><div style="color:var(--text-muted);font-size:12px;text-transform:uppercase;font-weight:700">Target Table</div><div>${escapeHtml(summary.prodTable||'')}</div></div>
+                    <div><div style="color:var(--text-muted);font-size:12px;text-transform:uppercase;font-weight:700">Approval Status Filter</div><div><code>${escapeHtml(summary.approvalStatusCol||'_004')}</code> IN (${escapeHtml(summary.approvalStatusValues || 'ALL — no filter applied')})</div></div>
                     <div><div style="color:var(--text-muted);font-size:12px;text-transform:uppercase;font-weight:700">Status</div><div>${escapeHtml(summary.status)}</div></div>
                 </div>
                 <div style="margin-top:18px"><table class="data-table"><thead><tr><th>Control</th><th>Criteria</th><th>Rows Tested</th><th>PASS</th><th>FAIL</th><th>Status</th></tr></thead><tbody>${controlRows}</tbody></table></div>
@@ -561,12 +571,14 @@ window.toggleAccordion = function (section) {
         const valpacTable = summary.valpacTable||'dbo_QUAL';
         const prodTable   = summary.prodTable||'MT-audit-prod-QUAL';
         const vSubj = summary.valpacSubjCol||'_001'; const pSubj = summary.prodSubjCol||'IAIQUAL';
+        const aCol = summary.approvalStatusCol||'_004';
 
         const rowHtml = rows.map(row => {
             const v=Object.fromEntries(Object.entries(row.displayValues||{}).map(([k,val])=>[k.toUpperCase(),val]));
             const isFail=String(row.validationResult||'').toUpperCase()==='FAIL';
             return `<tr>
                 <td class="group-valpac">${escapeHtml(v.VALPAC_SUBJ||'')}</td>
+                <td class="group-valpac">${escapeHtml(v.VALPAC_APPROVAL_STATUS||'')}</td>
                 <td class="group-prod ${isFail?'is-fail':''}">${escapeHtml(v.PROD_SUBJ||'')}</td>
                 <td class="group-final ${isFail?'is-fail':'is-pass'}">
                     <span class="result-text">${escapeHtml(isFail?'FAIL':'PASS')}</span>
@@ -600,12 +612,13 @@ window.toggleAccordion = function (section) {
                     <table class="R52-grid">
                         <thead>
                             <tr>
-                                <th class="group-valpac">${escapeHtml(valpacTable)}</th>
+                                <th class="group-valpac" colspan="2">${escapeHtml(valpacTable)}</th>
                                 <th class="group-prod">${escapeHtml(prodTable)}</th>
                                 <th class="group-final">Final Results</th>
                             </tr>
                             <tr>
                                 <th class="group-valpac">${escapeHtml(vSubj)} (_001)</th>
+                                <th class="group-valpac">Approval Status (${escapeHtml(aCol)})</th>
                                 <th class="group-prod">${escapeHtml(pSubj)} (IAIQUAL)</th>
                                 <th class="group-final" style="width:240px">pass/fail</th>
                             </tr>

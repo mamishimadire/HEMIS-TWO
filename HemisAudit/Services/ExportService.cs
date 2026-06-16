@@ -5463,11 +5463,12 @@ namespace HemisAudit.Services
                     wsResults.Cell(rowIndex, columnIndex++).Value = v.TryGetValue(Rule51ProdAlias(i), out var prodValue) ? prodValue ?? "" : "";
                 var isPassReview = string.Equals(row.ValidationResult, "PASS_REVIEW", StringComparison.OrdinalIgnoreCase);
                 var isNotInCreg  = string.Equals(row.ValidationResult, "NOT_IN_CREG",  StringComparison.OrdinalIgnoreCase);
-                var resultLabel  = isPassReview ? "PASS (Review)" : isNotInCreg ? "PASS (Not in CREG)" : row.ValidationResult;
+                var isCregWithdrawn = string.Equals(row.ValidationResult, "CREG_WITHDRAWN", StringComparison.OrdinalIgnoreCase);
+                var resultLabel  = isPassReview ? "PASS (Review)" : isNotInCreg ? "PASS (Not in CREG)" : isCregWithdrawn ? "PASS (Withdrew)" : row.ValidationResult;
                 wsResults.Cell(rowIndex, columnIndex++).Value = resultLabel;
                 wsResults.Cell(rowIndex, columnIndex).Value = row.ValidationExplanation ?? "";
                 var isFail = string.Equals(row.ValidationResult, "FAIL", StringComparison.OrdinalIgnoreCase);
-                var fill = isFail ? XLColor.FromHtml("#FFF3F3") : isPassReview ? XLColor.FromHtml("#FFF8E1") : isNotInCreg ? XLColor.FromHtml("#E1F5FE") : XLColor.FromHtml("#F3FFF3");
+                var fill = isFail ? XLColor.FromHtml("#FFF3F3") : isPassReview ? XLColor.FromHtml("#FFF8E1") : isNotInCreg ? XLColor.FromHtml("#E1F5FE") : isCregWithdrawn ? XLColor.FromHtml("#EDE7F6") : XLColor.FromHtml("#F3FFF3");
                 wsResults.Range(rowIndex, 1, rowIndex, headers.Length).Style.Fill.BackgroundColor = fill;
                 if (isFail && !string.IsNullOrEmpty(row.ValidationExplanation))
                 {
@@ -5484,6 +5485,11 @@ namespace HemisAudit.Services
                     wsResults.Cell(rowIndex, columnIndex).Style.Font.FontColor = XLColor.FromHtml("#01579B");
                     wsResults.Cell(rowIndex, columnIndex).Style.Alignment.WrapText = true;
                 }
+                else if (isCregWithdrawn && !string.IsNullOrEmpty(row.ValidationExplanation))
+                {
+                    wsResults.Cell(rowIndex, columnIndex).Style.Font.FontColor = XLColor.FromHtml("#4527A0");
+                    wsResults.Cell(rowIndex, columnIndex).Style.Alignment.WrapText = true;
+                }
                 rowIndex++;
             }
             for (int c = 1; c < headers.Length; c++) wsResults.Column(c).AdjustToContents();
@@ -5496,9 +5502,10 @@ namespace HemisAudit.Services
                 ("Database", summary.Database), ("VALPAC Table", summary.ValpacTable), ("PRODUCTION Table", summary.ProdTable),
                 ("Column Mapping", summary.TableLinkageText), ("Validation Date", summary.Timestamp), ("", ""),
                 ("VALIDATION RESULTS", ""), ("Total Tested", summary.TotalValidated.ToString("N0")),
-                ("PASS (found in Production)", (summary.PassCount - summary.PassWithReviewCount - summary.NotInCregCount).ToString("N0")),
+                ("PASS (found in Production)", (summary.PassCount - summary.PassWithReviewCount - summary.NotInCregCount - summary.CregWithdrawnCount).ToString("N0")),
                 ("Pass With Review Note (not an exception)", summary.PassWithReviewCount > 0 ? summary.PassWithReviewCount.ToString("N0") : "0"),
                 ("Not in CREG (No Service)", summary.NotInCregCount > 0 ? summary.NotInCregCount.ToString("N0") : "0"),
+                ($"Withdrew (CREG {summary.CregCompletionStatusCol ?? "_032"})", summary.CregWithdrawnCount > 0 ? summary.CregWithdrawnCount.ToString("N0") : "0"),
                 ("FAIL (not in Production)", summary.FailCount.ToString("N0")),
                 ("Foreign National Exempt", summary.ForeignNationalExemptCount > 0 ? summary.ForeignNationalExemptCount.ToString("N0") : "0"),
                 ("Exception Rate", $"{summary.ExceptionRate:F2}%"), ("Status", summary.Status)
@@ -5515,6 +5522,7 @@ namespace HemisAudit.Services
                     if (label == "Status") { wsSummary.Cell(sRow, 2).Style.Fill.BackgroundColor = value == "PASS" ? XLColor.FromHtml("#C8E6C9") : XLColor.FromHtml("#FFCDD2"); wsSummary.Cell(sRow, 2).Style.Font.Bold = true; }
                     else if (label.StartsWith("Pass With Review")) { wsSummary.Cell(sRow, 1).Style.Fill.BackgroundColor = XLColor.FromHtml("#FFF3E0"); wsSummary.Cell(sRow, 1).Style.Font.FontColor = XLColor.FromHtml("#E65100"); wsSummary.Cell(sRow, 2).Style.Font.FontColor = XLColor.FromHtml("#E65100"); wsSummary.Cell(sRow, 2).Style.Font.Bold = true; }
                     else if (label.StartsWith("Not in CREG")) { wsSummary.Cell(sRow, 1).Style.Fill.BackgroundColor = XLColor.FromHtml("#E1F5FE"); wsSummary.Cell(sRow, 1).Style.Font.FontColor = XLColor.FromHtml("#01579B"); wsSummary.Cell(sRow, 2).Style.Font.FontColor = XLColor.FromHtml("#01579B"); wsSummary.Cell(sRow, 2).Style.Font.Bold = true; }
+                    else if (label.StartsWith("Withdrew")) { wsSummary.Cell(sRow, 1).Style.Fill.BackgroundColor = XLColor.FromHtml("#EDE7F6"); wsSummary.Cell(sRow, 1).Style.Font.FontColor = XLColor.FromHtml("#4527A0"); wsSummary.Cell(sRow, 2).Style.Font.FontColor = XLColor.FromHtml("#4527A0"); wsSummary.Cell(sRow, 2).Style.Font.Bold = true; }
                 }
                 sRow++;
             }
@@ -5667,6 +5675,46 @@ namespace HemisAudit.Services
                 wsCreg.Column(headers.Length).Width = 60;
             }
 
+            var cregWithdrawnRows = summary.ReviewRows.Where(r => string.Equals(r.ValidationResult, "CREG_WITHDRAWN", StringComparison.OrdinalIgnoreCase)).ToList();
+            if (cregWithdrawnRows.Any())
+            {
+                var wsWd = wb.Worksheets.Add("Withdrew (CREG)");
+                StyleHeaderRow(wsWd, 1, "RULE 51 — WITHDREW (CREG completion status indicates withdrawal — not an exception)", headers.Length);
+                for (int i = 0; i < headers.Length; i++)
+                {
+                    var c = wsWd.Cell(2, i + 1); c.Value = headers[i]; c.Style.Font.Bold = true;
+                    var isCol049Header = has049 && (i + 1) == col049ColNum;
+                    c.Style.Fill.BackgroundColor = isCol049Header ? XLColor.FromHtml("#6A1B9A") : XLColor.FromHtml("#5E35B1");
+                    c.Style.Font.FontColor = XLColor.White;
+                }
+                int wdRow = 3;
+                foreach (var row in cregWithdrawnRows)
+                {
+                    var v = row.DisplayValues;
+                    wsWd.Cell(wdRow, 1).Value = row.ValidationNumber;
+                    var columnIndex = 2;
+                    for (int i = 0; i < mappings.Count; i++)
+                        wsWd.Cell(wdRow, columnIndex++).Value = v.TryGetValue(Rule51ValpacAlias(i), out var valpacValue) ? valpacValue ?? "" : "";
+                    if (has049)
+                    {
+                        var c049 = wsWd.Cell(wdRow, columnIndex++);
+                        c049.Value = v.TryGetValue("VALPAC_049_DISP", out var v049Val) ? v049Val ?? "" : "";
+                        c049.Style.Font.FontColor = XLColor.FromHtml("#6A1B9A");
+                    }
+                    for (int i = 0; i < mappings.Count; i++)
+                        wsWd.Cell(wdRow, columnIndex++).Value = v.TryGetValue(Rule51ProdAlias(i), out var prodValue) ? prodValue ?? "" : "";
+                    wsWd.Cell(wdRow, columnIndex++).Value = "PASS (Withdrew)";
+                    var noteCell = wsWd.Cell(wdRow, columnIndex);
+                    noteCell.Value = row.ValidationExplanation ?? "";
+                    noteCell.Style.Font.FontColor = XLColor.FromHtml("#4527A0");
+                    noteCell.Style.Alignment.WrapText = true;
+                    wsWd.Range(wdRow, 1, wdRow, headers.Length).Style.Fill.BackgroundColor = XLColor.FromHtml("#EDE7F6");
+                    wdRow++;
+                }
+                for (int c = 1; c < headers.Length; c++) wsWd.Column(c).AdjustToContents();
+                wsWd.Column(headers.Length).Width = 60;
+            }
+
             var purePassRows = summary.ReviewRows.Where(r => string.Equals(r.ValidationResult, "PASS", StringComparison.OrdinalIgnoreCase)).ToList();
             if (purePassRows.Any())
             {
@@ -5735,6 +5783,7 @@ namespace HemisAudit.Services
                     cells.Add(CsvEscape(v.TryGetValue(Rule51ProdAlias(i), out var prodValue) ? prodValue : ""));
                 var csvResult = string.Equals(row.ValidationResult, "PASS_REVIEW", StringComparison.OrdinalIgnoreCase) ? "PASS (Review)"
                              : string.Equals(row.ValidationResult, "NOT_IN_CREG",  StringComparison.OrdinalIgnoreCase) ? "PASS (Not in CREG)"
+                             : string.Equals(row.ValidationResult, "CREG_WITHDRAWN", StringComparison.OrdinalIgnoreCase) ? "PASS (Withdrew)"
                              : row.ValidationResult;
                 cells.Add(CsvEscape(csvResult));
                 cells.Add(CsvEscape(row.ValidationExplanation ?? ""));
@@ -5751,8 +5800,9 @@ namespace HemisAudit.Services
             var wsResults = wb.Worksheets.Add("Validation Results");
             var vSubj = summary.ValpacSubjCol ?? "_001";
             var pSubj = summary.ProdSubjCol ?? "IAIQUAL";
-            StyleHeaderRow(wsResults, 1, $"RULE 52: {summary.ValpacTable ?? "dbo_QUAL"} [{vSubj}] IN {summary.ProdTable ?? "MT-audit-prod-QUAL"} [{pSubj}]", 3);
-            var headers = new[] { "Validation #", $"{summary.ValpacTable} [{vSubj}]", $"{summary.ProdTable} [{pSubj}]", "Result" };
+            var aCol  = summary.ApprovalStatusCol ?? "_004";
+            StyleHeaderRow(wsResults, 1, $"RULE 52: {summary.ValpacTable ?? "dbo_QUAL"} [{vSubj}] IN {summary.ProdTable ?? "MT-audit-prod-QUAL"} [{pSubj}]", 5);
+            var headers = new[] { "Validation #", $"{summary.ValpacTable} [{vSubj}]", $"Approval Status [{aCol}]", $"{summary.ProdTable} [{pSubj}]", "Result" };
             for (int i = 0; i < headers.Length; i++)
             {
                 var cell = wsResults.Cell(2, i + 1);
@@ -5766,20 +5816,24 @@ namespace HemisAudit.Services
                 var v = row.DisplayValues;
                 wsResults.Cell(rowIndex, 1).Value = row.ValidationNumber;
                 wsResults.Cell(rowIndex, 2).Value = v.TryGetValue("VALPAC_SUBJ", out var vs) ? vs ?? "" : "";
-                wsResults.Cell(rowIndex, 3).Value = v.TryGetValue("PROD_SUBJ",   out var ps) ? ps ?? "" : "";
-                wsResults.Cell(rowIndex, 4).Value = row.ValidationResult;
-                wsResults.Range(rowIndex, 1, rowIndex, 4).Style.Fill.BackgroundColor =
+                wsResults.Cell(rowIndex, 3).Value = v.TryGetValue("VALPAC_APPROVAL_STATUS", out var aps) ? aps ?? "" : "";
+                wsResults.Cell(rowIndex, 4).Value = v.TryGetValue("PROD_SUBJ",   out var ps) ? ps ?? "" : "";
+                wsResults.Cell(rowIndex, 5).Value = row.ValidationResult;
+                wsResults.Range(rowIndex, 1, rowIndex, 5).Style.Fill.BackgroundColor =
                     string.Equals(row.ValidationResult, "FAIL", StringComparison.OrdinalIgnoreCase) ? XLColor.FromHtml("#FFF3F3") : XLColor.FromHtml("#F3FFF3");
                 rowIndex++;
             }
-            for (int c = 1; c <= 4; c++) wsResults.Column(c).AdjustToContents();
+            for (int c = 1; c <= 5; c++) wsResults.Column(c).AdjustToContents();
 
             var wsSummary = wb.Worksheets.Add("Summary");
             StyleHeaderRow(wsSummary, 1, "HEMIS RULE 52: dbo_QUAL QUALIFICATION CODE IN MT-audit-prod-QUAL", 2);
             var summaryData = new[]
             {
                 ("Database", summary.Database), ("Source Table (dbo_QUAL)", summary.ValpacTable), ("Target Table (MT-audit-prod-QUAL)", summary.ProdTable),
-                ("Column Mapping", summary.TableLinkageText), ("Validation Date", summary.Timestamp), ("", ""),
+                ("Column Mapping", summary.TableLinkageText),
+                ("Approval Status Column", summary.ApprovalStatusCol ?? "_004"),
+                ("Approval Status Filter", string.IsNullOrWhiteSpace(summary.ApprovalStatusValues) ? "ALL — no filter applied" : summary.ApprovalStatusValues),
+                ("Validation Date", summary.Timestamp), ("", ""),
                 ("VALIDATION RESULTS", ""), ("Total Tested", summary.TotalValidated.ToString("N0")),
                 ("PASS (found in PRODUCTION)", summary.PassCount.ToString("N0")), ("FAIL (not found in PRODUCTION)", summary.FailCount.ToString("N0")),
                 ("Exception Rate", $"{summary.ExceptionRate:F2}%"), ("Status", summary.Status)
@@ -5807,8 +5861,9 @@ namespace HemisAudit.Services
         {
             var vSubj = summary.ValpacSubjCol ?? "_001";
             var pSubj = summary.ProdSubjCol ?? "IAIQUAL";
+            var aCol  = summary.ApprovalStatusCol ?? "_004";
             var sb = new StringBuilder();
-            sb.AppendLine($"Validation_Number,VALPAC_{vSubj},PROD_{pSubj},Validation_Result");
+            sb.AppendLine($"Validation_Number,VALPAC_{vSubj},Approval_Status_{aCol},PROD_{pSubj},Validation_Result");
             foreach (var row in summary.ReviewRows)
             {
                 var v = row.DisplayValues;
@@ -5816,6 +5871,7 @@ namespace HemisAudit.Services
                 {
                     CsvEscape(row.ValidationNumber.ToString()),
                     CsvEscape(v.TryGetValue("VALPAC_SUBJ", out var a) ? a : ""),
+                    CsvEscape(v.TryGetValue("VALPAC_APPROVAL_STATUS", out var s) ? s : ""),
                     CsvEscape(v.TryGetValue("PROD_SUBJ",   out var b) ? b : ""),
                     CsvEscape(row.ValidationResult)
                 }));
