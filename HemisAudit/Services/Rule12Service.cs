@@ -699,11 +699,11 @@ END";
             var cresExtra1Col     = string.IsNullOrWhiteSpace(request.CresExtra1Col) ? "" : Sanitise(request.CresExtra1Col);
 
             var extraCols = new System.Text.StringBuilder();
-            if (!string.IsNullOrWhiteSpace(cregExtra1Col)) extraCols.Append($"\n    CREG__{cregExtra1Col.TrimStart('_')},");
-            if (!string.IsNullOrWhiteSpace(cregExtra2Col)) extraCols.Append($"\n    CREG__{cregExtra2Col.TrimStart('_')},");
-            if (!string.IsNullOrWhiteSpace(cregFilterCol)) extraCols.Append($"\n    CREG__{cregFilterCol.TrimStart('_')},");
-            if (!string.IsNullOrWhiteSpace(cregExtra3Col)) extraCols.Append($"\n    CREG__{cregExtra3Col.TrimStart('_')},");
-            if (!string.IsNullOrWhiteSpace(cresExtra1Col)) extraCols.Append($"\n    CRES__{cresExtra1Col.TrimStart('_')},");
+            if (!string.IsNullOrWhiteSpace(cregExtra1Col)) extraCols.Append($"\n    a.CREG__EXTRA1 AS CREG__{cregExtra1Col.TrimStart('_')},");
+            if (!string.IsNullOrWhiteSpace(cregExtra2Col)) extraCols.Append($"\n    a.CREG__EXTRA2 AS CREG__{cregExtra2Col.TrimStart('_')},");
+            if (!string.IsNullOrWhiteSpace(cregFilterCol)) extraCols.Append($"\n    a.CREG__FILTER AS CREG__{cregFilterCol.TrimStart('_')},");
+            if (!string.IsNullOrWhiteSpace(cregExtra3Col)) extraCols.Append($"\n    a.CREG__EXTRA3 AS CREG__{cregExtra3Col.TrimStart('_')},");
+            if (!string.IsNullOrWhiteSpace(cresExtra1Col)) extraCols.Append($"\n    a.CRES__EXTRA1 AS CRES__{cresExtra1Col.TrimStart('_')},");
 
             var sql = $@"-- HEMIS RULE 12: ACTIVE STUDENTS
 -- Tables: [{cregTable}], [{qualTable}], [{cresTable}]
