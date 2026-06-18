@@ -1,0 +1,155 @@
+@model HemisAudit.ViewModels.Rule67RunReviewViewModel
+@{
+    ViewData["Title"] = $"Rule 67 Run {Model.RunId}";
+    Layout = "~/Views/Shared/_Layout.cshtml";
+    var canDownload = ViewBag.CanDownloadSavedRun is bool d && d;
+    var canOpenWorkspace = ViewBag.CanOpenWorkspace is bool o && o;
+    var isArchived = ViewBag.IsArchived is bool a && a;
+    var moduleNavigation = ViewBag.ModuleNavigation as HemisAudit.ViewModels.ModuleSequenceNavigationViewModel;
+    var e051Filter = string.IsNullOrWhiteSpace(Model.Summary.E051FilterValues) ? "ALL — no filter applied" : Model.Summary.E051FilterValues;
+}
+
+@if (TempData["Success"] != null)
+{
+    <div class="alert alert--success" style="margin-bottom:16px">@TempData["Success"]</div>
+}
+@if (TempData["Error"] != null)
+{
+    <div class="alert alert--error" style="margin-bottom:16px">@TempData["Error"]</div>
+}
+
+@if (moduleNavigation != null)
+{
+    @await Html.PartialAsync("_ModuleSequenceNav", moduleNavigation)
+}
+
+<div class="page-header">
+    <div>
+        <h1>Rule 67 — Saved Run #@Model.RunId</h1>
+        <p>@Model.EngagementName &nbsp;|&nbsp; @Model.MaconomyNumber</p>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        @if (canOpenWorkspace)
+        {
+            <a href="/Rule67?clientId=@Model.ClientId" class="btn btn-secondary">Open Workspace</a>
+        }
+        @if (canDownload)
+        {
+            <a href="/Rule67/DownloadSavedExcel?runId=@Model.RunId" class="btn btn-info">Download Excel</a>
+            <a href="/Rule67/DownloadSavedCsv?runId=@Model.RunId" class="btn btn-info">Download CSV</a>
+            <a href="/Rule67/DownloadSavedSql?runId=@Model.RunId" class="btn btn-secondary">Download SQL</a>
+        }
+    </div>
+</div>
+
+<div class="card" style="padding:20px;margin-bottom:20px">
+    <h3 class="section-title" style="margin-top:0">Run Summary</h3>
+    <div class="form-grid">
+        <div><div style="color:var(--text-muted);font-size:12px;text-transform:uppercase;font-weight:700">Database</div><div>@Model.Summary.Database</div></div>
+        <div><div style="color:var(--text-muted);font-size:12px;text-transform:uppercase;font-weight:700">CREG Table</div><div>@Model.Summary.CregTable</div></div>
+        <div><div style="color:var(--text-muted);font-size:12px;text-transform:uppercase;font-weight:700">STUD Table</div><div>@Model.Summary.StudTable</div></div>
+        <div><div style="color:var(--text-muted);font-size:12px;text-transform:uppercase;font-weight:700">E051 Filter</div><div style="font-size:12px"><code>@Model.Summary.CregE051Col</code> IN (@e051Filter)</div></div>
+        <div><div style="color:var(--text-muted);font-size:12px;text-transform:uppercase;font-weight:700">Timestamp</div><div>@Model.Summary.Timestamp</div></div>
+        <div><div style="color:var(--text-muted);font-size:12px;text-transform:uppercase;font-weight:700">Status</div><div><span class="badge @(Model.Summary.Status == "PASS" ? "badge--pass" : "badge--fail")">@Model.Summary.Status</span></div></div>
+    </div>
+    <div class="stats-grid" style="margin-top:16px">
+        <div class="stat-card"><div class="stat-card__label">CREG Total Records</div><div class="stat-card__value">@Model.Summary.CregRecordCount.ToString("N0")</div></div>
+        <div class="stat-card"><div class="stat-card__label">STUD Total Records</div><div class="stat-card__value">@Model.Summary.StudRecordCount.ToString("N0")</div></div>
+        <div class="stat-card"><div class="stat-card__label">Distinct CREG Pairs Checked</div><div class="stat-card__value">@Model.Summary.TotalValidated.ToString("N0")</div></div>
+        <div class="stat-card stat-card--pass"><div class="stat-card__label">PASS (pair in STUD + E051 valid)</div><div class="stat-card__value">@Model.Summary.PassCount.ToString("N0")</div></div>
+        <div class="stat-card stat-card--fail"><div class="stat-card__label">FAIL — Not in STUD</div><div class="stat-card__value">@Model.Summary.NotInStudCount.ToString("N0")</div></div>
+        <div class="stat-card stat-card--fail"><div class="stat-card__label">FAIL — E051 Invalid</div><div class="stat-card__value">@Model.Summary.InvalidE051Count.ToString("N0")</div></div>
+    </div>
+</div>
+
+@if (Model.Signoffs.Any())
+{
+    <div class="card" style="padding:20px;margin-bottom:20px">
+        <h3 class="section-title" style="margin-top:0">Signoffs</h3>
+        <table class="data-table">
+            <thead><tr><th>Role</th><th>Reviewer</th><th>Signed Off At</th><th>Comment</th></tr></thead>
+            <tbody>
+                @foreach (var s in Model.Signoffs)
+                {
+                    <tr>
+                        <td>@s.SignoffRole</td>
+                        <td>@s.ReviewerName</td>
+                        <td>@s.SignedOffAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</td>
+                        <td>@s.Comment</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+        @if (!isArchived && Model.CanCurrentUserSignOff && !Model.CurrentUserHasSignedOff && Model.IsCurrentRun)
+        {
+            <form method="post" action="/Rule67/AddSignoff" style="margin-top:16px">
+                @Html.AntiForgeryToken()
+                <input type="hidden" name="runId" value="@Model.RunId" />
+                <div class="field-group"><label>Signoff Comment</label><textarea name="comment" rows="3" placeholder="Add review notes"></textarea></div>
+                <button type="submit" class="btn btn-primary">Sign Off</button>
+            </form>
+        }
+        @if (!isArchived && Model.CanCurrentUserRemoveSignoff && Model.IsCurrentRun)
+        {
+            <form method="post" action="/Rule67/RemoveSignoff" style="margin-top:8px">
+                @Html.AntiForgeryToken()
+                <input type="hidden" name="runId" value="@Model.RunId" />
+                <button type="submit" class="btn btn-warning" onclick="return confirm('Remove your signoff?')">Remove Signoff</button>
+            </form>
+        }
+    </div>
+}
+
+<div class="card" style="padding:20px">
+    <h3 class="section-title" style="margin-top:0">Result Rows <small style="font-weight:normal;font-size:13px">(browser preview)</small></h3>
+    @if (Model.Summary.IsPreviewOnly)
+    {
+        <div class="alert alert--warning" style="margin-bottom:12px">Showing a preview of @Model.Summary.PreviewLimit rows. Download Excel or CSV for the full result set.</div>
+    }
+    <div class="table-wrapper" style="overflow-x:auto">
+        <table class="data-table" style="min-width:700px;font-size:12px;font-family:Consolas,monospace">
+            <thead>
+                <tr>
+                    <th>#</th>
+                    <th>CREG [_007] Student No</th>
+                    <th>CREG [_001] Qual</th>
+                    <th>CREG [@Model.Summary.CregE051Col] E051</th>
+                    <th>STUD [_007]</th>
+                    <th>STUD [_001] Qual</th>
+                    <th>In STUD</th>
+                    <th>E051 Valid</th>
+                    <th>Result</th>
+                    <th>Exception Code</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var row in Model.Summary.ReviewRows)
+                {
+                    var dv = row.DisplayValues;
+                    string DV(string k) => dv.TryGetValue(k, out var val) ? (val ?? "") : "";
+                    var isFail = row.ValidationResult == "FAIL";
+                    <tr style="background:@(isFail ? "#FFF3F3" : "#F3FFF3")">
+                        <td>@row.ValidationNumber</td>
+                        <td>@DV("CREG_STUD_NO")</td>
+                        <td>@DV("CREG_QUAL")</td>
+                        <td>@DV("CREG_E051")</td>
+                        <td>@DV("STUD_NO")</td>
+                        <td>@DV("STUD_QUAL")</td>
+                        <td>@DV("IN_STUD")</td>
+                        <td>@DV("E051_VALID")</td>
+                        <td><span class="badge @(isFail ? "badge--fail" : "badge--pass")">@row.ValidationResult</span></td>
+                        <td>@(isFail ? row.ExceptionCode : "")</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+</div>
+
+@if (!string.IsNullOrWhiteSpace(Model.GeneratedSql))
+{
+    <div class="card" style="padding:20px;margin-top:20px">
+        <h3 class="section-title" style="margin-top:0">SQL Script</h3>
+        <pre style="overflow-x:auto;font-size:12px;background:var(--code-bg,#1e1e1e);color:var(--code-text,#d4d4d4);padding:16px;border-radius:8px">@Model.GeneratedSql</pre>
+    </div>
+}

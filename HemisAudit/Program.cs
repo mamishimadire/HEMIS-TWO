@@ -155,6 +155,7 @@ builder.Services.AddScoped<IRule63Service, Rule63Service>();
 builder.Services.AddScoped<IRule64Service, Rule64Service>();
 builder.Services.AddScoped<IRule65Service, Rule65Service>();
 builder.Services.AddScoped<IRule66Service, Rule66Service>();
+builder.Services.AddScoped<IRule67Service, Rule67Service>();
 builder.Services.AddScoped<IExportService, ExportService>();
 builder.Services.AddScoped<IAuditLogService, AuditLogService>();
 builder.Services.AddSingleton<IValidationOperationService, ValidationOperationService>();
@@ -548,6 +549,16 @@ app.MapControllerRoute(
     name: "rule66-short",
     pattern: "Rule66",
     defaults: new { controller = "Rule66", action = "Index" });
+
+app.MapControllerRoute(
+    name: "rule67-run",
+    pattern: "Rule67/Run/{id:int}",
+    defaults: new { controller = "Rule67", action = "Run" });
+
+app.MapControllerRoute(
+    name: "rule67-short",
+    pattern: "Rule67",
+    defaults: new { controller = "Rule67", action = "Index" });
 
 app.MapControllerRoute(
     name: "rule58-run",

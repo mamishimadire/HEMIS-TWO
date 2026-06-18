@@ -83,6 +83,8 @@ namespace HemisAudit.Services
         byte[] ExportRule53Csv(Rule53ValidationSummary summary);
         byte[] ExportRule66Excel(Rule66ValidationSummary summary);
         byte[] ExportRule66Csv(Rule66ValidationSummary summary);
+        byte[] ExportRule67Excel(Rule67ValidationSummary summary);
+        byte[] ExportRule67Csv(Rule67ValidationSummary summary);
         byte[] ExportSql(string sql);
     }
 
@@ -6045,6 +6047,111 @@ namespace HemisAudit.Services
                     CsvEscape(v.TryGetValue("FUNDING_SOURCE",  out var fs) ? fs : ""),
                     CsvEscape(v.TryGetValue("CREG_STUD_NO",   out var cn) ? cn : ""),
                     CsvEscape(row.ValidationResult)
+                }));
+            }
+            return System.Text.Encoding.UTF8.GetBytes(sb.ToString());
+        }
+
+        // ─── Rule 67: CREG-STUD Pair Validation ────────────────────────────────
+
+        public byte[] ExportRule67Excel(Rule67ValidationSummary summary)
+        {
+            using var wb = new XLWorkbook();
+            var e051Col = summary.CregE051Col ?? "_051";
+            var e051Filter = string.IsNullOrWhiteSpace(summary.E051FilterValues) ? "ALL — no filter applied" : summary.E051FilterValues;
+            var wsResults = wb.Worksheets.Add("Validation Results");
+            StyleHeaderRow(wsResults, 1, $"RULE 67: CREG [{summary.CregStudentNoCol ?? "_007"}]+[{summary.CregQualCol ?? "_001"}] Pair in STUD | [{e051Col}] Filter: {e051Filter}", 8);
+            var headers = new[] { "Validation #", "CREG [_007] Student No", "CREG [_001] Qual", $"CREG [{e051Col}] E051", "STUD [_007]", "STUD [_001] Qual", "In STUD", "E051 Valid", "Result", "Exception Code" };
+            for (int i = 0; i < headers.Length; i++)
+            {
+                var cell = wsResults.Cell(2, i + 1);
+                cell.Value = headers[i]; cell.Style.Font.Bold = true;
+                cell.Style.Fill.BackgroundColor = XLColor.FromHtml("#1A237E");
+                cell.Style.Font.FontColor = XLColor.White;
+            }
+            int rowIndex = 3;
+            foreach (var row in summary.ReviewRows)
+            {
+                var v = row.DisplayValues;
+                string DV(string k) => v.TryGetValue(k, out var val) ? val ?? "" : "";
+                var isFail = string.Equals(row.ValidationResult, "FAIL", StringComparison.OrdinalIgnoreCase);
+                wsResults.Cell(rowIndex, 1).Value = row.ValidationNumber;
+                wsResults.Cell(rowIndex, 2).Value = DV("CREG_STUD_NO");
+                wsResults.Cell(rowIndex, 3).Value = DV("CREG_QUAL");
+                wsResults.Cell(rowIndex, 4).Value = DV("CREG_E051");
+                wsResults.Cell(rowIndex, 5).Value = DV("STUD_NO");
+                wsResults.Cell(rowIndex, 6).Value = DV("STUD_QUAL");
+                wsResults.Cell(rowIndex, 7).Value = DV("IN_STUD");
+                wsResults.Cell(rowIndex, 8).Value = DV("E051_VALID");
+                wsResults.Cell(rowIndex, 9).Value = row.ValidationResult;
+                wsResults.Cell(rowIndex, 10).Value = isFail ? row.ExceptionCode : "";
+                wsResults.Range(rowIndex, 1, rowIndex, 10).Style.Fill.BackgroundColor =
+                    isFail ? XLColor.FromHtml("#FFF3F3") : XLColor.FromHtml("#F3FFF3");
+                rowIndex++;
+            }
+            for (int c = 1; c <= 10; c++) wsResults.Column(c).AdjustToContents();
+
+            var wsSummary = wb.Worksheets.Add("Summary");
+            StyleHeaderRow(wsSummary, 1, "HEMIS RULE 67: CREG-STUD PAIR VALIDATION", 2);
+            var summaryData = new[]
+            {
+                ("Database", summary.Database),
+                ("CREG Table", summary.CregTable),
+                ("STUD Table", summary.StudTable),
+                ("E051 Column", e051Col),
+                ("E051 Filter", e051Filter),
+                ("Validation Date", summary.Timestamp), ("", ""),
+                ("VALIDATION RESULTS", ""),
+                ("CREG Total Records", summary.CregRecordCount.ToString("N0")),
+                ("STUD Total Records", summary.StudRecordCount.ToString("N0")),
+                ("Distinct CREG Pairs Checked", summary.TotalValidated.ToString("N0")),
+                ("PASS (in STUD + E051 valid)", summary.PassCount.ToString("N0")),
+                ("FAIL — Not in STUD", summary.NotInStudCount.ToString("N0")),
+                ("FAIL — E051 Invalid", summary.InvalidE051Count.ToString("N0")),
+                ("Total FAIL (exception 00708)", summary.FailCount.ToString("N0")),
+                ("Exception Rate", $"{summary.ExceptionRate:F2}%"),
+                ("Status", summary.Status)
+            };
+            int sRow = 2;
+            foreach (var (label, value) in summaryData)
+            {
+                if (label == "VALIDATION RESULTS")
+                { var hc = wsSummary.Cell(sRow, 1); hc.Value = label; hc.Style.Font.Bold = true; hc.Style.Fill.BackgroundColor = XLColor.FromHtml("#1A237E"); hc.Style.Font.FontColor = XLColor.White; wsSummary.Range(sRow, 1, sRow, 2).Merge(); }
+                else if (label != "")
+                {
+                    wsSummary.Cell(sRow, 1).Value = label; wsSummary.Cell(sRow, 1).Style.Font.Bold = true; wsSummary.Cell(sRow, 1).Style.Fill.BackgroundColor = XLColor.FromHtml("#F5F5F5");
+                    wsSummary.Cell(sRow, 2).Value = value;
+                    if (label == "Status") { wsSummary.Cell(sRow, 2).Style.Fill.BackgroundColor = value == "PASS" ? XLColor.FromHtml("#C8E6C9") : XLColor.FromHtml("#FFCDD2"); wsSummary.Cell(sRow, 2).Style.Font.Bold = true; }
+                }
+                sRow++;
+            }
+            wsSummary.Column(1).Width = 40; wsSummary.Column(2).Width = 70;
+            using var ms = new MemoryStream();
+            wb.SaveAs(ms);
+            return ms.ToArray();
+        }
+
+        public byte[] ExportRule67Csv(Rule67ValidationSummary summary)
+        {
+            var e051Col = summary.CregE051Col ?? "_051";
+            var sb = new StringBuilder();
+            sb.AppendLine($"Validation_Number,CREG_STUD_NO,CREG_QUAL,CREG_{e051Col},STUD_NO,STUD_QUAL,IN_STUD,E051_VALID,Validation_Result,Exception_Code");
+            foreach (var row in summary.ReviewRows)
+            {
+                var v = row.DisplayValues;
+                string DV(string k) => v.TryGetValue(k, out var val) ? val ?? "" : "";
+                sb.AppendLine(string.Join(",", new[]
+                {
+                    CsvEscape(row.ValidationNumber.ToString()),
+                    CsvEscape(DV("CREG_STUD_NO")),
+                    CsvEscape(DV("CREG_QUAL")),
+                    CsvEscape(DV("CREG_E051")),
+                    CsvEscape(DV("STUD_NO")),
+                    CsvEscape(DV("STUD_QUAL")),
+                    CsvEscape(DV("IN_STUD")),
+                    CsvEscape(DV("E051_VALID")),
+                    CsvEscape(row.ValidationResult),
+                    CsvEscape(string.Equals(row.ValidationResult,"FAIL",StringComparison.OrdinalIgnoreCase) ? row.ExceptionCode : "")
                 }));
             }
             return System.Text.Encoding.UTF8.GetBytes(sb.ToString());

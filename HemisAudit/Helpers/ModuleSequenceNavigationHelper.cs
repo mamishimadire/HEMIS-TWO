@@ -65,7 +65,8 @@ namespace HemisAudit.Helpers
             new(63, "Rule 63", "Qualification Code Reference Validation"),
             new(64, "Rule 64", "STUD to CREG Student Number Validation"),
             new(65, "Rule 65", "Cancellation Census Date Validation"),
-            new(66, "Rule 66", "NSFAS Students in CREG")
+            new(66, "Rule 66", "NSFAS Students in CREG"),
+            new(67, "Rule 67", "CREG-STUD Pair Validation")
         };
 
         public static ModuleSequenceNavigationViewModel? BuildForWorkspace(int currentRuleNumber, int clientId)

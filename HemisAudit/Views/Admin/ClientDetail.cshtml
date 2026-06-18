@@ -225,7 +225,7 @@
                 <span class="collapsible-trigger__title">Modules</span>
                 <span class="collapsible-trigger__subtitle">Open the validation workspaces or review module availability for this engagement.</span>
             </div>
-            <span class="collapsible-trigger__meta">Rules 1-10, 11-32, 34-36, 37, 38, 39, 40, 41, 44, 45, 46, 47, 48, 51, 52, 53, 54, 55, 57, 58, 59, 60, 61, 62, 63, 64, 65 and 66</span>
+            <span class="collapsible-trigger__meta">Rules 1-10, 11-32, 34-36, 37, 38, 39, 40, 41, 44, 45, 46, 47, 48, 51, 52, 53, 54, 55, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66 and 67</span>
             <span class="collapsible-trigger__icon" aria-hidden="true"></span>
         </summary>
         <div class="collapsible-panel">
@@ -683,6 +683,14 @@
                             <p class="module-card__text">Checks that every NSFAS student in <code>STUD</code> (where <code>_019</code> matches the funding source filter, e.g. <code>NS</code>) also has a course registration record in <code>CREG</code> on <code>_007</code>. PASS when found; FAIL when missing.</p>
                             <div class="module-card__actions">
                                 <a href="/Rule66?clientId=@Model.Id" class="btn btn-success">Open Rule 66</a>
+                            </div>
+                        </article>
+                        <article class="module-card">
+                            <div class="module-card__eyebrow">Rule 67</div>
+                            <h4 class="module-card__title">CREG-STUD Pair Validation</h4>
+                            <p class="module-card__text">Checks that every <code>CREG._007 + _001</code> (student number + qualification code) pair exists in <code>STUD</code> and that <code>CREG._051</code> (E051 code) matches the configured filter (default: <code>E</code>). Exception code <strong>00708</strong> when missing or E051 invalid.</p>
+                            <div class="module-card__actions">
+                                <a href="/Rule67?clientId=@Model.Id" class="btn btn-success">Open Rule 67</a>
                             </div>
                         </article>
                     </div>
