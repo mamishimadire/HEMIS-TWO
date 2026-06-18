@@ -22,6 +22,8 @@ namespace HemisAudit.ViewModels
         public string StudStudentNoCol { get; set; } = "_007";
         public string StudQualCol { get; set; } = "_001";
         public string E051FilterValues { get; set; } = "E";
+        public string DetailTable { get; set; } = "dbo_CREG_VALIDATION_DETAIL";
+        public string DetailErrorCode { get; set; } = "00708";
     }
 
     public class Rule67VerifyResult
@@ -47,6 +49,8 @@ namespace HemisAudit.ViewModels
         public string StudStudentNoCol { get; set; } = "_007";
         public string StudQualCol { get; set; } = "_001";
         public string E051FilterValues { get; set; } = "E";
+        public string DetailTable { get; set; } = "dbo_CREG_VALIDATION_DETAIL";
+        public string DetailErrorCode { get; set; } = "00708";
     }
 
     public class Rule67ControlSummaryItemViewModel
@@ -96,6 +100,8 @@ namespace HemisAudit.ViewModels
         public string StudStudentNoCol { get; set; } = "_007";
         public string StudQualCol { get; set; } = "_001";
         public string E051FilterValues { get; set; } = "E";
+        public string DetailTable { get; set; } = "";
+        public string DetailErrorCode { get; set; } = "00708";
         public string TableLinkageText { get; set; } = "";
         public string RuleModeText { get; set; } = "";
         public List<string> ProcedureSteps { get; set; } = new();
@@ -103,6 +109,12 @@ namespace HemisAudit.ViewModels
         public int? SavedRunId { get; set; }
         public List<Rule67ControlSummaryItemViewModel> ControlSummaries { get; set; } = new();
         public List<Rule67ValidationRowRecord> ReviewRows { get; set; } = new();
+        // Reconciliation fields (populated when DetailTable is configured)
+        public int DetailRecordCount { get; set; }
+        public int ConfirmedByRule29Count { get; set; }
+        public int NotInRule29Count { get; set; }
+        public int Rule29OnlyCount { get; set; }
+        public List<Rule67Rule29OnlyRow> Rule29OnlyRows { get; set; } = new();
         public string? Warning { get; set; }
         public string? Error { get; set; }
     }
@@ -123,6 +135,8 @@ namespace HemisAudit.ViewModels
         public string StudStudentNoCol { get; set; } = "_007";
         public string StudQualCol { get; set; } = "_001";
         public string E051FilterValues { get; set; } = "E";
+        public string DetailTable { get; set; } = "dbo_CREG_VALIDATION_DETAIL";
+        public string DetailErrorCode { get; set; } = "00708";
         public string CurrentUserEngagementRole { get; set; } = "";
         public bool HasDataAnalystSignoff { get; set; }
         public bool CurrentUserHasSignedOff { get; set; }
@@ -182,5 +196,12 @@ namespace HemisAudit.ViewModels
         public bool Success { get; set; }
         public string Sql { get; set; } = "";
         public string? Error { get; set; }
+    }
+
+    public class Rule67Rule29OnlyRow
+    {
+        public int RowNumber { get; set; }
+        public string StudentNo { get; set; } = "";
+        public string QualCode { get; set; } = "";
     }
 }

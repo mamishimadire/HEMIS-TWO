@@ -481,6 +481,8 @@ SELECT
 
             var cregTable      = Sanitise(request.CregTable);
             var studTable      = Sanitise(request.StudTable);
+            var detailTable    = Sanitise(request.DetailTable ?? "");
+            var detailErrCodes = ParseDetailErrorCodes(request.DetailErrorCode ?? "00708");
             var cregStudentCol = Sanitise(request.CregStudentNoCol);
             var cregQualCol    = Sanitise(request.CregQualCol);
             var cregE051Col    = Sanitise(string.IsNullOrWhiteSpace(request.CregE051Col) ? "_051" : request.CregE051Col);
@@ -489,30 +491,35 @@ SELECT
             var e051Values     = ParseFilterValues(request.E051FilterValues);
             var e051ValuesText = e051Values.Count > 0 ? string.Join(", ", e051Values) : "ALL — no filter applied";
 
-            // Single batch: RS1=source counts, RS2=validation counts, RS3=preview rows
+            // Single batch: RS1=source counts, RS2=validation+reconciliation counts, RS3=rows, RS4=Rule29-only
             await using var batchCmd = conn.CreateConfiguredCommand();
-            batchCmd.CommandText = BuildSingleBatchSql(cregTable, studTable, cregStudentCol, cregQualCol, cregE051Col, studStudentCol, studQualCol, e051Values, includeAllReviewRows ? null : BrowserPreviewRowLimit);
+            batchCmd.CommandText = BuildSingleBatchSql(cregTable, studTable, detailTable, detailErrCodes, cregStudentCol, cregQualCol, cregE051Col, studStudentCol, studQualCol, e051Values, includeAllReviewRows ? null : BrowserPreviewRowLimit);
             await using var batchReader = await batchCmd.ExecuteReaderAsync();
 
-            // RS 1: source table row counts
-            int cregCount = 0, studCount = 0;
+            // RS 1: source table row counts + detail count
+            int cregCount = 0, studCount = 0, detailCount = 0;
             if (await batchReader.ReadAsync())
             {
-                cregCount = batchReader.IsDBNull(0) ? 0 : Convert.ToInt32(batchReader.GetValue(0), CultureInfo.InvariantCulture);
-                studCount = batchReader.IsDBNull(1) ? 0 : Convert.ToInt32(batchReader.GetValue(1), CultureInfo.InvariantCulture);
+                cregCount   = batchReader.IsDBNull(0) ? 0 : Convert.ToInt32(batchReader.GetValue(0), CultureInfo.InvariantCulture);
+                studCount   = batchReader.IsDBNull(1) ? 0 : Convert.ToInt32(batchReader.GetValue(1), CultureInfo.InvariantCulture);
+                detailCount = batchReader.IsDBNull(2) ? 0 : Convert.ToInt32(batchReader.GetValue(2), CultureInfo.InvariantCulture);
             }
 
-            // RS 2: validation counts
+            // RS 2: validation counts + reconciliation counts
             int totalChecked = 0, passCount = 0, notInStudCount = 0, invalidE051Count = 0;
+            int confirmedByRule29Count = 0, notInRule29Count = 0, rule29OnlyCount = 0;
             if (await batchReader.NextResultAsync() && await batchReader.ReadAsync())
             {
-                totalChecked     = GetInt(batchReader, 0);
-                passCount        = GetInt(batchReader, 1);
-                notInStudCount   = GetInt(batchReader, 2);
-                invalidE051Count = GetInt(batchReader, 3);
+                totalChecked            = GetInt(batchReader, 0);
+                passCount               = GetInt(batchReader, 1);
+                notInStudCount          = GetInt(batchReader, 2);
+                invalidE051Count        = GetInt(batchReader, 3);
+                confirmedByRule29Count  = GetInt(batchReader, 4);
+                notInRule29Count        = GetInt(batchReader, 5);
+                rule29OnlyCount         = GetInt(batchReader, 6);
             }
 
-            // RS 3: preview / full rows
+            // RS 3: preview / full rows (now includes Reconciliation_Status column)
             var reviewRows = new List<Rule67ValidationRowRecord>();
             if (await batchReader.NextResultAsync())
             {
@@ -533,6 +540,21 @@ SELECT
                     };
                     EnrichDisplayValues(row);
                     reviewRows.Add(row);
+                }
+            }
+
+            // RS 4: Rule 29-only rows (in detail table 00708 but not in Rule 67 FAIL)
+            var rule29OnlyRows = new List<Rule67Rule29OnlyRow>();
+            if (await batchReader.NextResultAsync())
+            {
+                while (await batchReader.ReadAsync())
+                {
+                    rule29OnlyRows.Add(new Rule67Rule29OnlyRow
+                    {
+                        RowNumber  = rule29OnlyRows.Count + 1,
+                        StudentNo  = batchReader.IsDBNull(1) ? "" : Convert.ToString(batchReader.GetValue(1), CultureInfo.InvariantCulture) ?? "",
+                        QualCode   = batchReader.IsDBNull(2) ? "" : Convert.ToString(batchReader.GetValue(2), CultureInfo.InvariantCulture) ?? ""
+                    });
                 }
             }
             await batchReader.CloseAsync();
@@ -556,29 +578,36 @@ SELECT
 
             return new Rule67ValidationSummary
             {
-                Success           = true,
-                CregRecordCount   = cregCount,
-                StudRecordCount   = studCount,
-                TotalValidated    = totalChecked,
-                DisplayedCount    = reviewRows.Count,
-                IsPreviewOnly     = isPreviewOnly,
-                PreviewLimit      = isPreviewOnly ? BrowserPreviewRowLimit : 0,
-                PassCount         = passCount,
-                FailCount         = failCount,
-                NotInStudCount    = notInStudCount,
-                InvalidE051Count  = invalidE051Count,
-                ExceptionRate     = totalChecked == 0 ? 0m : Math.Round(failCount * 100m / totalChecked, 2),
-                Status            = failCount == 0 ? "PASS" : "FAIL",
-                Timestamp         = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
-                Database          = request.Database,
-                CregTable         = request.CregTable,
-                StudTable         = request.StudTable,
-                CregStudentNoCol  = cregStudentCol,
-                CregQualCol       = cregQualCol,
-                CregE051Col       = cregE051Col,
-                StudStudentNoCol  = studStudentCol,
-                StudQualCol       = studQualCol,
-                E051FilterValues  = e051Values.Count > 0 ? string.Join(",", e051Values) : "",
+                Success                = true,
+                CregRecordCount        = cregCount,
+                StudRecordCount        = studCount,
+                TotalValidated         = totalChecked,
+                DisplayedCount         = reviewRows.Count,
+                IsPreviewOnly          = isPreviewOnly,
+                PreviewLimit           = isPreviewOnly ? BrowserPreviewRowLimit : 0,
+                PassCount              = passCount,
+                FailCount              = failCount,
+                NotInStudCount         = notInStudCount,
+                InvalidE051Count       = invalidE051Count,
+                ExceptionRate          = totalChecked == 0 ? 0m : Math.Round(failCount * 100m / totalChecked, 2),
+                Status                 = failCount == 0 ? "PASS" : "FAIL",
+                Timestamp              = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
+                Database               = request.Database,
+                CregTable              = request.CregTable,
+                StudTable              = request.StudTable,
+                CregStudentNoCol       = cregStudentCol,
+                CregQualCol            = cregQualCol,
+                CregE051Col            = cregE051Col,
+                StudStudentNoCol       = studStudentCol,
+                StudQualCol            = studQualCol,
+                E051FilterValues       = e051Values.Count > 0 ? string.Join(",", e051Values) : "",
+                DetailTable            = detailTable,
+                DetailErrorCode        = detailErrCodes.Count > 0 ? string.Join(",", detailErrCodes.Select(c => c.ToString())) : "00708",
+                DetailRecordCount      = detailCount,
+                ConfirmedByRule29Count = confirmedByRule29Count,
+                NotInRule29Count       = notInRule29Count,
+                Rule29OnlyCount        = rule29OnlyCount,
+                Rule29OnlyRows         = rule29OnlyRows,
                 TableLinkageText  = $"{request.CregTable}.[{cregStudentCol}]+[{cregQualCol}] <> {request.StudTable}.[{studStudentCol}]+[{studQualCol}] (E051 filter: [{cregE051Col}] IN {e051ValuesText})",
                 RuleModeText      = $"CREG pairs checked against STUD, [{cregE051Col}] must be IN ({e051ValuesText})",
                 ProcedureSteps    = new List<string>
@@ -587,8 +616,9 @@ SELECT
                     $"For each CREG pair, check if [{studStudentCol}]+[{studQualCol}] exists in {request.StudTable}.",
                     $"Also check that [{cregE051Col}] is IN ({e051ValuesText}).",
                     "Mark PASS when the pair is found in STUD AND E051 is in the filter. FAIL otherwise (exception code 00708).",
-                    "A FAIL indicates: pair missing from STUD, or E051 code does not match the expected value(s)."
-                },
+                    "A FAIL indicates: pair missing from STUD, or E051 code does not match the expected value(s).",
+                    string.IsNullOrWhiteSpace(detailTable) ? "" : $"Reconciliation: cross-reference FAIL results against {detailTable} (error 00708) to confirm findings."
+                }.Where(s => !string.IsNullOrEmpty(s)).ToList(),
                 ClientId          = request.ClientId,
                 ControlSummaries  = controlSummaries,
                 ReviewRows        = reviewRows,
@@ -600,8 +630,8 @@ SELECT
 
         // ─── SQL Builders ─────────────────────────────────────────────────────
 
-        // Materialise temp tables once, return counts (RS1) + preview rows (RS2) in a single round-trip.
-        private static string BuildSingleBatchSql(string cregTable, string studTable, string cregStudentCol, string cregQualCol, string cregE051Col, string studStudentCol, string studQualCol, IReadOnlyList<string> e051Values, int? maxRows)
+        // Materialise temp tables once, return RS1=source counts, RS2=validation counts, RS3=rows, RS4=Rule29-only.
+        private static string BuildSingleBatchSql(string cregTable, string studTable, string detailTable, IReadOnlyList<long> detailErrCodes, string cregStudentCol, string cregQualCol, string cregE051Col, string studStudentCol, string studQualCol, IReadOnlyList<string> e051Values, int? maxRows)
         {
             var e051ValidExpr = e051Values.Count > 0
                 ? $"CASE WHEN CP.CREG_E051 IN ({BuildInClauseSql(e051Values)}) THEN 'Yes' ELSE 'No' END"
@@ -617,17 +647,81 @@ SELECT
                 ? "CASE WHEN ValidationResult = 'FAIL' THEN 0 ELSE 1 END, CREG_STUD_NO, CREG_QUAL"
                 : "CREG_STUD_NO, CREG_QUAL";
 
+            var hasDetail     = !string.IsNullOrWhiteSpace(detailTable);
+            // Reconciliation column — '' when no detail table so the column always exists
+            var reconExpr     = hasDetail
+                ? $"CASE WHEN {passExpr} THEN '' WHEN DP.DETAIL_STUD_NO IS NOT NULL THEN 'Confirmed by Rule 29' ELSE 'Not in Rule 29' END"
+                : "''";
+            var detailJoin    = hasDetail ? "LEFT JOIN #R67DetailPairs DP ON DP.DETAIL_STUD_NO = CP.CREG_STUD_NO AND DP.DETAIL_QUAL = CP.CREG_QUAL" : "";
+            var detailErrInSql  = hasDetail ? BuildDetailErrInSql(detailErrCodes) : "0";
+            var detailCountExpr = hasDetail
+                ? $"(SELECT COUNT(*) FROM [{detailTable}] WITH (NOLOCK) WHERE TRY_CAST(LTRIM(RTRIM(CAST([Error] AS nvarchar(50)))) AS bigint) IN ({detailErrInSql}))"
+                : "0";
+            var reconCountsSql  = hasDetail
+                ? @"SUM(CASE WHEN Reconciliation_Status = 'Confirmed by Rule 29' THEN 1 ELSE 0 END) AS ConfirmedByRule29Count,
+    SUM(CASE WHEN Reconciliation_Status = 'Not in Rule 29'       THEN 1 ELSE 0 END) AS NotInRule29Count,
+    (SELECT COUNT(*) FROM #R67DetailPairs DP2 WHERE DP2.DETAIL_STUD_NO IS NOT NULL AND NOT EXISTS (SELECT 1 FROM #R67Results R2 WHERE R2.CREG_STUD_NO = DP2.DETAIL_STUD_NO AND R2.CREG_QUAL = DP2.DETAIL_QUAL AND R2.ValidationResult = 'FAIL')) AS Rule29OnlyCount"
+                : "0 AS ConfirmedByRule29Count, 0 AS NotInRule29Count, 0 AS Rule29OnlyCount";
+            var detailSetupSql  = hasDetail ? $@"
+IF OBJECT_ID('tempdb..#R67DetailPairs') IS NOT NULL DROP TABLE #R67DetailPairs;
+
+-- Materialise Rule 29 (00708) pairs from dbo_CREG_VALIDATION_DETAIL
+-- Element_Information format: 'E007: <StudentNo>       E001: <QualCode>'
+SELECT DISTINCT
+    LTRIM(RTRIM(CONVERT(nvarchar(255), CASE
+        WHEN CHARINDEX('E007:', CONVERT(nvarchar(500), [Element_Information])) > 0
+         AND CHARINDEX('E001:', CONVERT(nvarchar(500), [Element_Information])) > 0
+        THEN SUBSTRING(CONVERT(nvarchar(500), [Element_Information]),
+            CHARINDEX('E007:', CONVERT(nvarchar(500), [Element_Information])) + 5,
+            CHARINDEX('E001:', CONVERT(nvarchar(500), [Element_Information]))
+                - (CHARINDEX('E007:', CONVERT(nvarchar(500), [Element_Information])) + 5)
+        )
+    END))) AS DETAIL_STUD_NO,
+    UPPER(LTRIM(RTRIM(CONVERT(nvarchar(255), CASE
+        WHEN CHARINDEX('E001:', CONVERT(nvarchar(500), [Element_Information])) > 0
+        THEN SUBSTRING(CONVERT(nvarchar(500), [Element_Information]),
+            CHARINDEX('E001:', CONVERT(nvarchar(500), [Element_Information])) + 5,
+            LEN(CONVERT(nvarchar(500), [Element_Information]))
+        )
+    END)))) AS DETAIL_QUAL
+INTO #R67DetailPairs
+FROM [{detailTable}] WITH (NOLOCK)
+WHERE CHARINDEX('E007:', CONVERT(nvarchar(500), [Element_Information])) > 0
+  AND CHARINDEX('E001:', CONVERT(nvarchar(500), [Element_Information])) > 0
+  AND TRY_CAST(LTRIM(RTRIM(CAST([Error] AS nvarchar(50)))) AS bigint) IN ({detailErrInSql})
+OPTION (MAXDOP 4);
+
+CREATE INDEX IX_R67DP ON #R67DetailPairs (DETAIL_STUD_NO, DETAIL_QUAL);" : "";
+            var rule29OnlySql   = hasDetail ? $@"
+-- RS 4: Rule 29 records (00708) whose student+qual pair is not in Rule 67 FAIL results
+SELECT {top}
+    ROW_NUMBER() OVER (ORDER BY DP.DETAIL_STUD_NO, DP.DETAIL_QUAL) AS RowNum,
+    DP.DETAIL_STUD_NO, DP.DETAIL_QUAL
+FROM #R67DetailPairs DP
+WHERE DP.DETAIL_STUD_NO IS NOT NULL
+  AND NOT EXISTS (
+    SELECT 1 FROM #R67Results R
+    WHERE R.CREG_STUD_NO = DP.DETAIL_STUD_NO
+      AND R.CREG_QUAL    = DP.DETAIL_QUAL
+      AND R.ValidationResult = 'FAIL'
+  )
+ORDER BY DP.DETAIL_STUD_NO, DP.DETAIL_QUAL;"
+                : "SELECT CAST(0 AS int) AS RowNum, CAST('' AS nvarchar(255)) AS DETAIL_STUD_NO, CAST('' AS nvarchar(255)) AS DETAIL_QUAL WHERE 1=0;";
+            var detailDropSql   = hasDetail ? "DROP TABLE IF EXISTS #R67DetailPairs;" : "";
+
             return $@"
 IF OBJECT_ID('tempdb..#R67CregPairs') IS NOT NULL DROP TABLE #R67CregPairs;
 IF OBJECT_ID('tempdb..#R67StudPairs') IS NOT NULL DROP TABLE #R67StudPairs;
 IF OBJECT_ID('tempdb..#R67Results')   IS NOT NULL DROP TABLE #R67Results;
+{detailSetupSql}
 
--- RS 1: source table row counts (included in the same batch to avoid extra round-trips)
+-- RS 1: source table row counts + optional detail count
 SELECT
     (SELECT COUNT(*) FROM [{cregTable}] WITH (NOLOCK)) AS CregCount,
-    (SELECT COUNT(*) FROM [{studTable}] WITH (NOLOCK)) AS StudCount;
+    (SELECT COUNT(*) FROM [{studTable}] WITH (NOLOCK)) AS StudCount,
+    {detailCountExpr}                                  AS DetailCount;
 
--- Materialise CREG distinct pairs — NOLOCK: VALPAC tables are read-only during validation
+-- Materialise CREG distinct pairs
 SELECT DISTINCT
     CONVERT(nvarchar(255), C.[{cregStudentCol}])                       AS CREG_STUD_NO,
     UPPER(LTRIM(RTRIM(CONVERT(nvarchar(255), C.[{cregQualCol}]))))     AS CREG_QUAL,
@@ -654,27 +748,30 @@ OPTION (MAXDOP 4);
 
 CREATE INDEX IX_R67SP ON #R67StudPairs (STUD_NO, STUD_QUAL);
 
--- Materialise join results
+-- Materialise join results + reconciliation column
 SELECT
     CP.CREG_STUD_NO, CP.CREG_QUAL, CP.CREG_E051,
     SP.STUD_NO, SP.STUD_QUAL,
     CASE WHEN SP.STUD_NO IS NOT NULL THEN 'Yes' ELSE 'No' END AS IN_STUD,
     {e051ValidExpr}                                            AS E051_VALID,
     CASE WHEN {passExpr}  THEN 'PASS' ELSE 'FAIL' END         AS ValidationResult,
-    {failReasonExpr}                                           AS FailReason
+    {failReasonExpr}                                           AS FailReason,
+    {reconExpr}                                                AS Reconciliation_Status
 INTO #R67Results
 FROM #R67CregPairs CP
 LEFT JOIN #R67StudPairs SP ON SP.STUD_NO = CP.CREG_STUD_NO AND SP.STUD_QUAL = CP.CREG_QUAL
+{detailJoin}
 OPTION (MAXDOP 4);
 
-CREATE INDEX IX_R67VR ON #R67Results (ValidationResult, FailReason);
+CREATE INDEX IX_R67VR ON #R67Results (ValidationResult, FailReason, Reconciliation_Status);
 
--- RS 2: validation counts
+-- RS 2: validation counts + reconciliation counts
 SELECT
-    COUNT(1)                                                                        AS TotalChecked,
+    COUNT(1)                                                                           AS TotalChecked,
     SUM(CASE WHEN ValidationResult = 'PASS'                        THEN 1 ELSE 0 END) AS PassCount,
     SUM(CASE WHEN FailReason = 'Not found in STUD'                 THEN 1 ELSE 0 END) AS NotInStudCount,
-    SUM(CASE WHEN FailReason = 'E051 code not in expected values'  THEN 1 ELSE 0 END) AS InvalidE051Count
+    SUM(CASE WHEN FailReason = 'E051 code not in expected values'  THEN 1 ELSE 0 END) AS InvalidE051Count,
+    {reconCountsSql}
 FROM #R67Results;
 
 -- RS 3: preview / full rows
@@ -687,13 +784,16 @@ SELECT {top}
         ELSE 'FAIL (00708): ' + ISNULL(FailReason, 'Validation failed.')
     END AS Validation_Explanation,
     CREG_STUD_NO, CREG_QUAL, CREG_E051, STUD_NO, STUD_QUAL, IN_STUD, E051_VALID, FailReason,
-    CASE WHEN ValidationResult = 'FAIL' THEN '00708' ELSE '' END AS Exception_Code
+    CASE WHEN ValidationResult = 'FAIL' THEN '00708' ELSE '' END AS Exception_Code,
+    Reconciliation_Status
 FROM #R67Results
 ORDER BY {orderBy};
+{rule29OnlySql}
 
 DROP TABLE IF EXISTS #R67CregPairs;
 DROP TABLE IF EXISTS #R67StudPairs;
-DROP TABLE IF EXISTS #R67Results;";
+DROP TABLE IF EXISTS #R67Results;
+{detailDropSql}";
         }
 
         // BuildSourceCtes is retained only for the standalone GenerateSqlAsync / Export path.
@@ -957,6 +1057,22 @@ SELECT CAST(SCOPE_IDENTITY() AS int);";
 
         private static string BuildInClauseSql(IReadOnlyList<string> values) =>
             string.Join(",", values.Select(v => $"'{v}'"));
+
+        // Parse comma-separated error codes like "00708,00159" → [708, 159].
+        // Normalises leading zeros so "00708" == "708" in the IN clause.
+        private static IReadOnlyList<long> ParseDetailErrorCodes(string raw)
+        {
+            if (string.IsNullOrWhiteSpace(raw)) return new[] { 708L };
+            return raw.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Select(s => { return long.TryParse(s.TrimStart('0') == "" ? "0" : s.TrimStart('0'), out var n) ? n : (long?)null; })
+                .Where(n => n.HasValue)
+                .Select(n => n!.Value)
+                .Distinct()
+                .ToList();
+        }
+
+        private static string BuildDetailErrInSql(IReadOnlyList<long> codes) =>
+            codes.Count == 0 ? "0" : string.Join(",", codes);
 
         private static void ValidateObjectName(string value)
         {

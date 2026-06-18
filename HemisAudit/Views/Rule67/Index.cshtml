@@ -32,11 +32,18 @@
     .R67-cat-tab { padding:7px 14px; border-radius:20px; border:2px solid var(--border,#ddd); background:var(--card-bg,#fff); color:var(--text,#333); font-size:12px; font-weight:600; cursor:pointer; display:flex; align-items:center; gap:6px; transition:background .15s,border-color .15s; }
     .R67-cat-tab:hover { border-color:var(--primary,#1a237e); color:var(--primary,#1a237e); }
     .R67-cat-tab.active { background:var(--primary,#1a237e); border-color:var(--primary,#1a237e); color:#fff; }
-    .R67-cat-tab[data-cat="PASS"].active { background:#1b5e20; border-color:#1b5e20; }
-    .R67-cat-tab[data-cat="NOT_IN_STUD"].active { background:#b71c1c; border-color:#b71c1c; }
+    .R67-cat-tab[data-cat="PASS"].active         { background:#1b5e20; border-color:#1b5e20; }
+    .R67-cat-tab[data-cat="NOT_IN_STUD"].active  { background:#b71c1c; border-color:#b71c1c; }
     .R67-cat-tab[data-cat="E051_INVALID"].active { background:#e65100; border-color:#e65100; }
+    .R67-cat-tab[data-cat="CONFIRMED"].active    { background:#2e7d32; border-color:#2e7d32; }
+    .R67-cat-tab[data-cat="NOT_CONFIRMED"].active{ background:#f57f17; border-color:#f57f17; }
+    .R67-cat-tab[data-cat="RULE29_ONLY"].active  { background:#880e4f; border-color:#880e4f; }
     .R67-cat-count { background:rgba(255,255,255,.25); border-radius:10px; padding:1px 7px; font-size:11px; font-weight:700; }
     .R67-cat-tab:not(.active) .R67-cat-count { background:var(--border,#e5e7eb); color:var(--text-muted,#666); }
+    .R67-recon { display:inline-block; border-radius:10px; padding:2px 8px; font-size:11px; font-weight:700; white-space:nowrap; }
+    .R67-recon--confirmed    { background:#e8f5e9; color:#2e7d32; border:1px solid #a5d6a7; }
+    .R67-recon--notconfirmed { background:#fff8e1; color:#e65100; border:1px solid #ffcc80; }
+    .R67-recon--only         { background:#fce4ec; color:#880e4f; border:1px solid #f48fb1; }
 </style>
 
 <div id="app" class="rule-page-shell">
@@ -120,6 +127,8 @@
                         <div class="field-group"><label>STUD Student No Column <small>(_007)</small></label><select id="studStudentNoCol"><option value="_007">_007</option></select></div>
                         <div class="field-group"><label>STUD Qualification Column <small>(_001)</small></label><select id="studQualCol"><option value="_001">_001</option></select></div>
                         <div class="field-group"><label for="e051FilterValues">E051 Filter Values <small>(comma separated, e.g. E,N,G)</small></label><input id="e051FilterValues" type="text" value="E" placeholder="e.g. E,N,G" /></div>
+                        <div class="field-group"><label for="detailTable">Rule 29 Detail Table <small>(for reconciliation — leave blank to skip)</small></label><input id="detailTable" type="text" value="dbo_CREG_VALIDATION_DETAIL" placeholder="dbo_CREG_VALIDATION_DETAIL" /></div>
+                        <div class="field-group"><label for="detailErrorCode">Detail Error Code(s) <small>(comma separated, e.g. 00708,00159 — leading zeros ignored)</small></label><input id="detailErrorCode" type="text" value="00708" placeholder="e.g. 00708,00159" /></div>
                     </div>
                     <div class="action-bar" style="justify-content:flex-start;margin:10px 0 0">
                         <button type="button" class="btn btn-secondary" onclick="autoDetectColumns()">Auto-Detect Columns</button>
@@ -239,6 +248,8 @@ window.toggleAccordion = function (section) {
         cregStudentNoCol: document.getElementById('cregStudentNoCol'), cregQualCol: document.getElementById('cregQualCol'),
         cregE051Col: document.getElementById('cregE051Col'), studStudentNoCol: document.getElementById('studStudentNoCol'),
         studQualCol: document.getElementById('studQualCol'), e051FilterValues: document.getElementById('e051FilterValues'),
+        detailTable: document.getElementById('detailTable'),
+        detailErrorCode: document.getElementById('detailErrorCode'),
         connectionOutput: document.getElementById('connectionOutput'), configOutput: document.getElementById('configOutput'),
         analysisPane: document.getElementById('analysisPane'), resultsPane: document.getElementById('resultsPane'),
         sqlText: document.getElementById('sqlText'), downloadAllBtn: document.getElementById('downloadAllBtn'),
@@ -313,7 +324,9 @@ window.toggleAccordion = function (section) {
             cregE051Col:       els.cregE051Col?.value||'_051',
             studStudentNoCol:  els.studStudentNoCol?.value||'_007',
             studQualCol:       els.studQualCol?.value||'_001',
-            e051FilterValues:  els.e051FilterValues?.value?.trim()||'E'
+            e051FilterValues:  els.e051FilterValues?.value?.trim()||'E',
+            detailTable:       els.detailTable?.value?.trim()||'dbo_CREG_VALIDATION_DETAIL',
+            detailErrorCode:   els.detailErrorCode?.value?.trim()||'00708'
         };
     }
 
@@ -399,6 +412,8 @@ window.toggleAccordion = function (section) {
         if (workspace.studStudentNoCol) setColSel(els.studStudentNoCol, workspace.studStudentNoCol);
         if (workspace.studQualCol) setColSel(els.studQualCol, workspace.studQualCol);
         if (els.e051FilterValues) els.e051FilterValues.value = workspace.e051FilterValues ?? 'E';
+        if (els.detailTable) els.detailTable.value = workspace.detailTable ?? 'dbo_CREG_VALIDATION_DETAIL';
+        if (els.detailErrorCode) els.detailErrorCode.value = workspace.detailErrorCode ?? '00708';
         els.workspaceRunState.textContent=workspace.runId?`Run #${workspace.runId}`:'No saved run loaded';
         els.workspaceRunLabel.textContent=workspace.runId?`Rule 67 Run #${workspace.runId}`:'No saved run yet';
         els.workspaceStatusLabel.textContent=workspace.currentStatus||'-';
@@ -598,6 +613,32 @@ window.toggleAccordion = function (section) {
                 </div>
             </div>` : ''}
 
+            ${(summary.detailTable&&(summary.confirmedByRule29Count>0||summary.notInRule29Count>0||summary.rule29OnlyCount>0)) ? `
+            <div class="card" style="padding:20px;margin-top:20px;border-left:4px solid #880e4f">
+                <h3 class="section-title" style="margin-top:0;color:#880e4f">Reconciliation vs Rule 29 (${escapeHtml(summary.detailTable||'')})</h3>
+                <p style="font-size:13px;color:var(--text-muted);margin:0 0 14px">
+                    Cross-reference of Rule 67 FAIL results against <strong>${escapeHtml(summary.detailTable||'')}</strong> records with error code(s) <code>${escapeHtml(summary.detailErrorCode||'00708')}</code>
+                    (${(summary.detailRecordCount||0).toLocaleString()} detail records found).
+                </p>
+                <div class="R67-summary-grid">
+                    <div class="stat-card" style="border-left:4px solid #2e7d32;cursor:pointer" onclick="document.querySelector('[data-tab=\\'results\\']')?.click();state.categoryTab='CONFIRMED';renderResults(true);" title="Click to view confirmed rows">
+                        <div class="stat-card__label">Confirmed by Rule 29</div>
+                        <div class="stat-card__value" style="color:#2e7d32">${(summary.confirmedByRule29Count||0).toLocaleString()}</div>
+                        <div style="font-size:11px;margin-top:4px;opacity:.75">In both Rule 67 FAIL <em>and</em> Rule 29 — findings confirmed</div>
+                    </div>
+                    <div class="stat-card" style="border-left:4px solid #f57f17;cursor:pointer" onclick="document.querySelector('[data-tab=\\'results\\']')?.click();state.categoryTab='NOT_CONFIRMED';renderResults(true);" title="Click to view unconfirmed rows">
+                        <div class="stat-card__label">Not Confirmed (Rule 67 Only)</div>
+                        <div class="stat-card__value" style="color:#f57f17">${(summary.notInRule29Count||0).toLocaleString()}</div>
+                        <div style="font-size:11px;margin-top:4px;opacity:.75">In Rule 67 FAIL but <em>not</em> in Rule 29 detail table</div>
+                    </div>
+                    <div class="stat-card" style="border-left:4px solid #880e4f;cursor:pointer" onclick="document.querySelector('[data-tab=\\'results\\']')?.click();state.categoryTab='RULE29_ONLY';renderResults(true);" title="Click to view Rule 29-only rows">
+                        <div class="stat-card__label">Rule 29 Only (not in Rule 67)</div>
+                        <div class="stat-card__value" style="color:#880e4f">${(summary.rule29OnlyCount||0).toLocaleString()}</div>
+                        <div style="font-size:11px;margin-top:4px;opacity:.75">In Rule 29 detail (00708) but <em>not</em> matched in Rule 67 FAIL</div>
+                    </div>
+                </div>
+            </div>` : ''}
+
             <div class="card" style="padding:20px;margin-top:20px">
                 <h3 class="section-title" style="margin-top:0">Run Summary</h3>
                 <div class="form-grid">
@@ -619,32 +660,50 @@ window.toggleAccordion = function (section) {
     function renderResults(force = false) {
         if (!state.summary) { els.resultsPane.innerHTML='<div class="empty-card"><p>No Rule 67 results loaded.</p></div>'; return; }
         if (!force && getActiveTab()!=='results') { els.resultsPane.innerHTML='<div class="empty-card"><p>Open the Results tab to load the browser preview.</p></div>'; return; }
-        const summary = state.summary;
-        const allRows = summary.reviewRows||[];
-        const e051Col = summary.cregE051Col||'_051';
+        const summary    = state.summary;
+        const allRows    = summary.reviewRows||[];
+        const e051Col    = summary.cregE051Col||'_051';
+        const hasDetail  = !!(summary.detailTable);
 
-        const passRows        = allRows.filter(r => String(r.validationResult||'').toUpperCase()==='PASS');
-        const notInStudRows   = allRows.filter(r => {
-            const fr = String((r.displayValues||{}).FailReason||(r.displayValues||{}).FAILREASON||'').toLowerCase();
-            return fr === 'not found in stud';
-        });
-        const e051InvalidRows = allRows.filter(r => {
-            const fr = String((r.displayValues||{}).FailReason||(r.displayValues||{}).FAILREASON||'').toLowerCase();
-            return fr === 'e051 code not in expected values';
-        });
+        const passRows         = allRows.filter(r => String(r.validationResult||'').toUpperCase()==='PASS');
+        const notInStudRows    = allRows.filter(r => { const fr=String((r.displayValues||{}).FailReason||(r.displayValues||{}).FAILREASON||'').toLowerCase(); return fr==='not found in stud'; });
+        const e051InvalidRows  = allRows.filter(r => { const fr=String((r.displayValues||{}).FailReason||(r.displayValues||{}).FAILREASON||'').toLowerCase(); return fr==='e051 code not in expected values'; });
+        const getRecon         = r => String((r.displayValues||{}).Reconciliation_Status||(r.displayValues||{}).RECONCILIATION_STATUS||'');
+        const confirmedRows    = hasDetail ? allRows.filter(r=>getRecon(r)==='Confirmed by Rule 29') : [];
+        const notConfirmedRows = hasDetail ? allRows.filter(r=>getRecon(r)==='Not in Rule 29') : [];
+        const rule29OnlyRows   = hasDetail ? (summary.rule29OnlyRows||[]) : [];
 
         const catMap = {
-            ALL:         { rows: allRows,         label: 'All Results',           badgeClass: '',              count: allRows.length },
-            PASS:        { rows: passRows,         label: 'PASS',                  badgeClass: 'badge--pass',   count: passRows.length },
-            NOT_IN_STUD: { rows: notInStudRows,    label: 'FAIL — Not in STUD',    badgeClass: 'badge--fail',   count: notInStudRows.length },
-            E051_INVALID:{ rows: e051InvalidRows,  label: 'FAIL — E051 Invalid',   badgeClass: 'badge--fail',   count: e051InvalidRows.length }
+            ALL:           { rows: allRows,          label: 'All Results',              count: allRows.length,          isRule29: false },
+            PASS:          { rows: passRows,          label: 'PASS',                     count: passRows.length,         isRule29: false },
+            NOT_IN_STUD:   { rows: notInStudRows,     label: 'FAIL — Not in STUD',       count: notInStudRows.length,    isRule29: false },
+            E051_INVALID:  { rows: e051InvalidRows,   label: 'FAIL — E051 Invalid',      count: e051InvalidRows.length,  isRule29: false },
+            ...(hasDetail ? {
+                CONFIRMED:     { rows: confirmedRows,    label: 'Confirmed by Rule 29',     count: confirmedRows.length,    isRule29: false },
+                NOT_CONFIRMED: { rows: notConfirmedRows, label: 'Not Confirmed (R67 Only)', count: notConfirmedRows.length, isRule29: false },
+                RULE29_ONLY:   { rows: rule29OnlyRows,   label: 'Rule 29 Only (00708)',     count: rule29OnlyRows.length,   isRule29: true  }
+            } : {})
         };
 
+        // Validate active tab still exists after possible hasDetail=false
+        if (!catMap[state.categoryTab]) state.categoryTab = 'ALL';
+
+        const isRule29Tab = catMap[state.categoryTab]?.isRule29 === true;
         const rows = catMap[state.categoryTab]?.rows || allRows;
+
+        const reconBadge = (reconVal) => {
+            if (!hasDetail || !reconVal) return '';
+            if (reconVal === 'Confirmed by Rule 29')
+                return `<span class="R67-recon R67-recon--confirmed">&#10003; Rule 29</span>`;
+            if (reconVal === 'Not in Rule 29')
+                return `<span class="R67-recon R67-recon--notconfirmed">&#9888; Not in Rule 29</span>`;
+            return '';
+        };
 
         const buildRowHtml = (rowList) => rowList.map(row => {
             const v=Object.fromEntries(Object.entries(row.displayValues||{}).map(([k,val])=>[k.toUpperCase(),val]));
             const isFail=String(row.validationResult||'').toUpperCase()==='FAIL';
+            const recon = hasDetail ? v.RECONCILIATION_STATUS||'' : '';
             return `<tr style="background:${isFail?'#FFF3F3':'#F3FFF3'}">
                 <td>${escapeHtml(String(row.validationNumber||''))}</td>
                 <td class="group-creg">${escapeHtml(v.CREG_STUD_NO||'')}</td>
@@ -657,14 +716,46 @@ window.toggleAccordion = function (section) {
                 <td class="group-final ${isFail?'is-fail':'is-pass'}">
                     <span class="result-text">${escapeHtml(isFail?'FAIL':'PASS')} ${isFail?'(00708)':''}</span>
                 </td>
+                ${hasDetail?`<td>${reconBadge(recon)}</td>`:''}
             </tr>`;
         }).join('');
 
+        const buildRule29OnlyRowHtml = (rowList) => rowList.map((row,i) =>
+            `<tr style="background:#FCE4EC">
+                <td>${i+1}</td>
+                <td style="font-weight:700;color:#880e4f">${escapeHtml(String(row.studentNo||''))}</td>
+                <td>${escapeHtml(String(row.qualCode||''))}</td>
+                <td colspan="${hasDetail?7:6}" style="color:var(--text-muted);font-size:11px;font-style:italic">
+                    In Rule 29 (00708) — not matched in Rule 67 FAIL results
+                </td>
+            </tr>`
+        ).join('');
+
+        const colSpan = hasDetail ? 10 : 9;
         const catTabsHtml = Object.entries(catMap).map(([key, cfg]) =>
             `<button type="button" class="R67-cat-tab${state.categoryTab===key?' active':''}" data-cat="${key}">
                 ${escapeHtml(cfg.label)} <span class="R67-cat-count">${cfg.count.toLocaleString()}</span>
             </button>`
         ).join('');
+
+        const tableHeader = isRule29Tab
+            ? `<tr><th>#</th><th>Student No (from Rule 29)</th><th>Qualification (from Rule 29)</th><th colspan="${colSpan-2}">Note</th></tr>`
+            : `<tr>
+                <th>#</th>
+                <th class="group-creg">CREG [_007] Student No</th>
+                <th class="group-creg">CREG [_001] Qual</th>
+                <th class="group-creg">CREG [${escapeHtml(e051Col)}] E051</th>
+                <th class="group-stud">STUD [_007]</th>
+                <th class="group-stud">STUD [_001] Qual</th>
+                <th>In STUD</th>
+                <th>E051 Valid</th>
+                <th class="group-final">Result</th>
+                ${hasDetail?'<th>Reconciliation</th>':''}
+              </tr>`;
+
+        const bodyHtml = isRule29Tab
+            ? (buildRule29OnlyRowHtml(rows)||`<tr><td colspan="${colSpan}" style="text-align:center;color:var(--text-muted);padding:16px">No Rule 29-only records.</td></tr>`)
+            : (buildRowHtml(rows)||`<tr><td colspan="${colSpan}" style="text-align:center;color:var(--text-muted);padding:16px">No rows in this category.</td></tr>`);
 
         els.resultsPane.innerHTML=`
             <div class="R67-cat-tabs">${catTabsHtml}</div>
@@ -674,20 +765,8 @@ window.toggleAccordion = function (section) {
             </div>
             <div class="R67-table-wrap">
                 <table class="R67-grid">
-                    <thead>
-                        <tr>
-                            <th>#</th>
-                            <th class="group-creg">CREG [_007] Student No</th>
-                            <th class="group-creg">CREG [_001] Qual</th>
-                            <th class="group-creg">CREG [${escapeHtml(e051Col)}] E051</th>
-                            <th class="group-stud">STUD [_007]</th>
-                            <th class="group-stud">STUD [_001] Qual</th>
-                            <th>In STUD</th>
-                            <th>E051 Valid</th>
-                            <th class="group-final">Result</th>
-                        </tr>
-                    </thead>
-                    <tbody>${buildRowHtml(rows)||'<tr><td colspan="9" style="text-align:center;color:var(--text-muted);padding:16px">No rows in this category.</td></tr>'}</tbody>
+                    <thead>${tableHeader}</thead>
+                    <tbody>${bodyHtml}</tbody>
                 </table>
             </div>`;
 

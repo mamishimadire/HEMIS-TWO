@@ -6057,15 +6057,17 @@ namespace HemisAudit.Services
         public byte[] ExportRule67Excel(Rule67ValidationSummary summary)
         {
             using var wb = new XLWorkbook();
-            var e051Col = summary.CregE051Col ?? "_051";
+            var e051Col    = summary.CregE051Col ?? "_051";
             var e051Filter = string.IsNullOrWhiteSpace(summary.E051FilterValues) ? "ALL — no filter applied" : summary.E051FilterValues;
-            var titleText = $"RULE 67: CREG [{summary.CregStudentNoCol ?? "_007"}]+[{summary.CregQualCol ?? "_001"}] Pair in STUD | [{e051Col}] Filter: {e051Filter}";
-            var headers = new[] { "Validation #", "CREG [_007] Student No", "CREG [_001] Qual", $"CREG [{e051Col}] E051", "STUD [_007]", "STUD [_001] Qual", "In STUD", "E051 Valid", "Result", "Exception Code" };
+            var titleText  = $"RULE 67: CREG [{summary.CregStudentNoCol ?? "_007"}]+[{summary.CregQualCol ?? "_001"}] Pair in STUD | [{e051Col}] Filter: {e051Filter}";
+            var hasDetail  = !string.IsNullOrWhiteSpace(summary.DetailTable);
+            var headers    = new[] { "Validation #", "CREG [_007] Student No", "CREG [_001] Qual", $"CREG [{e051Col}] E051", "STUD [_007]", "STUD [_001] Qual", "In STUD", "E051 Valid", "Result", "Exception Code", "Reconciliation" };
+            var colCount   = hasDetail ? 11 : 10;
 
             void WriteRule67Sheet(IXLWorksheet ws, IEnumerable<Rule67ValidationRowRecord> sheetRows, string headerBg)
             {
-                StyleHeaderRow(ws, 1, titleText, 10);
-                for (int i = 0; i < headers.Length; i++)
+                StyleHeaderRow(ws, 1, titleText, colCount);
+                for (int i = 0; i < colCount; i++)
                 {
                     var hc = ws.Cell(2, i + 1);
                     hc.Value = headers[i]; hc.Style.Font.Bold = true;
@@ -6077,7 +6079,8 @@ namespace HemisAudit.Services
                 {
                     var v = row.DisplayValues;
                     string DV(string k) => v.TryGetValue(k, out var val) ? val ?? "" : "";
-                    var isFail = string.Equals(row.ValidationResult, "FAIL", StringComparison.OrdinalIgnoreCase);
+                    var isFail  = string.Equals(row.ValidationResult, "FAIL", StringComparison.OrdinalIgnoreCase);
+                    var recon   = DV("Reconciliation_Status");
                     ws.Cell(r, 1).Value = row.ValidationNumber;
                     ws.Cell(r, 2).Value = DV("CREG_STUD_NO");
                     ws.Cell(r, 3).Value = DV("CREG_QUAL");
@@ -6088,10 +6091,22 @@ namespace HemisAudit.Services
                     ws.Cell(r, 8).Value = DV("E051_VALID");
                     ws.Cell(r, 9).Value = row.ValidationResult;
                     ws.Cell(r, 10).Value = isFail ? row.ExceptionCode : "";
-                    ws.Range(r, 1, r, 10).Style.Fill.BackgroundColor = isFail ? XLColor.FromHtml("#FFF3F3") : XLColor.FromHtml("#F3FFF3");
+                    if (hasDetail)
+                    {
+                        ws.Cell(r, 11).Value = recon;
+                        if (recon == "Confirmed by Rule 29")
+                            ws.Cell(r, 11).Style.Fill.BackgroundColor = XLColor.FromHtml("#E8F5E9");
+                        else if (recon == "Not in Rule 29")
+                            ws.Cell(r, 11).Style.Fill.BackgroundColor = XLColor.FromHtml("#FFF8E1");
+                    }
+                    ws.Range(r, 1, r, colCount).Style.Fill.BackgroundColor = isFail ? XLColor.FromHtml("#FFF3F3") : XLColor.FromHtml("#F3FFF3");
+                    if (hasDetail && recon == "Confirmed by Rule 29")
+                        ws.Cell(r, 11).Style.Fill.BackgroundColor = XLColor.FromHtml("#E8F5E9");
+                    else if (hasDetail && recon == "Not in Rule 29")
+                        ws.Cell(r, 11).Style.Fill.BackgroundColor = XLColor.FromHtml("#FFF8E1");
                     r++;
                 }
-                for (int c = 1; c <= 10; c++) ws.Column(c).AdjustToContents();
+                for (int c = 1; c <= colCount; c++) ws.Column(c).AdjustToContents();
             }
 
             static string GetFailReason(Rule67ValidationRowRecord row)
@@ -6099,27 +6114,63 @@ namespace HemisAudit.Services
                 row.DisplayValues.TryGetValue("FailReason", out var fr);
                 return fr ?? "";
             }
+            static string GetRecon(Rule67ValidationRowRecord row)
+            {
+                row.DisplayValues.TryGetValue("Reconciliation_Status", out var rc);
+                return rc ?? "";
+            }
 
-            var allRows         = summary.ReviewRows;
-            var passRows        = allRows.Where(r => string.Equals(r.ValidationResult, "PASS", StringComparison.OrdinalIgnoreCase)).ToList();
-            var notInStudRows   = allRows.Where(r => string.Equals(GetFailReason(r), "Not found in STUD", StringComparison.OrdinalIgnoreCase)).ToList();
-            var e051InvalidRows = allRows.Where(r => string.Equals(GetFailReason(r), "E051 code not in expected values", StringComparison.OrdinalIgnoreCase)).ToList();
+            var allRows             = summary.ReviewRows;
+            var passRows            = allRows.Where(r => string.Equals(r.ValidationResult, "PASS", StringComparison.OrdinalIgnoreCase)).ToList();
+            var notInStudRows       = allRows.Where(r => string.Equals(GetFailReason(r), "Not found in STUD", StringComparison.OrdinalIgnoreCase)).ToList();
+            var e051InvalidRows     = allRows.Where(r => string.Equals(GetFailReason(r), "E051 code not in expected values", StringComparison.OrdinalIgnoreCase)).ToList();
+            var confirmedRows       = hasDetail ? allRows.Where(r => string.Equals(GetRecon(r), "Confirmed by Rule 29", StringComparison.OrdinalIgnoreCase)).ToList() : null;
+            var notConfirmedRows    = hasDetail ? allRows.Where(r => string.Equals(GetRecon(r), "Not in Rule 29", StringComparison.OrdinalIgnoreCase)).ToList() : null;
 
-            WriteRule67Sheet(wb.Worksheets.Add("All Results"),          allRows,         "#1A237E");
-            WriteRule67Sheet(wb.Worksheets.Add("PASS"),                 passRows,         "#1B5E20");
-            WriteRule67Sheet(wb.Worksheets.Add("FAIL - Not in STUD"),   notInStudRows,    "#B71C1C");
-            WriteRule67Sheet(wb.Worksheets.Add("FAIL - E051 Invalid"),  e051InvalidRows,  "#E65100");
+            WriteRule67Sheet(wb.Worksheets.Add("All Results"),         allRows,         "#1A237E");
+            WriteRule67Sheet(wb.Worksheets.Add("PASS"),                passRows,        "#1B5E20");
+            WriteRule67Sheet(wb.Worksheets.Add("FAIL - Not in STUD"),  notInStudRows,   "#B71C1C");
+            WriteRule67Sheet(wb.Worksheets.Add("FAIL - E051 Invalid"), e051InvalidRows, "#E65100");
+
+            if (hasDetail)
+            {
+                WriteRule67Sheet(wb.Worksheets.Add("Confirmed by Rule 29"),   confirmedRows!,    "#2E7D32");
+                WriteRule67Sheet(wb.Worksheets.Add("Not Confirmed (R67 Only)"), notConfirmedRows!, "#F57F17");
+
+                // Rule 29 Only sheet — different column structure
+                var wsR29 = wb.Worksheets.Add("Rule 29 Only (00708)");
+                StyleHeaderRow(wsR29, 1, $"RULE 29 ONLY: Records in [{summary.DetailTable}] (error 00708) not matched in Rule 67 FAIL results", 3);
+                var r29Headers = new[] { "#", "Student No (from Rule 29)", "Qualification Code (from Rule 29)" };
+                for (int i = 0; i < r29Headers.Length; i++)
+                {
+                    var hc = wsR29.Cell(2, i + 1);
+                    hc.Value = r29Headers[i]; hc.Style.Font.Bold = true;
+                    hc.Style.Fill.BackgroundColor = XLColor.FromHtml("#880E4F");
+                    hc.Style.Font.FontColor = XLColor.White;
+                }
+                int rr = 3;
+                foreach (var row in summary.Rule29OnlyRows)
+                {
+                    wsR29.Cell(rr, 1).Value = row.RowNumber;
+                    wsR29.Cell(rr, 2).Value = row.StudentNo;
+                    wsR29.Cell(rr, 3).Value = row.QualCode;
+                    wsR29.Range(rr, 1, rr, 3).Style.Fill.BackgroundColor = XLColor.FromHtml("#FCE4EC");
+                    rr++;
+                }
+                for (int c = 1; c <= 3; c++) wsR29.Column(c).AdjustToContents();
+            }
 
             var wsSummary = wb.Worksheets.Add("Summary");
             StyleHeaderRow(wsSummary, 1, "HEMIS RULE 67: CREG-STUD PAIR VALIDATION", 2);
-            var summaryData = new[]
+            var summaryRows = new List<(string label, string value)>
             {
                 ("Database", summary.Database),
                 ("CREG Table", summary.CregTable),
                 ("STUD Table", summary.StudTable),
                 ("E051 Column", e051Col),
                 ("E051 Filter", e051Filter),
-                ("Validation Date", summary.Timestamp), ("", ""),
+                ("Validation Date", summary.Timestamp),
+                ("", ""),
                 ("VALIDATION RESULTS", ""),
                 ("CREG Total Records", summary.CregRecordCount.ToString("N0")),
                 ("STUD Total Records", summary.StudRecordCount.ToString("N0")),
@@ -6131,11 +6182,25 @@ namespace HemisAudit.Services
                 ("Exception Rate", $"{summary.ExceptionRate:F2}%"),
                 ("Status", summary.Status)
             };
-            int sRow = 2;
-            foreach (var (label, value) in summaryData)
+            if (hasDetail)
             {
-                if (label == "VALIDATION RESULTS")
-                { var hc = wsSummary.Cell(sRow, 1); hc.Value = label; hc.Style.Font.Bold = true; hc.Style.Fill.BackgroundColor = XLColor.FromHtml("#1A237E"); hc.Style.Font.FontColor = XLColor.White; wsSummary.Range(sRow, 1, sRow, 2).Merge(); }
+                summaryRows.Add(("", ""));
+                summaryRows.Add(("RECONCILIATION vs RULE 29", ""));
+                summaryRows.Add(($"Detail Table ({summary.DetailTable})", summary.DetailRecordCount.ToString("N0") + " records (error 00708)"));
+                summaryRows.Add(("Confirmed by Rule 29 (in both)", summary.ConfirmedByRule29Count.ToString("N0")));
+                summaryRows.Add(("Not Confirmed (Rule 67 FAIL only)", summary.NotInRule29Count.ToString("N0")));
+                summaryRows.Add(("Rule 29 Only (not in Rule 67 FAIL)", summary.Rule29OnlyCount.ToString("N0")));
+            }
+            int sRow = 2;
+            foreach (var (label, value) in summaryRows)
+            {
+                if (label is "VALIDATION RESULTS" or "RECONCILIATION vs RULE 29")
+                {
+                    var hc = wsSummary.Cell(sRow, 1); hc.Value = label; hc.Style.Font.Bold = true;
+                    hc.Style.Fill.BackgroundColor = XLColor.FromHtml(label == "RECONCILIATION vs RULE 29" ? "#880E4F" : "#1A237E");
+                    hc.Style.Font.FontColor = XLColor.White;
+                    wsSummary.Range(sRow, 1, sRow, 2).Merge();
+                }
                 else if (label != "")
                 {
                     wsSummary.Cell(sRow, 1).Value = label; wsSummary.Cell(sRow, 1).Style.Font.Bold = true; wsSummary.Cell(sRow, 1).Style.Fill.BackgroundColor = XLColor.FromHtml("#F5F5F5");
@@ -6144,7 +6209,7 @@ namespace HemisAudit.Services
                 }
                 sRow++;
             }
-            wsSummary.Column(1).Width = 40; wsSummary.Column(2).Width = 70;
+            wsSummary.Column(1).Width = 45; wsSummary.Column(2).Width = 70;
             using var ms = new MemoryStream();
             wb.SaveAs(ms);
             return ms.ToArray();
@@ -6153,13 +6218,14 @@ namespace HemisAudit.Services
         public byte[] ExportRule67Csv(Rule67ValidationSummary summary)
         {
             var e051Col = summary.CregE051Col ?? "_051";
+            var hasDetail = !string.IsNullOrWhiteSpace(summary.DetailTable);
             var sb = new StringBuilder();
-            sb.AppendLine($"Validation_Number,CREG_STUD_NO,CREG_QUAL,CREG_{e051Col},STUD_NO,STUD_QUAL,IN_STUD,E051_VALID,Validation_Result,Exception_Code");
+            sb.AppendLine($"Validation_Number,CREG_STUD_NO,CREG_QUAL,CREG_{e051Col},STUD_NO,STUD_QUAL,IN_STUD,E051_VALID,Validation_Result,Exception_Code{(hasDetail ? ",Reconciliation" : "")}");
             foreach (var row in summary.ReviewRows)
             {
                 var v = row.DisplayValues;
                 string DV(string k) => v.TryGetValue(k, out var val) ? val ?? "" : "";
-                sb.AppendLine(string.Join(",", new[]
+                var fields = new List<string>
                 {
                     CsvEscape(row.ValidationNumber.ToString()),
                     CsvEscape(DV("CREG_STUD_NO")),
@@ -6171,7 +6237,9 @@ namespace HemisAudit.Services
                     CsvEscape(DV("E051_VALID")),
                     CsvEscape(row.ValidationResult),
                     CsvEscape(string.Equals(row.ValidationResult,"FAIL",StringComparison.OrdinalIgnoreCase) ? row.ExceptionCode : "")
-                }));
+                };
+                if (hasDetail) fields.Add(CsvEscape(DV("Reconciliation_Status")));
+                sb.AppendLine(string.Join(",", fields));
             }
             return System.Text.Encoding.UTF8.GetBytes(sb.ToString());
         }
