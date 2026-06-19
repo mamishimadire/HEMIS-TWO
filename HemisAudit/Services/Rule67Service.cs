@@ -444,6 +444,8 @@ ELSE
             var studQualCol      = Sanitise(request.StudQualCol);
             var e051Values       = ParseFilterValues(request.E051FilterValues);
             var e051ValuesText   = e051Values.Count > 0 ? string.Join(", ", e051Values.Select(v => $"'{v}'")) : "ALL — no filter applied";
+            // Inside a SQL string literal, single quotes must be doubled to avoid breaking the string
+            var e051ValuesLiteral = e051ValuesText.Replace("'", "''");
 
             var sql = $@"-- HEMIS RULE 67: CREG-STUD PAIR VALIDATION
 -- Check: CREG.[{cregStudentCol}] + [{cregQualCol}] pair must exist in STUD.[{studStudentCol}] + [{studQualCol}]
@@ -453,7 +455,7 @@ ELSE
 {BuildSourceCtes(cregTable, studTable, cregStudentCol, cregQualCol, cregE051Col, studStudentCol, studQualCol, e051Values)}
 SELECT
     'Control_1' AS Control_Type,
-    'CONTROL 1: CREG [{cregTable}].[{cregStudentCol}]+[{cregQualCol}] pair in STUD [{studTable}].[{studStudentCol}]+[{studQualCol}] with [{cregE051Col}] IN ({e051ValuesText})' AS Control_Label,
+    'CONTROL 1: CREG [{cregTable}].[{cregStudentCol}]+[{cregQualCol}] pair in STUD [{studTable}].[{studStudentCol}]+[{studQualCol}] with [{cregE051Col}] IN ({e051ValuesLiteral})' AS Control_Label,
     CREG_STUD_NO, CREG_QUAL, CREG_E051, STUD_NO, STUD_QUAL, IN_STUD, E051_VALID,
     ValidationResult,
     CASE WHEN ValidationResult = 'FAIL' THEN '00708' ELSE '' END AS Exception_Code,
