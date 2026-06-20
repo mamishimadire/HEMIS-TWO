@@ -1,20 +1,23 @@
 @{
     ViewData["Title"] = "DEETYAPAC Help";
     Layout = "~/Views/Shared/_Layout.cshtml";
+    var proxyUrl = Url.Action("Proxy", "Directives") ?? "/Directives/Proxy";
+    var sitemapUrl = Url.Action("Sitemap", "Directives") ?? "/Directives/Sitemap";
 }
 
 @section Styles {
 <style>
-/* Make page-content fill height and remove padding so the browser occupies all space */
 .page-content {
     padding: 0 !important;
     overflow: hidden !important;
     display: flex !important;
     flex-direction: column !important;
 }
-.rule-preview-notice { display: none !important; }
 
-/* ─── DIRECTIVES SHELL ─── */
+.rule-preview-notice {
+    display: none !important;
+}
+
 .dir-shell {
     display: flex;
     flex: 1;
@@ -25,7 +28,6 @@
     color: #222;
 }
 
-/* ─── INTERNAL SIDEBAR ─── */
 .dir-sidebar {
     width: 220px;
     min-width: 220px;
@@ -36,108 +38,357 @@
     transition: width .2s, min-width .2s;
     overflow: hidden;
 }
-.dir-sidebar.closed { width: 0; min-width: 0; }
+
+.dir-sidebar.closed {
+    width: 0;
+    min-width: 0;
+}
+
 .dir-sb-head {
     background: #0a1520;
     padding: 12px 13px;
     border-bottom: 1px solid rgba(255,255,255,.07);
     flex-shrink: 0;
 }
-.dir-sb-head h3 { font-size: 12px; font-weight: bold; color: #7fb8e8; line-height: 1.5; }
-.dir-sb-head p  { font-size: 10px; color: #3a6a8a; margin-top: 2px; }
-.dir-sb-nav { overflow-y: auto; flex: 1; }
-.dir-sb-nav::-webkit-scrollbar { width: 3px; }
-.dir-sb-nav::-webkit-scrollbar-thumb { background: #2a4a6a; }
+
+.dir-sb-head h3 {
+    font-size: 12px;
+    font-weight: bold;
+    color: #7fb8e8;
+    line-height: 1.5;
+}
+
+.dir-sb-head p {
+    font-size: 10px;
+    color: #3a6a8a;
+    margin-top: 2px;
+}
+
+.dir-sb-nav {
+    overflow-y: auto;
+    flex: 1;
+}
+
+.dir-sb-nav::-webkit-scrollbar {
+    width: 3px;
+}
+
+.dir-sb-nav::-webkit-scrollbar-thumb {
+    background: #2a4a6a;
+}
+
 .dir-grp-lbl {
-    font-size: 9px; font-weight: bold; text-transform: uppercase; letter-spacing: .08em;
-    color: #2a5a7a; padding: 9px 12px 3px; margin-top: 3px;
+    font-size: 9px;
+    font-weight: bold;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    color: #2a5a7a;
+    padding: 9px 12px 3px;
+    margin-top: 3px;
 }
+
 .dir-navbtn {
-    display: block; width: 100%; text-align: left; background: none; border: none;
-    border-left: 3px solid transparent; padding: 7px 12px; font-size: 11.5px;
-    color: #6a9ab8; cursor: pointer; line-height: 1.35;
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; transition: all .12s;
+    display: block;
+    width: 100%;
+    text-align: left;
+    background: none;
+    border: none;
+    border-left: 3px solid transparent;
+    padding: 7px 12px;
+    font-size: 11.5px;
+    color: #6a9ab8;
+    cursor: pointer;
+    line-height: 1.35;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    transition: all .12s;
 }
-.dir-navbtn:hover  { background: rgba(127,184,232,.08); color: #a8c8e8; border-left-color: #3a7aaa; }
-.dir-navbtn.active { background: rgba(68,153,221,.18); color: #7fb8e8; border-left-color: #4499dd; font-weight: bold; }
-.dir-navbtn.sub    { padding-left: 22px; font-size: 11px; }
-.dir-nb-div        { border-top: 1px solid rgba(255,255,255,.05); margin: 5px 0; }
 
-/* ─── MAIN AREA ─── */
-.dir-main { flex: 1; display: flex; flex-direction: column; overflow: hidden; background: #e8eaf0; }
+.dir-navbtn:hover {
+    background: rgba(127,184,232,.08);
+    color: #a8c8e8;
+    border-left-color: #3a7aaa;
+}
 
-/* ─── TOOLBAR ─── */
+.dir-navbtn.active {
+    background: rgba(68,153,221,.18);
+    color: #7fb8e8;
+    border-left-color: #4499dd;
+    font-weight: bold;
+}
+
+.dir-navbtn.sub {
+    padding-left: 22px;
+    font-size: 11px;
+}
+
+.dir-nb-div {
+    border-top: 1px solid rgba(255,255,255,.05);
+    margin: 5px 0;
+}
+
+.dir-main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    background: #e8eaf0;
+}
+
 .dir-toolbar {
-    display: flex; align-items: center; gap: 6px; padding: 6px 10px;
-    background: #1e2a3a; flex-shrink: 0; height: 40px;
-}
-.dir-tbtn {
-    background: rgba(255,255,255,.12); border: 1px solid rgba(255,255,255,.2);
-    border-radius: 5px; padding: 3px 9px; font-size: 12px; cursor: pointer;
-    color: #ccc; white-space: nowrap; transition: all .12s;
-}
-.dir-tbtn:hover    { background: rgba(255,255,255,.22); color: #fff; }
-.dir-tbtn:disabled { opacity: .3; cursor: default; }
-.dir-urlbar {
-    flex: 1; background: rgba(0,0,0,.35); border: 1px solid rgba(255,255,255,.15);
-    border-radius: 12px; padding: 3px 12px; font-size: 11px; font-family: monospace;
-    color: #7fb8e8; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;
-}
-.dir-livebadge {
-    background: #1a6634; color: #6ee8a0; font-size: 10px;
-    padding: 2px 8px; border-radius: 20px; font-weight: bold; flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    background: #1e2a3a;
+    flex-shrink: 0;
+    height: 40px;
 }
 
-/* ─── LIVE BAR ─── */
+.dir-tbtn {
+    background: rgba(255,255,255,.12);
+    border: 1px solid rgba(255,255,255,.2);
+    border-radius: 5px;
+    padding: 3px 9px;
+    font-size: 12px;
+    cursor: pointer;
+    color: #ccc;
+    white-space: nowrap;
+    transition: all .12s;
+}
+
+.dir-tbtn:hover {
+    background: rgba(255,255,255,.22);
+    color: #fff;
+}
+
+.dir-tbtn:disabled {
+    opacity: .3;
+    cursor: default;
+}
+
+.dir-urlbar {
+    flex: 1;
+    background: rgba(0,0,0,.35);
+    border: 1px solid rgba(255,255,255,.15);
+    border-radius: 12px;
+    padding: 3px 12px;
+    font-size: 11px;
+    font-family: monospace;
+    color: #7fb8e8;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+}
+
+.dir-livebadge {
+    background: #1a6634;
+    color: #6ee8a0;
+    font-size: 10px;
+    padding: 2px 8px;
+    border-radius: 20px;
+    font-weight: bold;
+    flex-shrink: 0;
+}
+
 .dir-live-bar {
-    background: #0d2a1a; color: #6ee8a0; font-size: 11px; padding: 3px 12px;
-    display: flex; align-items: center; gap: 8px; flex-shrink: 0;
+    background: #0d2a1a;
+    color: #6ee8a0;
+    font-size: 11px;
+    padding: 3px 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
     border-bottom: 1px solid #1a4a2a;
 }
-.dir-dot-live { width: 7px; height: 7px; border-radius: 50%; background: #28C840; animation: dir-pulse 2s infinite; }
-@@keyframes dir-pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
 
-/* ─── CONTENT FRAME ─── */
-.dir-frame { flex: 1; overflow-y: auto; background: #f0f2f5; }
-.dir-frame::-webkit-scrollbar { width: 6px; }
-.dir-frame::-webkit-scrollbar-thumb { background: #bbb; border-radius: 3px; }
+.dir-dot-live {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #28c840;
+    animation: dir-pulse 2s infinite;
+}
+
+@@keyframes dir-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: .4; }
+}
+
+.dir-frame {
+    flex: 1;
+    overflow-y: auto;
+    background: #f0f2f5;
+}
+
+.dir-frame::-webkit-scrollbar {
+    width: 6px;
+}
+
+.dir-frame::-webkit-scrollbar-thumb {
+    background: #bbb;
+    border-radius: 3px;
+}
+
 .dir-page-inner {
-    background: #fff; max-width: 860px; margin: 0 auto;
-    min-height: 100%; padding: 22px 28px 60px;
+    background: #fff;
+    max-width: 860px;
+    margin: 0 auto;
+    min-height: 100%;
+    padding: 22px 28px 60px;
 }
-.dir-page-inner table { border-collapse: collapse; width: 100%; margin-bottom: 14px; font-size: 12px; }
-.dir-page-inner table td, .dir-page-inner table th { padding: 4px 8px; border: 1px solid #ccc; vertical-align: top; line-height: 1.5; }
-.dir-page-inner table th { background: #d8e4f0; font-weight: bold; color: #1a3a5c; text-align: left; }
-.dir-page-inner h1,.dir-page-inner h2,.dir-page-inner h3,.dir-page-inner h4 { color: #1a3a5c; margin: 14px 0 8px; }
-.dir-page-inner p   { margin-bottom: 8px; line-height: 1.7; font-size: 13px; }
-.dir-page-inner a   { color: #1a5c9c; text-decoration: none; cursor: pointer; }
-.dir-page-inner a:hover { text-decoration: underline; }
-.dir-page-inner ul,.dir-page-inner ol { padding-left: 18px; margin-bottom: 10px; font-size: 13px; line-height: 1.8; }
-.dir-page-inner .MsoNormal { margin: 3px 0; font-size: 13px; line-height: 1.6; }
 
-/* ─── LOADING / ERROR STATES ─── */
-.dir-state { display: flex; flex-direction: column; align-items: center; justify-content: center; flex: 1; gap: 14px; color: #666; background: #f5f5f7; min-height: 300px; }
-.dir-spinner { width: 30px; height: 30px; border: 3px solid #dde; border-top-color: #4499dd; border-radius: 50%; animation: dir-spin .8s linear infinite; }
-@@keyframes dir-spin { to { transform: rotate(360deg) } }
-.dir-err-box { background: #fff0f0; border: 1px solid #f8c0c0; border-radius: 8px; padding: 16px 20px; max-width: 420px; text-align: center; }
-.dir-err-box strong { color: #c0392b; font-size: 14px; }
-.dir-err-box p { color: #555; font-size: 12px; margin-top: 6px; line-height: 1.6; }
-.dir-retry { margin-top: 12px; padding: 6px 16px; background: #2c5282; color: #fff; border: none; border-radius: 5px; cursor: pointer; font-size: 13px; }
-.dir-retry:hover { background: #1a3a6a; }
+.dir-page-inner table {
+    border-collapse: collapse;
+    width: 100%;
+    margin-bottom: 14px;
+    font-size: 12px;
+}
 
-/* ─── STATUS BAR ─── */
+.dir-page-inner table td,
+.dir-page-inner table th {
+    padding: 4px 8px;
+    border: 1px solid #ccc;
+    vertical-align: top;
+    line-height: 1.5;
+}
+
+.dir-page-inner table th {
+    background: #d8e4f0;
+    font-weight: bold;
+    color: #1a3a5c;
+    text-align: left;
+}
+
+.dir-page-inner h1,
+.dir-page-inner h2,
+.dir-page-inner h3,
+.dir-page-inner h4 {
+    color: #1a3a5c;
+    margin: 14px 0 8px;
+}
+
+.dir-page-inner p {
+    margin-bottom: 8px;
+    line-height: 1.7;
+    font-size: 13px;
+}
+
+.dir-page-inner a {
+    color: #1a5c9c;
+    text-decoration: none;
+    cursor: pointer;
+}
+
+.dir-page-inner a:hover {
+    text-decoration: underline;
+}
+
+.dir-page-inner ul,
+.dir-page-inner ol {
+    padding-left: 18px;
+    margin-bottom: 10px;
+    font-size: 13px;
+    line-height: 1.8;
+}
+
+.dir-page-inner .MsoNormal {
+    margin: 3px 0;
+    font-size: 13px;
+    line-height: 1.6;
+}
+
+.dir-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    flex: 1;
+    gap: 14px;
+    color: #666;
+    background: #f5f5f7;
+    min-height: 300px;
+}
+
+.dir-spinner {
+    width: 30px;
+    height: 30px;
+    border: 3px solid #dde;
+    border-top-color: #4499dd;
+    border-radius: 50%;
+    animation: dir-spin .8s linear infinite;
+}
+
+@@keyframes dir-spin {
+    to { transform: rotate(360deg); }
+}
+
+.dir-err-box {
+    background: #fff0f0;
+    border: 1px solid #f8c0c0;
+    border-radius: 8px;
+    padding: 16px 20px;
+    max-width: 420px;
+    text-align: center;
+}
+
+.dir-err-box strong {
+    color: #c0392b;
+    font-size: 14px;
+}
+
+.dir-err-box p {
+    color: #555;
+    font-size: 12px;
+    margin-top: 6px;
+    line-height: 1.6;
+}
+
+.dir-retry {
+    margin-top: 12px;
+    padding: 6px 16px;
+    background: #2c5282;
+    color: #fff;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 13px;
+}
+
+.dir-retry:hover {
+    background: #1a3a6a;
+}
+
 .dir-statusbar {
-    height: 22px; background: #0d1520; display: flex; align-items: center;
-    padding: 0 12px; font-size: 10px; color: #4a7a9a; gap: 10px; flex-shrink: 0;
+    height: 22px;
+    background: #0d1520;
+    display: flex;
+    align-items: center;
+    padding: 0 12px;
+    font-size: 10px;
+    color: #4a7a9a;
+    gap: 10px;
+    flex-shrink: 0;
 }
-.dir-sdot { width: 7px; height: 7px; border-radius: 50%; background: #28C840; flex-shrink: 0; }
-.dir-sdot.red { background: #e24b4a; }
+
+.dir-sdot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #28c840;
+    flex-shrink: 0;
+}
+
+.dir-sdot.red {
+    background: #e24b4a;
+}
 </style>
 }
 
 <div class="dir-shell">
-
-    <!-- VALPAC SIDEBAR -->
     <div class="dir-sidebar" id="dirSidebar">
         <div class="dir-sb-head">
             <h3>DEETYAPAC<br>Equity Module</h3>
@@ -148,10 +399,7 @@
         </div>
     </div>
 
-    <!-- MAIN CONTENT -->
     <div class="dir-main">
-
-        <!-- TOOLBAR -->
         <div class="dir-toolbar">
             <button class="dir-tbtn" id="dirBtnBack" disabled>&#8592; Back</button>
             <button class="dir-tbtn" id="dirBtnFwd" disabled>&#8594; Fwd</button>
@@ -161,22 +409,19 @@
             <span class="dir-livebadge">&#9679; LIVE</span>
         </div>
 
-        <!-- LIVE INDICATOR -->
         <div class="dir-live-bar">
             <span class="dir-dot-live"></span>
             <span>Content fetched live from <strong>www.heda.co.za/Valpac_Help/</strong></span>
         </div>
 
-        <!-- PAGE FRAME -->
         <div class="dir-frame" id="dirFrame">
-            <div class="dir-state" id="dirState">
+            <div class="dir-state">
                 <div class="dir-spinner"></div>
                 <div>Loading Valpac Help System&hellip;</div>
                 <div style="font-size:11px;color:#888">Connecting to heda.co.za</div>
             </div>
         </div>
 
-        <!-- STATUS BAR -->
         <div class="dir-statusbar">
             <span class="dir-sdot" id="dirSdot"></span>
             <span id="dirStatusTxt">Connecting&hellip;</span>
@@ -188,43 +433,47 @@
 <script>
 (function () {
     const BASE = 'https://www.heda.co.za/Valpac_Help/';
-    let hist = [], hpos = -1, sbOpen = true, currentUrl = '';
-    const sitemap = {};
+    const PROXY_URL = '@proxyUrl';
+    const SITEMAP_URL = '@sitemapUrl';
+    let hist = [];
+    let hpos = -1;
+    let sbOpen = true;
+    let currentUrl = '';
 
-    const elFrame  = document.getElementById('dirFrame');
+    const elFrame = document.getElementById('dirFrame');
     const elUrlBar = document.getElementById('dirUrlBar');
-    const elSdot   = document.getElementById('dirSdot');
+    const elSdot = document.getElementById('dirSdot');
     const elStatus = document.getElementById('dirStatusTxt');
-    const elBack   = document.getElementById('dirBtnBack');
-    const elFwd    = document.getElementById('dirBtnFwd');
-    const elSidebar= document.getElementById('dirSidebar');
+    const elBack = document.getElementById('dirBtnBack');
+    const elFwd = document.getElementById('dirBtnFwd');
+    const elSidebar = document.getElementById('dirSidebar');
 
-    function setStatus(txt, ok) {
-        elStatus.textContent = txt;
+    function setStatus(text, ok) {
+        elStatus.textContent = text;
         elSdot.className = 'dir-sdot' + (ok === false ? ' red' : '');
     }
 
     function setUrl(url) {
-        elUrlBar.textContent = url.replace('https://www.heda.co.za/Valpac_Help/', 'heda.co.za/Valpac_Help/');
+        elUrlBar.textContent = url.replace(BASE, 'heda.co.za/Valpac_Help/');
         currentUrl = url;
     }
 
     function updateNavBtns() {
         elBack.disabled = hpos <= 0;
-        elFwd.disabled  = hpos >= hist.length - 1;
+        elFwd.disabled = hpos >= hist.length - 1;
     }
 
     function markActive(url) {
-        document.querySelectorAll('.dir-navbtn').forEach(b => {
-            b.classList.toggle('active', b.dataset.url === url);
+        document.querySelectorAll('.dir-navbtn').forEach(function (button) {
+            button.classList.toggle('active', button.dataset.url === url);
         });
     }
 
     function showLoading(url) {
-        const path = url.replace('https://www.heda.co.za/Valpac_Help/', '');
+        const path = url.replace(BASE, '');
         elFrame.innerHTML =
             '<div class="dir-state"><div class="dir-spinner"></div>' +
-            '<div>Loading ' + escHtml(path) + '…</div>' +
+            '<div>Loading ' + escHtml(path) + '...</div>' +
             '<div style="font-size:11px;color:#888">Fetching live from heda.co.za</div></div>';
     }
 
@@ -237,39 +486,51 @@
             '</div></div>';
     }
 
-    function escHtml(s) {
-        return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    function escHtml(value) {
+        return String(value)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;');
     }
 
     function wireLinks() {
-        elFrame.querySelectorAll('a[data-valpac-url]').forEach(a => {
-            a.addEventListener('click', function (e) {
-                e.preventDefault();
-                const target = this.getAttribute('data-valpac-url');
-                if (target) loadPage(target);
+        elFrame.querySelectorAll('a[data-valpac-url]').forEach(function (anchor) {
+            anchor.addEventListener('click', function (event) {
+                event.preventDefault();
+                const target = anchor.getAttribute('data-valpac-url');
+                if (target) {
+                    loadPage(target);
+                }
             });
         });
     }
 
     async function loadPage(url, addToHist) {
-        if (addToHist === undefined) addToHist = true;
-        if (!url || !url.includes('heda.co.za')) return;
+        if (addToHist === undefined) {
+            addToHist = true;
+        }
+
+        if (!url || !url.includes('heda.co.za')) {
+            return;
+        }
 
         setUrl(url);
         markActive(url);
         showLoading(url);
-        setStatus('Loading ' + url.split('/').pop() + '…');
+        setStatus('Loading ' + url.split('/').pop() + '...');
 
         if (addToHist) {
             hist = hist.slice(0, hpos + 1);
             hist.push(url);
             hpos = hist.length - 1;
         }
+
         updateNavBtns();
 
         try {
-            const resp = await fetch('/Directives/Proxy?url=' + encodeURIComponent(url));
-            const data = await resp.json();
+            const response = await fetch(PROXY_URL + '?url=' + encodeURIComponent(url));
+            const data = await response.json();
 
             if (!data.success) {
                 showError('Page failed to load', escHtml(data.error || 'Unknown error'));
@@ -277,11 +538,11 @@
                 return;
             }
 
-            elFrame.innerHTML = '<div class="dir-page-inner" id="dirPageInner">' + data.body + '</div>';
+            elFrame.innerHTML = '<div class="dir-page-inner">' + data.body + '</div>';
             elFrame.scrollTop = 0;
-            setStatus('Loaded: ' + url.replace('https://www.heda.co.za/Valpac_Help/', '') + ' ✓');
+            setStatus('Loaded: ' + url.replace(BASE, '') + ' [OK]');
             wireLinks();
-        } catch (e) {
+        } catch (error) {
             showError('Connection failed', 'Could not reach the help server. Check your internet connection.');
             setStatus('Connection error', false);
         }
@@ -289,61 +550,77 @@
 
     async function loadSitemap() {
         try {
-            const resp = await fetch('/Directives/Sitemap');
-            const pages = await resp.json();
+            const response = await fetch(SITEMAP_URL);
+            const pages = await response.json();
             const nav = document.getElementById('dirSbNav');
-            nav.innerHTML = '';
             let lastGroup = '';
 
-            pages.forEach(function (p) {
-                sitemap[p.url] = p;
-                if (p.group !== lastGroup) {
+            nav.innerHTML = '';
+
+            pages.forEach(function (page) {
+                if (page.group !== lastGroup) {
                     if (lastGroup) {
-                        const div = document.createElement('div');
-                        div.className = 'dir-nb-div';
-                        nav.appendChild(div);
+                        const divider = document.createElement('div');
+                        divider.className = 'dir-nb-div';
+                        nav.appendChild(divider);
                     }
-                    const lbl = document.createElement('div');
-                    lbl.className = 'dir-grp-lbl';
-                    lbl.textContent = p.group;
-                    nav.appendChild(lbl);
-                    lastGroup = p.group;
+
+                    const label = document.createElement('div');
+                    label.className = 'dir-grp-lbl';
+                    label.textContent = page.group;
+                    nav.appendChild(label);
+                    lastGroup = page.group;
                 }
-                const btn = document.createElement('button');
-                btn.className = 'dir-navbtn' + (p.sub ? ' sub' : '');
-                btn.textContent = p.label;
-                btn.dataset.url = p.url;
-                btn.addEventListener('click', function () { loadPage(p.url); });
-                nav.appendChild(btn);
+
+                const button = document.createElement('button');
+                button.className = 'dir-navbtn' + (page.sub ? ' sub' : '');
+                button.textContent = page.label;
+                button.dataset.url = page.url;
+                button.addEventListener('click', function () {
+                    loadPage(page.url);
+                });
+                nav.appendChild(button);
             });
 
             loadPage(BASE + 'Main_menu.htm');
-        } catch (e) {
+        } catch (error) {
             document.getElementById('dirSbNav').innerHTML =
                 '<div style="padding:12px;color:#e06060;font-size:11px">Navigation failed to load.</div>';
             showError('Navigation error', 'Could not load the page list. Check your internet connection.');
         }
     }
 
-    // Button wiring
     elBack.addEventListener('click', function () {
-        if (hpos > 0) { hpos--; loadPage(hist[hpos], false); }
+        if (hpos > 0) {
+            hpos -= 1;
+            loadPage(hist[hpos], false);
+        }
     });
+
     elFwd.addEventListener('click', function () {
-        if (hpos < hist.length - 1) { hpos++; loadPage(hist[hpos], false); }
+        if (hpos < hist.length - 1) {
+            hpos += 1;
+            loadPage(hist[hpos], false);
+        }
     });
+
     document.getElementById('dirBtnReload').addEventListener('click', function () {
-        if (currentUrl) loadPage(currentUrl, false);
+        if (currentUrl) {
+            loadPage(currentUrl, false);
+        }
     });
+
     document.getElementById('dirBtnToggle').addEventListener('click', function () {
         sbOpen = !sbOpen;
         elSidebar.classList.toggle('closed', !sbOpen);
     });
 
-    // Expose for retry button in showError
-    window.dirReload = function () { if (currentUrl) loadPage(currentUrl, false); };
+    window.dirReload = function () {
+        if (currentUrl) {
+            loadPage(currentUrl, false);
+        }
+    };
 
-    // Boot
     loadSitemap();
 }());
 </script>
