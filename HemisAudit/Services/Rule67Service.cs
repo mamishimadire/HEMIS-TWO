@@ -456,7 +456,7 @@ ELSE
 SELECT
     'Control_1' AS Control_Type,
     'CONTROL 1: CREG [{cregTable}].[{cregStudentCol}]+[{cregQualCol}] pair in STUD [{studTable}].[{studStudentCol}]+[{studQualCol}] with [{cregE051Col}] IN ({e051ValuesLiteral})' AS Control_Label,
-    CREG_STUD_NO, CREG_QUAL, CREG_E051, STUD_NO, STUD_QUAL, IN_STUD, E051_VALID,
+    CREG_STUD_NO, CREG_QUAL, CREG_E051, STUD_NO, STUD_QUAL, IN_STUD, STUD_STUDENT_EXISTS, GHOST_STUDENT, GHOST_STUDENT_NOTE, E051_VALID,
     ValidationResult,
     CASE WHEN ValidationResult = 'FAIL' THEN '00708' ELSE '' END AS Exception_Code,
     FailReason
@@ -468,7 +468,10 @@ SELECT
     (SELECT COUNT(1) FROM ValidationResults WHERE ValidationResult = 'PASS')            AS Pass_Count,
     (SELECT COUNT(1) FROM ValidationResults WHERE ValidationResult = 'FAIL')            AS Fail_Count,
     (SELECT COUNT(1) FROM ValidationResults WHERE FailReason = 'Not found in STUD')    AS Not_In_STUD,
-    (SELECT COUNT(1) FROM ValidationResults WHERE FailReason = 'E051 code not in expected values') AS Invalid_E051;";
+    (SELECT COUNT(1) FROM ValidationResults WHERE FailReason = 'E051 code not in expected values') AS Invalid_E051,
+    (SELECT COUNT(1) FROM ValidationResults WHERE FailReason = 'Not found in STUD' AND E051_VALID = 'Yes') AS Not_In_STUD_E051_Valid,
+    (SELECT COUNT(1) FROM ValidationResults WHERE FailReason = 'Not found in STUD' AND E051_VALID = 'No') AS Not_In_STUD_E051_Invalid,
+    (SELECT COUNT(1) FROM ValidationResults WHERE FailReason = 'Not found in STUD' AND GHOST_STUDENT = 'Yes') AS Ghost_Students;";
 
             return Task.FromResult(sql.Trim());
         }
@@ -510,7 +513,7 @@ SELECT
             }
 
             // RS 2: validation counts + reconciliation counts
-            int totalChecked = 0, passCount = 0, notInStudCount = 0, invalidE051Count = 0;
+            int totalChecked = 0, passCount = 0, notInStudCount = 0, invalidE051Count = 0, notInStudE051ValidCount = 0, notInStudE051InvalidCount = 0, ghostStudentCount = 0;
             int confirmedByRule29Count = 0, notInRule29Count = 0, rule29OnlyCount = 0;
             if (await batchReader.NextResultAsync() && await batchReader.ReadAsync())
             {
@@ -518,9 +521,12 @@ SELECT
                 passCount               = GetInt(batchReader, 1);
                 notInStudCount          = GetInt(batchReader, 2);
                 invalidE051Count        = GetInt(batchReader, 3);
-                confirmedByRule29Count  = GetInt(batchReader, 4);
-                notInRule29Count        = GetInt(batchReader, 5);
-                rule29OnlyCount         = GetInt(batchReader, 6);
+                notInStudE051ValidCount = GetInt(batchReader, 4);
+                notInStudE051InvalidCount = GetInt(batchReader, 5);
+                ghostStudentCount       = GetInt(batchReader, 6);
+                confirmedByRule29Count  = GetInt(batchReader, 7);
+                notInRule29Count        = GetInt(batchReader, 8);
+                rule29OnlyCount         = GetInt(batchReader, 9);
             }
 
             // RS 3: preview / full rows (now includes Reconciliation_Status column)
@@ -566,6 +572,8 @@ SELECT
             }
             await batchReader.CloseAsync();
             reviewRows = NormalizeRows(reviewRows);
+            if (!includeAllReviewRows && rule29OnlyRows.Count > BrowserPreviewRowLimit)
+                rule29OnlyRows = rule29OnlyRows.Take(BrowserPreviewRowLimit).ToList();
             var failCount     = notInStudCount + invalidE051Count;
             var isPreviewOnly = !includeAllReviewRows && totalChecked > reviewRows.Count;
 
@@ -595,6 +603,9 @@ SELECT
                 PassCount              = passCount,
                 FailCount              = failCount,
                 NotInStudCount         = notInStudCount,
+                NotInStudE051ValidCount = notInStudE051ValidCount,
+                NotInStudE051InvalidCount = notInStudE051InvalidCount,
+                GhostStudentCount      = ghostStudentCount,
                 InvalidE051Count       = invalidE051Count,
                 ExceptionRate          = totalChecked == 0 ? 0m : Math.Round(failCount * 100m / totalChecked, 2),
                 Status                 = failCount == 0 ? "PASS" : "FAIL",
@@ -651,6 +662,9 @@ SELECT
             var failReasonExpr = e051Values.Count > 0
                 ? $"CASE WHEN SP.STUD_NO IS NULL THEN 'Not found in STUD' WHEN CP.CREG_E051 NOT IN ({BuildInClauseSql(e051Values)}) THEN 'E051 code not in expected values' ELSE '' END"
                 : "CASE WHEN SP.STUD_NO IS NULL THEN 'Not found in STUD' ELSE '' END";
+            const string studStudentExistsExpr = "CASE WHEN SSN.STUD_STUDENT_NO IS NOT NULL THEN 'Yes' ELSE 'No' END";
+            const string ghostStudentExpr = "CASE WHEN SSN.STUD_STUDENT_NO IS NULL THEN 'Yes' ELSE 'No' END";
+            const string ghostStudentNoteExpr = "CASE WHEN SSN.STUD_STUDENT_NO IS NULL THEN 'Ghost student - tested in Rule 9.' WHEN SP.STUD_NO IS NULL THEN 'Student found in STUD with different qualification code' ELSE '' END";
             var top     = maxRows.HasValue && maxRows.Value > 0 ? $"TOP {maxRows.Value}" : string.Empty;
             var orderBy = maxRows.HasValue && maxRows.Value > 0
                 ? "CASE WHEN ValidationResult = 'FAIL' THEN 0 ELSE 1 END, CREG_STUD_NO, CREG_QUAL"
@@ -738,6 +752,7 @@ OPTION (MAXDOP 4);"
             return $@"
 IF OBJECT_ID('tempdb..#R67CregPairs')    IS NOT NULL DROP TABLE #R67CregPairs;
 IF OBJECT_ID('tempdb..#R67StudPairs')    IS NOT NULL DROP TABLE #R67StudPairs;
+IF OBJECT_ID('tempdb..#R67StudNos')      IS NOT NULL DROP TABLE #R67StudNos;
 IF OBJECT_ID('tempdb..#R67Results')      IS NOT NULL DROP TABLE #R67Results;
 IF OBJECT_ID('tempdb..#R67CregStudNos') IS NOT NULL DROP TABLE #R67CregStudNos;
 
@@ -785,11 +800,30 @@ OPTION (MAXDOP 4);
 
 CREATE INDEX IX_R67SP ON #R67StudPairs (STUD_NO, STUD_QUAL);
 
+-- Materialise STUD student numbers for ghost-student detection
+SELECT DISTINCT
+    CONVERT(nvarchar(255), S.[{studStudentCol}]) AS STUD_STUDENT_NO
+INTO #R67StudNos
+FROM [{studTable}] S WITH (NOLOCK)
+WHERE S.[{studStudentCol}] IS NOT NULL
+OPTION (MAXDOP 4);
+
+CREATE INDEX IX_R67SN ON #R67StudNos (STUD_STUDENT_NO);
+
 -- Materialise join results + reconciliation column
 SELECT
     CP.CREG_STUD_NO, CP.CREG_QUAL, CP.CREG_E051,
-    SP.STUD_NO, SP.STUD_QUAL,
+    -- Show actual STUD values even when qual differs (non-ghost student)
+    CASE WHEN SP.STUD_NO   IS NOT NULL THEN SP.STUD_NO
+         WHEN SSN.STUD_STUDENT_NO IS NOT NULL THEN CP.CREG_STUD_NO
+         ELSE NULL END AS STUD_NO,
+    CASE WHEN SP.STUD_QUAL IS NOT NULL THEN SP.STUD_QUAL
+         WHEN SSN.STUD_STUDENT_NO IS NOT NULL THEN SPF.STUD_ACTUAL_QUAL
+         ELSE NULL END AS STUD_QUAL,
     CASE WHEN SP.STUD_NO IS NOT NULL THEN 'Yes' ELSE 'No' END AS IN_STUD,
+    {studStudentExistsExpr}                                     AS STUD_STUDENT_EXISTS,
+    {ghostStudentExpr}                                          AS GHOST_STUDENT,
+    {ghostStudentNoteExpr}                                      AS GHOST_STUDENT_NOTE,
     {e051ValidExpr}                                            AS E051_VALID,
     CASE WHEN {passExpr}  THEN 'PASS' ELSE 'FAIL' END         AS ValidationResult,
     {failReasonExpr}                                           AS FailReason,
@@ -797,6 +831,9 @@ SELECT
 INTO #R67Results
 FROM #R67CregPairs CP
 LEFT JOIN #R67StudPairs SP ON SP.STUD_NO = CP.CREG_STUD_NO AND SP.STUD_QUAL = CP.CREG_QUAL
+LEFT JOIN #R67StudNos SSN ON SSN.STUD_STUDENT_NO = CP.CREG_STUD_NO
+LEFT JOIN (SELECT STUD_NO, MIN(STUD_QUAL) AS STUD_ACTUAL_QUAL FROM #R67StudPairs GROUP BY STUD_NO) SPF
+    ON SPF.STUD_NO = CP.CREG_STUD_NO
 {detailJoin}
 OPTION (MAXDOP 4);
 
@@ -808,6 +845,9 @@ SELECT
     SUM(CASE WHEN ValidationResult = 'PASS'                        THEN 1 ELSE 0 END) AS PassCount,
     SUM(CASE WHEN FailReason = 'Not found in STUD'                 THEN 1 ELSE 0 END) AS NotInStudCount,
     SUM(CASE WHEN FailReason = 'E051 code not in expected values'  THEN 1 ELSE 0 END) AS InvalidE051Count,
+    SUM(CASE WHEN FailReason = 'Not found in STUD' AND E051_VALID = 'Yes' THEN 1 ELSE 0 END) AS NotInStudE051ValidCount,
+    SUM(CASE WHEN FailReason = 'Not found in STUD' AND E051_VALID = 'No'  THEN 1 ELSE 0 END) AS NotInStudE051InvalidCount,
+    SUM(CASE WHEN FailReason = 'Not found in STUD' AND GHOST_STUDENT = 'Yes' THEN 1 ELSE 0 END) AS GhostStudentCount,
     {reconCountsSql}
 FROM #R67Results;
 
@@ -820,7 +860,7 @@ SELECT {top}
         THEN 'PASS: CREG pair found in STUD and E051 code matches.'
         ELSE 'FAIL (00708): ' + ISNULL(FailReason, 'Validation failed.')
     END AS Validation_Explanation,
-    CREG_STUD_NO, CREG_QUAL, CREG_E051, STUD_NO, STUD_QUAL, IN_STUD, E051_VALID, FailReason,
+    CREG_STUD_NO, CREG_QUAL, CREG_E051, STUD_NO, STUD_QUAL, IN_STUD, STUD_STUDENT_EXISTS, GHOST_STUDENT, GHOST_STUDENT_NOTE, E051_VALID, FailReason,
     CASE WHEN ValidationResult = 'FAIL' THEN '00708' ELSE '' END AS Exception_Code,
     Reconciliation_Status
 FROM #R67Results
@@ -829,6 +869,7 @@ ORDER BY {orderBy};
 
 DROP TABLE IF EXISTS #R67CregPairs;
 DROP TABLE IF EXISTS #R67StudPairs;
+DROP TABLE IF EXISTS #R67StudNos;
 DROP TABLE IF EXISTS #R67Results;
 DROP TABLE IF EXISTS #R67CregStudNos;
 {detailDropSql}";
@@ -846,6 +887,9 @@ DROP TABLE IF EXISTS #R67CregStudNos;
             var failReasonExpr = e051Values.Count > 0
                 ? $"CASE WHEN SP.STUD_NO IS NULL THEN 'Not found in STUD' WHEN CP.CREG_E051 NOT IN ({BuildInClauseSql(e051Values)}) THEN 'E051 code not in expected values' ELSE '' END"
                 : "CASE WHEN SP.STUD_NO IS NULL THEN 'Not found in STUD' ELSE '' END";
+            const string studStudentExistsExpr = "CASE WHEN SSN.STUD_STUDENT_NO IS NOT NULL THEN 'Yes' ELSE 'No' END";
+            const string ghostStudentExpr = "CASE WHEN SSN.STUD_STUDENT_NO IS NULL THEN 'Yes' ELSE 'No' END";
+            const string ghostStudentNoteExpr = "CASE WHEN SSN.STUD_STUDENT_NO IS NULL THEN 'Ghost student - tested in Rule 9.' WHEN SP.STUD_NO IS NULL THEN 'Student found in STUD with different qualification code' ELSE '' END";
 
             return $@"
 WITH CregPairs AS
@@ -869,15 +913,35 @@ StudPairs AS
     WHERE S.[{studStudentCol}] IS NOT NULL
       AND S.[{studQualCol}] IS NOT NULL
 ),
+StudStudents AS
+(
+    SELECT DISTINCT
+        CONVERT(nvarchar(255), S.[{studStudentCol}]) AS STUD_STUDENT_NO
+    FROM [{studTable}] S
+    WHERE S.[{studStudentCol}] IS NOT NULL
+),
+StudFirstQual AS
+(
+    SELECT STUD_NO, MIN(STUD_QUAL) AS STUD_ACTUAL_QUAL
+    FROM StudPairs
+    GROUP BY STUD_NO
+),
 ValidationResults AS
 (
     SELECT
         CP.CREG_STUD_NO,
         CP.CREG_QUAL,
         CP.CREG_E051,
-        SP.STUD_NO,
-        SP.STUD_QUAL,
+        CASE WHEN SP.STUD_NO   IS NOT NULL THEN SP.STUD_NO
+             WHEN SSN.STUD_STUDENT_NO IS NOT NULL THEN CP.CREG_STUD_NO
+             ELSE NULL END AS STUD_NO,
+        CASE WHEN SP.STUD_QUAL IS NOT NULL THEN SP.STUD_QUAL
+             WHEN SSN.STUD_STUDENT_NO IS NOT NULL THEN SPF.STUD_ACTUAL_QUAL
+             ELSE NULL END AS STUD_QUAL,
         CASE WHEN SP.STUD_NO IS NOT NULL THEN 'Yes' ELSE 'No' END AS IN_STUD,
+        {studStudentExistsExpr} AS STUD_STUDENT_EXISTS,
+        {ghostStudentExpr} AS GHOST_STUDENT,
+        {ghostStudentNoteExpr} AS GHOST_STUDENT_NOTE,
         {e051ValidExpr} AS E051_VALID,
         CASE WHEN {passExpr} THEN 'PASS' ELSE 'FAIL' END AS ValidationResult,
         {failReasonExpr} AS FailReason
@@ -885,6 +949,10 @@ ValidationResults AS
     LEFT JOIN StudPairs SP
         ON SP.STUD_NO  = CP.CREG_STUD_NO
        AND SP.STUD_QUAL = CP.CREG_QUAL
+    LEFT JOIN StudStudents SSN
+        ON SSN.STUD_STUDENT_NO = CP.CREG_STUD_NO
+    LEFT JOIN StudFirstQual SPF
+        ON SPF.STUD_NO = CP.CREG_STUD_NO
 )";
         }
 
@@ -896,10 +964,21 @@ ValidationResults AS
             var qual   = ReadValue(v, "CREG_QUAL");
             var e051   = ReadValue(v, "CREG_E051");
             var reason = ReadValue(v, "FailReason");
+            var ghost  = string.Equals(ReadValue(v, "GHOST_STUDENT"), "Yes", StringComparison.OrdinalIgnoreCase);
+            var studStudentExists = string.Equals(ReadValue(v, "STUD_STUDENT_EXISTS"), "Yes", StringComparison.OrdinalIgnoreCase);
+            var ghostNote = ReadValue(v, "GHOST_STUDENT_NOTE");
 
             v["FINAL_RESULT_MESSAGE"] = isPass
                 ? $"PASS: CREG pair '{studNo}' / '{qual}' (E051: {e051}) found in STUD with valid E051 code."
-                : $"FAIL (00708): CREG pair '{studNo}' / '{qual}' (E051: {e051}) — {reason}.";
+                : reason switch
+                {
+                    "Not found in STUD" when ghost
+                        => $"FAIL (00708): CREG pair '{studNo}' / '{qual}' (E051: {e051}) - student number not found in STUD. Marked as Ghost Student. {ghostNote}",
+                    "Not found in STUD" when studStudentExists
+                        => $"FAIL (00708): CREG pair '{studNo}' / '{qual}' (E051: {e051}) - student number exists in STUD, but the qualification pair was not found.",
+                    _
+                        => $"FAIL (00708): CREG pair '{studNo}' / '{qual}' (E051: {e051}) - {reason}."
+                };
             row.ValidationExplanation = ReadValue(v, "FINAL_RESULT_MESSAGE");
         }
 
@@ -965,6 +1044,10 @@ SELECT CAST(SCOPE_IDENTITY() AS int);";
 
         private static void ApplyBrowserPreview(Rule67ValidationSummary summary)
         {
+            // Cap Rule29Only rows
+            if (summary.Rule29OnlyRows.Count > BrowserPreviewRowLimit)
+                summary.Rule29OnlyRows = summary.Rule29OnlyRows.Take(BrowserPreviewRowLimit).ToList();
+
             var rows = summary.ReviewRows;
             if (rows.Count <= BrowserPreviewRowLimit) { summary.DisplayedCount = rows.Count; summary.IsPreviewOnly = false; summary.PreviewLimit = 0; return; }
 
@@ -986,7 +1069,7 @@ SELECT CAST(SCOPE_IDENTITY() AS int);";
         {
             Success = s.Success, CregRecordCount = s.CregRecordCount, StudRecordCount = s.StudRecordCount,
             TotalValidated = s.TotalValidated, DisplayedCount = s.DisplayedCount, IsPreviewOnly = s.IsPreviewOnly, PreviewLimit = s.PreviewLimit,
-            PassCount = s.PassCount, FailCount = s.FailCount, NotInStudCount = s.NotInStudCount, InvalidE051Count = s.InvalidE051Count,
+            PassCount = s.PassCount, FailCount = s.FailCount, NotInStudCount = s.NotInStudCount, NotInStudE051ValidCount = s.NotInStudE051ValidCount, NotInStudE051InvalidCount = s.NotInStudE051InvalidCount, GhostStudentCount = s.GhostStudentCount, InvalidE051Count = s.InvalidE051Count,
             ExceptionRate = s.ExceptionRate, Status = s.Status, Timestamp = s.Timestamp, Database = s.Database,
             CregTable = s.CregTable, StudTable = s.StudTable,
             CregStudentNoCol = s.CregStudentNoCol, CregQualCol = s.CregQualCol, CregE051Col = s.CregE051Col,
