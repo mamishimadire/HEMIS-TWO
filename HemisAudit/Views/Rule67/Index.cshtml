@@ -771,9 +771,9 @@ window.toggleAccordion = function (section) {
         const catMap = {
             ALL:               { rows: allRows,             label: 'All Results',                    count: summary.totalValidated||allRows.length,          isRule29: false },
             PASS:              { rows: passRows,             label: 'PASS',                           count: summary.passCount||passRows.length,              isRule29: false },
-            NOT_IN_STUD_E051_YES: { rows: notInStudE051YesRows, label: 'Not in STUD | E051 Yes',    count: summary.notInStudE051ValidCount||notInStudE051YesRows.length, isRule29: false },
-            NOT_IN_STUD_E051_NO:  { rows: notInStudE051NoRows,  label: 'Not in STUD | E051 No',     count: summary.notInStudE051InvalidCount||notInStudE051NoRows.length, isRule29: false },
-            NOT_IN_STUD:       { rows: notInStudRows,        label: 'FAIL — Not in STUD',             count: summary.notInStudCount||notInStudRows.length,    isRule29: false },
+            NOT_IN_STUD_E051_YES: { rows: notInStudE051YesRows, label: 'Fail (E051 Yes)',             count: summary.notInStudE051ValidCount||notInStudE051YesRows.length, isRule29: false },
+            NOT_IN_STUD_E051_NO:  { rows: notInStudE051NoRows,  label: 'Fail (E051 No)',              count: summary.notInStudE051InvalidCount||notInStudE051NoRows.length, isRule29: false },
+            NOT_IN_STUD:       { rows: notInStudRows,        label: 'Fail',                           count: summary.notInStudCount||notInStudRows.length,    isRule29: false },
             E051_INVALID:      { rows: e051InvalidRows,      label: 'FAIL — E051 Invalid',            count: summary.invalidE051Count||e051InvalidRows.length, isRule29: false },
             ...(hasDetail ? {
                 CONFIRMED:            { rows: confirmedRows,       label: 'Confirmed by Rule 29',           count: summary.confirmedByRule29Count||confirmedRows.length,    isRule29: false },
