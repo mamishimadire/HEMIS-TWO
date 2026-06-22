@@ -338,6 +338,13 @@ FROM [{safeTable}] src{joinSql}{(string.IsNullOrWhiteSpace(whereClause) ? "" : $
                         var dayStatus = GetDayStatus(computedDate, actualCensusDate, holidayLookup);
                         var comparisonResult = !actualCensusDate.HasValue || !censusDate.HasValue ||
                                                actualCensusDate.Value.Date != censusDate.Value.Date;
+                        var workingDayDiff = comparisonResult
+                            ? CountWorkingDaysApart(censusDate, actualCensusDate, holidayLookup)
+                            : 0;
+                        var withinTolerance = comparisonResult && workingDayDiff <= 2;
+                        var toleranceNote = withinTolerance
+                            ? BuildToleranceNote(censusDate, actualCensusDate, workingDayDiff, holidayLookup)
+                            : "";
 
                         var blockValue = !string.IsNullOrWhiteSpace(request.BlockColumn)
                             ? ReadStringColumn(reader, "BlockValue")
@@ -355,10 +362,15 @@ FROM [{safeTable}] src{joinSql}{(string.IsNullOrWhiteSpace(whereClause) ? "" : $
                             CensusDateValue = FormatDate(censusDate),
                             DayStatus = dayStatus,
                             ComparisonResult = comparisonResult,
-                            DateMatch = !comparisonResult,
-                            ValidationStatus = comparisonResult
-                                ? "FAIL (TRUE - MISMATCH)"
-                                : "PASS (FALSE - MATCH)",
+                            DateMatch = !comparisonResult || withinTolerance,
+                            ValidationStatus = !comparisonResult
+                                ? "PASS (FALSE - MATCH)"
+                                : withinTolerance
+                                    ? "PASS (TOLERANCE)"
+                                    : "FAIL (TRUE - MISMATCH)",
+                            WorkingDayDiff = workingDayDiff,
+                            WithinTolerance = withinTolerance,
+                            ToleranceNote = toleranceNote,
                             BlockValue = blockValue ?? ""
                         });
                     }
@@ -366,6 +378,7 @@ FROM [{safeTable}] src{joinSql}{(string.IsNullOrWhiteSpace(whereClause) ? "" : $
 
                 var passCount = rows.Count(r => r.DateMatch);
                 var failCount = rows.Count - passCount;
+                var tolerancePassCount = rows.Count(r => r.WithinTolerance);
                 var total = rows.Count;
                 var holidayCount = rows.Count(r => r.DayStatus.StartsWith("SA Public Holiday", StringComparison.OrdinalIgnoreCase));
                 var weekendCount = rows.Count(r =>
@@ -393,13 +406,15 @@ FROM [{safeTable}] src{joinSql}{(string.IsNullOrWhiteSpace(whereClause) ? "" : $
                     HolidayYearRange = $"{request.StartYear}-{request.EndYear}",
                     HolidayCount = holidayCount,
                     WeekendCount = weekendCount,
+                    TolerancePassCount = tolerancePassCount,
                     ClientId = request.ClientId,
                     BlockColumn = request.BlockColumn ?? "",
                     BlockExcludeValues = request.BlockExcludeValues ?? "",
                     ExcludedRowCount = excludedRowCount,
                     Holidays = holidays,
                     ValidationRows = rows,
-                    Exceptions = rows.Where(r => !r.DateMatch).ToList()
+                    Exceptions = rows.Where(r => !r.DateMatch).ToList(),
+                    ToleranceExceptions = rows.Where(r => r.WithinTolerance).ToList()
                 };
 
                 if (request.ClientId > 0)
@@ -1501,6 +1516,39 @@ WHERE RunID = @RunID;";
             }
 
             return candidate;
+        }
+
+        private static int CountWorkingDaysApart(DateTime? a, DateTime? b, IReadOnlyDictionary<DateOnly, string> holidays)
+        {
+            if (!a.HasValue || !b.HasValue || a.Value.Date == b.Value.Date) return 0;
+            var start = a.Value.Date < b.Value.Date ? a.Value.Date : b.Value.Date;
+            var end   = a.Value.Date > b.Value.Date ? a.Value.Date : b.Value.Date;
+            var count = 0;
+            for (var d = start.AddDays(1); d <= end; d = d.AddDays(1))
+            {
+                if (d.DayOfWeek != DayOfWeek.Saturday && d.DayOfWeek != DayOfWeek.Sunday
+                    && !holidays.ContainsKey(DateOnly.FromDateTime(d)))
+                    count++;
+            }
+            return count;
+        }
+
+        private static string BuildToleranceNote(DateTime? censusDate, DateTime? actualCensusDate, int workingDayDiff, IReadOnlyDictionary<DateOnly, string> holidays)
+        {
+            if (!censusDate.HasValue || !actualCensusDate.HasValue) return "";
+            var start = censusDate.Value.Date < actualCensusDate.Value.Date ? censusDate.Value.Date : actualCensusDate.Value.Date;
+            var end   = censusDate.Value.Date > actualCensusDate.Value.Date ? censusDate.Value.Date : actualCensusDate.Value.Date;
+            var calDiff = (end - start).Days;
+            var skipped = new List<string>();
+            for (var d = start.AddDays(1); d < end; d = d.AddDays(1))
+            {
+                if (d.DayOfWeek == DayOfWeek.Saturday || d.DayOfWeek == DayOfWeek.Sunday)
+                    skipped.Add($"{d:dd MMM} [{d.DayOfWeek}]");
+                else if (holidays.TryGetValue(DateOnly.FromDateTime(d), out var name))
+                    skipped.Add($"{d:dd MMM} [Holiday: {name}]");
+            }
+            var skippedText = skipped.Count > 0 ? $" ({string.Join(", ", skipped)} not counted)" : "";
+            return $"{calDiff} calendar day(s) apart; {workingDayDiff} working day(s){skippedText} — within 2-day tolerance";
         }
 
         private static string GetDayStatus(DateTime? preparedDate, DateTime? actualDate, IReadOnlyDictionary<DateOnly, string> holidays)

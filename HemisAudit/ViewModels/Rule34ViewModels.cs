@@ -105,6 +105,9 @@ namespace HemisAudit.ViewModels
         public bool DateMatch { get; set; }
         public string ValidationStatus { get; set; } = "";
         public string BlockValue { get; set; } = "";
+        public int WorkingDayDiff { get; set; }
+        public bool WithinTolerance { get; set; }
+        public string ToleranceNote { get; set; } = "";
     }
 
     public class Rule34ValidationSummary
@@ -128,6 +131,8 @@ namespace HemisAudit.ViewModels
         public string HolidayYearRange { get; set; } = "";
         public int HolidayCount { get; set; }
         public int WeekendCount { get; set; }
+        public int TolerancePassCount { get; set; }
+        public List<Rule34ValidationRowRecord> ToleranceExceptions { get; set; } = new();
         public int ClientId { get; set; }
         public int? SavedRunId { get; set; }
         public string BlockColumn { get; set; } = "";

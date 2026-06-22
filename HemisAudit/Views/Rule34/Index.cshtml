@@ -1135,6 +1135,7 @@ function renderValidationResults(r) {
     const censusValueLabel = getRule34CensusValueLabel(r);
     const rows = (r.validationRows || []).slice(0, 10).map(row => {
         const isExcludedBlock = blockCol && excludedVals.split(',').map(v => v.trim().toUpperCase()).includes((row.blockValue||'').trim().toUpperCase());
+        const badgeClass = row.dateMatch ? (row.withinTolerance ? 'badge--warning' : 'badge--pass') : 'badge--fail';
         return `
         <tr>
             <td>${row.validationNumber}</td>
@@ -1147,7 +1148,8 @@ function renderValidationResults(r) {
             <td>${escapeHtml(row.actualCensusDate)}</td>
             <td>${escapeHtml(row.censusDateValue)}</td>
             <td>${escapeHtml(row.dayStatus)}</td>
-            <td><span class="badge ${row.dateMatch ? 'badge--pass' : 'badge--fail'}">${escapeHtml(row.validationStatus)}</span></td>
+            <td><span class="badge ${badgeClass}">${escapeHtml(row.validationStatus)}</span></td>
+            <td style="font-size:11px;color:#b45309;max-width:280px">${escapeHtml(row.toleranceNote||'')}</td>
         </tr>`;
     }).join('');
 
@@ -1158,6 +1160,7 @@ function renderValidationResults(r) {
             <div class="stat-card"><div class="stat-card__label">Validated</div><div class="stat-card__value">${r.totalValidated.toLocaleString()}</div></div>
             <div class="stat-card stat-card--pass"><div class="stat-card__label">Pass</div><div class="stat-card__value">${r.passCount.toLocaleString()}</div></div>
             <div class="stat-card stat-card--fail"><div class="stat-card__label">Fail</div><div class="stat-card__value">${r.failCount.toLocaleString()}</div></div>
+            ${(r.tolerancePassCount||0)>0?`<div class="stat-card" style="border-color:#d97706"><div class="stat-card__label" style="color:#b45309">Pass (Tolerance)</div><div class="stat-card__value" style="color:#b45309">${(r.tolerancePassCount||0).toLocaleString()}</div></div>`:''}
             <div class="stat-card"><div class="stat-card__label">Mismatch Rate</div><div class="stat-card__value">${parseFloat(r.exceptionRate).toFixed(2)}%</div></div>
             ${(r.excludedRowCount > 0 || r.blockColumn) ? `<div class="stat-card"><div class="stat-card__label">Excluded (Block Filter)</div><div class="stat-card__value">${(r.excludedRowCount||0).toLocaleString()}</div></div>` : ''}
         </div>
@@ -1183,6 +1186,7 @@ function renderValidationResults(r) {
                         <th>${escapeHtml(censusValueLabel)}</th>
                         <th>Day Status</th>
                         <th>Validation Status</th>
+                        <th>Note</th>
                     </tr>
                 </thead>
                 <tbody>${rows}</tbody>
@@ -1193,7 +1197,7 @@ function renderValidationResults(r) {
 
 function renderExceptions(r) {
     const blockCol = r.blockColumn || '';
-    const colSpan = blockCol ? 11 : 10;
+    const colSpan = blockCol ? 12 : 11;
     const censusValueLabel = getRule34CensusValueLabel(r);
     const rows = (r.exceptions || []).map(row => `
         <tr>
@@ -1208,16 +1212,34 @@ function renderExceptions(r) {
             <td>${escapeHtml(row.censusDateValue)}</td>
             <td>${escapeHtml(row.dayStatus)}</td>
             <td><span class="badge badge--fail">${escapeHtml(row.validationStatus)}</span></td>
+            <td></td>
+        </tr>`).join('');
+
+    const toleranceRows = (r.toleranceExceptions || []).map(row => `
+        <tr style="background:#fffbeb">
+            <td>${row.validationNumber}</td>
+            ${blockCol ? `<td style="font-weight:700">${escapeHtml(row.blockValue||'')}</td>` : ''}
+            <td>${escapeHtml(row.firstDayValue)}</td>
+            <td>${escapeHtml(row.lastDayValue)}</td>
+            <td>${row.currentDays ?? ''}</td>
+            <td>${row.currentDaysHalf ?? ''}</td>
+            <td>${escapeHtml(row.computedCensusDate)}</td>
+            <td>${escapeHtml(row.actualCensusDate)}</td>
+            <td>${escapeHtml(row.censusDateValue)}</td>
+            <td>${escapeHtml(row.dayStatus)}</td>
+            <td><span class="badge badge--warning">${escapeHtml(row.validationStatus)}</span></td>
+            <td style="font-size:11px;color:#b45309;max-width:280px">${escapeHtml(row.toleranceNote||'')}</td>
         </tr>`).join('');
 
     const content = document.getElementById('exceptionsContent');
     content.classList.remove('empty-state');
     content.innerHTML = `
         <div class="card" style="padding:18px;margin-bottom:18px">
-            <strong>Exceptions:</strong> ${r.failCount.toLocaleString()}<br>
-            <strong>Completed:</strong> ${escapeHtml(r.timestamp)}
+            <strong>Exceptions (true FAIL):</strong> ${r.failCount.toLocaleString()}&nbsp;&nbsp;
+            ${(r.tolerancePassCount||0)>0?`<strong style="color:#b45309">Pass (Tolerance — ≤2 working days):</strong> <span style="color:#b45309">${(r.tolerancePassCount||0).toLocaleString()}</span>`:''}
+            <br><strong>Completed:</strong> ${escapeHtml(r.timestamp)}
             ${r.clientTableName ? `<br><strong>Client Census Table:</strong> ${escapeHtml(r.clientTableName)} &nbsp;|&nbsp; <strong>Client Join Column:</strong> ${escapeHtml(r.clientJoinColumn || '')}` : ''}
-            ${blockCol ? `<br><strong>Block column:</strong> ${escapeHtml(blockCol)} &nbsp;|&nbsp; <strong>Excluded values:</strong> ${escapeHtml(r.blockExcludeValues||'')} &nbsp;|&nbsp; <strong>Rows excluded from validation:</strong> ${(r.excludedRowCount||0).toLocaleString()}` : ''}
+            ${blockCol ? `<br><strong>Block column:</strong> ${escapeHtml(blockCol)} &nbsp;|&nbsp; <strong>Excluded values:</strong> ${escapeHtml(r.blockExcludeValues||'')} &nbsp;|&nbsp; <strong>Rows excluded:</strong> ${(r.excludedRowCount||0).toLocaleString()}` : ''}
         </div>
         <div class="table-wrapper">
             <table class="data-table">
@@ -1234,11 +1256,32 @@ function renderExceptions(r) {
                         <th>${escapeHtml(censusValueLabel)}</th>
                         <th>Day Status</th>
                         <th>Validation Status</th>
+                        <th>Note</th>
                     </tr>
                 </thead>
                 <tbody>${rows || `<tr><td colspan="${colSpan}">No exceptions found.</td></tr>`}</tbody>
             </table>
-        </div>`;
+        </div>
+        ${toleranceRows ? `
+        <div style="margin-top:24px">
+            <h4 style="color:#b45309;margin-bottom:8px">Tolerance Notes — dates within 2 working days (treated as Pass)</h4>
+            <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px">These rows have a calendar date difference but the gap reduces to ≤ 2 working days once weekends and public holidays are excluded.</p>
+            <div class="table-wrapper">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>#</th>
+                            ${blockCol ? `<th>${escapeHtml(blockCol)}</th>` : ''}
+                            <th>First Day</th><th>Last Day</th><th>c_Days</th><th>c_Days_2</th>
+                            <th>Prepared Census Date</th><th>Actual Census Date</th>
+                            <th>${escapeHtml(censusValueLabel)}</th>
+                            <th>Day Status</th><th>Status</th><th>Note</th>
+                        </tr>
+                    </thead>
+                    <tbody>${toleranceRows}</tbody>
+                </table>
+            </div>
+        </div>` : ''}`;
 }
 
 function renderCharts(r) {
