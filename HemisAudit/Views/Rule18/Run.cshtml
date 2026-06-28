@@ -294,6 +294,7 @@
                         <span class="message-text">${escapeHtml(studCriteriaMessage)}</span>
                     </td>
                     <td>${escapeHtml(v.BRIDGE__001 || '')}</td>
+                    <td>${escapeHtml(v.BRIDGE__007 || '')}</td>
                     <td>${escapeHtml(v.BRIDGE__030 || '')}</td>
                     <td class="mid-pass-cell ${row.validationResult === 'FAIL' ? 'is-fail' : 'is-pass'}">
                         <span class="message-text">${escapeHtml(bridgeMessage)}</span>
@@ -317,7 +318,7 @@
                             <tr>
                                 <th colspan="${include024 ? 4 : 3}" class="group-stud">dbo_STUD</th>
                                 <th class="criteria-head">Criteria:<br />${escapeHtml(criteriaText)}</th>
-                                <th colspan="2" class="group-bridge">${escapeHtml(bridgeTableName)}</th>
+                                <th colspan="3" class="group-bridge">${escapeHtml(bridgeTableName)}</th>
                                 <th class="criteria-head"></th>
                                 <th colspan="2" class="group-crse">dbo_CRSE</th>
                                 <th class="group-final">Final results</th>
@@ -329,6 +330,7 @@
                                 ${include024 ? '<th>_024</th>' : ''}
                                 <th></th>
                                 <th>_001</th>
+                                <th>_007</th>
                                 <th>_030</th>
                                 <th></th>
                                 <th>_030</th>

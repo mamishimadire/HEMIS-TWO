@@ -1023,6 +1023,7 @@ WITH ControlResults AS
         CAST(S.[{c1Col}] AS nvarchar(255)) AS STUD__019,
         NULL AS STUD__024,
         NULL AS BRIDGE__001,
+        NULL AS BRIDGE__007,
         NULL AS BRIDGE__030,
         NULL AS CRSE__030,
         NULL AS CRSE__091
@@ -1047,6 +1048,7 @@ WITH ControlResults AS
         CAST(S.[{nsfasCol}] AS nvarchar(255)) AS STUD__019,
         CAST(S.[{distCol}] AS nvarchar(255)) AS STUD__024,
         CAST(BRIDGE.[_001] AS nvarchar(255)) AS BRIDGE__001,
+        CAST(BRIDGE.[_007] AS nvarchar(255)) AS BRIDGE__007,
         CAST(BRIDGE.[_030] AS nvarchar(255)) AS BRIDGE__030,
         CAST(CRSE.[_030] AS nvarchar(255)) AS CRSE__030,
         CAST(CRSE.[{foundCol}] AS nvarchar(255)) AS CRSE__091
@@ -1075,6 +1077,7 @@ WITH ControlResults AS
         CAST(S.[{nsfasCol}] AS nvarchar(255)) AS STUD__019,
         CAST(S.[{distCol}] AS nvarchar(255)) AS STUD__024,
         CAST(BRIDGE.[_001] AS nvarchar(255)) AS BRIDGE__001,
+        CAST(BRIDGE.[_007] AS nvarchar(255)) AS BRIDGE__007,
         CAST(BRIDGE.[_030] AS nvarchar(255)) AS BRIDGE__030,
         CAST(CRSE.[_030] AS nvarchar(255)) AS CRSE__030,
         CAST(CRSE.[{foundCol}] AS nvarchar(255)) AS CRSE__091
@@ -1104,6 +1107,7 @@ WITH ControlResults AS
         CAST(S.[{nsfasCol}] AS nvarchar(255)) AS STUD__019,
         CAST(S.[{distCol}] AS nvarchar(255)) AS STUD__024,
         CAST(BRIDGE.[_001] AS nvarchar(255)) AS BRIDGE__001,
+        CAST(BRIDGE.[_007] AS nvarchar(255)) AS BRIDGE__007,
         CAST(BRIDGE.[_030] AS nvarchar(255)) AS BRIDGE__030,
         CAST(CRSE.[_030] AS nvarchar(255)) AS CRSE__030,
         CAST(CRSE.[{foundCol}] AS nvarchar(255)) AS CRSE__091
@@ -1155,6 +1159,7 @@ WITH BaseRows AS
         CAST(S.[{nsfasCol}] AS nvarchar(255)) AS Stud_019,
         CAST(S.[{distCol}] AS nvarchar(255)) AS Stud_024,
         CAST(BRIDGE.[_001] AS nvarchar(255)) AS Bridge_001,
+        CAST(BRIDGE.[_007] AS nvarchar(255)) AS Bridge_007,
         CAST(BRIDGE.[_030] AS nvarchar(255)) AS Bridge_030,
         CAST(CRSE.[_030] AS nvarchar(255)) AS Crse_030,
         CAST(CRSE.[{foundCol}] AS nvarchar(255)) AS Crse_091,
