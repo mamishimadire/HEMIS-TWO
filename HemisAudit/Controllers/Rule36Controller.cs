@@ -921,6 +921,7 @@ namespace HemisAudit.Controllers
         public string Driver { get; set; } = "";
         public string TableName { get; set; } = "";
         public bool IsStudTable { get; set; }
+        public string TableRole { get; set; } = "";
     }
 }
 

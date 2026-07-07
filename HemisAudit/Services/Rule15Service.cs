@@ -82,7 +82,7 @@ namespace HemisAudit.Services
             try
             {
                 ValidateRequest(request);
-                await EnsureColumnsExistAsync(request.Server, request.Database, request.Driver, request.StudTable, request.BridgeTable, request.CrseTable);
+                await EnsureColumnsExistAsync(request.Server, request.Database, request.Driver, request.StudTable, request.BridgeTable, request.CrseTable, request.QualApprovedCol ?? "_004", request.CredQualJoinCol ?? "_001", request.CredCregJoinCol1 ?? "_001", request.CredCregJoinCol2 ?? "_030", request.CregStudentCol ?? "_007");
 
                 var connStr = BuildConnectionString(request.Server, request.Database, request.Driver);
                 await using var conn = new SqlConnection(connStr);
@@ -135,17 +135,15 @@ namespace HemisAudit.Services
             try
             {
                 ValidateRequest(request);
-                await EnsureColumnsExistAsync(request.Server, request.Database, request.Driver, request.StudTable, request.BridgeTable, request.CrseTable);
+                await EnsureColumnsExistAsync(request.Server, request.Database, request.Driver, request.StudTable, request.BridgeTable, request.CrseTable, request.QualApprovedCol ?? "_004", request.CredQualJoinCol ?? "_001", request.CredCregJoinCol1 ?? "_001", request.CredCregJoinCol2 ?? "_030", request.CregStudentCol ?? "_007");
 
-                var summary = await AnalyseAsync(request, includeAllReviewRows: false);
+                // Run once with all rows — used for both save and browser preview
+                var summary = await AnalyseAsync(request, includeAllReviewRows: true);
                 if (summary.Success && request.ClientId > 0)
                 {
                     try
                     {
                         var summaryToPersist = CloneSummary(summary);
-                        if (summaryToPersist.IsPreviewOnly || summaryToPersist.ReviewRows.Count < summaryToPersist.TotalValidated)
-                            summaryToPersist = await AnalyseAsync(request, includeAllReviewRows: true);
-
                         summaryToPersist.SavedRunId = null;
                         summary.SavedRunId = await SaveValidationRunAsync(request, summaryToPersist, userEmail, userName, markWorkspaceSaved: false);
 
@@ -255,9 +253,15 @@ ORDER BY vr.RunTimestamp DESC, vr.RunID DESC;";
                 RunId = reader.GetInt32(0),
                 Server = reader.IsDBNull(2) ? "" : reader.GetString(2),
                 Database = reader.IsDBNull(3) ? "" : reader.GetString(3),
-                StudTable = reader.IsDBNull(4) ? "dbo_QUAL" : reader.GetString(4),
-                BridgeTable = reader.IsDBNull(5) ? "dbo_CRED" : reader.GetString(5),
+                StudTable = reader.IsDBNull(4) ? "dbo_CRED" : reader.GetString(4),
+                BridgeTable = reader.IsDBNull(5) ? "dbo_QUAL" : reader.GetString(5),
                 CrseTable = reader.IsDBNull(6) ? "dbo_CREG" : reader.GetString(6),
+                QualApprovedCol = deserializedSummary?.QualApprovedCol ?? "_004",
+                QualApprovedVal = deserializedSummary?.QualApprovedVal ?? "A",
+                CredQualJoinCol = deserializedSummary?.CredQualJoinCol ?? "_001",
+                CredCregJoinCol1 = deserializedSummary?.CredCregJoinCol1 ?? "_001",
+                CredCregJoinCol2 = deserializedSummary?.CredCregJoinCol2 ?? "_030",
+                CregStudentCol = deserializedSummary?.CregStudentCol ?? "_007",
                 CurrentStatus = reader.IsDBNull(7) ? "" : reader.GetString(7),
                 LastEditedByUserName = reader.IsDBNull(8) ? null : reader.GetString(8),
                 LastEditedAt = reader.IsDBNull(9) ? null : reader.GetDateTime(9),
@@ -601,34 +605,47 @@ END";
         {
             ValidateRequest(request);
 
-            var qualTable = Sanitise(request.StudTable);
-            var credTable = Sanitise(request.BridgeTable);
+            var credTable = Sanitise(request.StudTable);
+            var qualTable = Sanitise(request.BridgeTable);
             var cregTable = Sanitise(request.CrseTable);
+            var aCol  = Sanitise(request.QualApprovedCol ?? "_004");
+            var aVal  = request.QualApprovedVal ?? "A";
+            var qjCol = Sanitise(request.CredQualJoinCol ?? "_001");
+            var cj1   = Sanitise(request.CredCregJoinCol1 ?? "_001");
+            var cj2   = Sanitise(request.CredCregJoinCol2 ?? "_030");
+            var sCol  = Sanitise(request.CregStudentCol ?? "_007");
 
             var sql = $@"-- HEMIS RULE 15: COURSE CREDENTIALS VALIDATION
--- Linkage: [{qualTable}] -> [{credTable}] -> [{cregTable}]
--- Rule: test 100% of credential rows where QUAL._004 = 'A'
--- PASS when a matching registration exists on CREG._001 = CRED._001 AND CREG._030 = CRED._030
+-- Step 1: Extract 100% CRED population from [{credTable}]
+-- Step 2: Extract approved qualifications from [{qualTable}] where {aCol} = '{aVal}'
+-- Step 3: Extract CREG registration population from [{cregTable}]
+-- Step 4: Validate CRED -> QUAL -> CREG linkage (PASS when both links found)
 
-{BuildRule15SourceCtes(qualTable, credTable, cregTable)}
-SELECT
-    'Control_1' AS Control_Type,
-    'CONTROL 1: QUAL._004 = ''A'' and CREG registration exists for the credential course' AS Control_Label,
-    ResultRows.QUAL__001,
-    ResultRows.QUAL__004,
-    ResultRows.CRED__001,
-    ResultRows.CRED__030,
-    CASE
-        WHEN ResultRows.CREG__001 IS NOT NULL THEN 'PASS' ELSE 'FAIL'
-    END AS Validation_Result
-FROM ApprovedCredentialResults ResultRows
-ORDER BY ResultRows.CRED__001, ResultRows.CRED__030;
+{BuildRule15PrepSql(credTable, qualTable, cregTable, aCol, aVal, qjCol, cj1, cj2, sCol, true, true, true, true)}
 
+-- Step 5: Full CRED population
+SELECT * FROM #Rule15_CRED_Population ORDER BY [Extract_Number];
+
+-- Step 6: Full validation result
+SELECT * FROM #Rule15_Validation ORDER BY [Extract_Number];
+
+-- Step 7: Exceptions only
+SELECT * FROM #Rule15_Validation WHERE [Validation_Result] = 'FAIL' ORDER BY [Extract_Number];
+
+-- Step 8: Summary
 SELECT
-    (SELECT COUNT(*) FROM ApprovedQualifications) AS Approved_Qualifications,
-    COUNT(1) AS Approved_Credentials,
-    SUM(CASE WHEN CREG__001 IS NOT NULL THEN 1 ELSE 0 END) AS Registered_Credentials
-FROM ApprovedCredentialResults;";
+    (SELECT COUNT(1) FROM #Rule15_Approved_QUAL)   AS [Approved_Qualifications],
+    (SELECT COUNT(1) FROM #Rule15_CRED_Population) AS [Total_Course_Credentials],
+    SUM(CASE WHEN [Validation_Result] = 'PASS' THEN 1 ELSE 0 END) AS [PASS_Count],
+    SUM(CASE WHEN [Validation_Result] = 'FAIL' THEN 1 ELSE 0 END) AS [FAIL_Count],
+    CAST(SUM(CASE WHEN [Validation_Result] = 'FAIL' THEN 1 ELSE 0 END) * 100.0
+        / NULLIF(COUNT(*), 0) AS DECIMAL(5,2)) AS [Exception_Rate_Pct]
+FROM #Rule15_Validation;
+
+DROP TABLE IF EXISTS #Rule15_CRED_Population;
+DROP TABLE IF EXISTS #Rule15_Approved_QUAL;
+DROP TABLE IF EXISTS #Rule15_CREG_Population;
+DROP TABLE IF EXISTS #Rule15_Validation;";
 
             return Task.FromResult(sql.Trim());
         }
@@ -639,38 +656,41 @@ FROM ApprovedCredentialResults;";
             await using var conn = new SqlConnection(connStr);
             await conn.OpenAsync();
 
-            var qualTable = Sanitise(request.StudTable);
-            var credTable = Sanitise(request.BridgeTable);
-            var cregTable = Sanitise(request.CrseTable);
+            // StudTable = CRED (primary), BridgeTable = QUAL (filter), CrseTable = CREG (registration)
+            var credTable        = Sanitise(request.StudTable);
+            var qualTable        = Sanitise(request.BridgeTable);
+            var cregTable        = Sanitise(request.CrseTable);
+            var qualApprovedCol  = Sanitise(string.IsNullOrWhiteSpace(request.QualApprovedCol)  ? "_004" : request.QualApprovedCol);
+            var qualApprovedVal  = request.QualApprovedVal ?? "A";
+            var credQualJoinCol  = Sanitise(string.IsNullOrWhiteSpace(request.CredQualJoinCol)  ? "_001" : request.CredQualJoinCol);
+            var credCregJoinCol1 = Sanitise(string.IsNullOrWhiteSpace(request.CredCregJoinCol1) ? "_001" : request.CredCregJoinCol1);
+            var credCregJoinCol2 = Sanitise(string.IsNullOrWhiteSpace(request.CredCregJoinCol2) ? "_030" : request.CredCregJoinCol2);
+            var cregStudentCol   = Sanitise(string.IsNullOrWhiteSpace(request.CregStudentCol)   ? "_007" : request.CregStudentCol);
 
-            var qualCount = await CountAsync(conn, $"SELECT COUNT(*) FROM [{qualTable}];");
+            // Check which optional display columns exist
+            var credCols = new HashSet<string>(await GetColumnsOnConnectionAsync(conn, credTable), StringComparer.OrdinalIgnoreCase);
+            var qualCols = new HashSet<string>(await GetColumnsOnConnectionAsync(conn, qualTable), StringComparer.OrdinalIgnoreCase);
+            bool hasCredFiller  = credCols.Contains("_065");
+            bool hasCredCredit1 = credCols.Contains("_036");
+            bool hasCredCredit2 = credCols.Contains("_050");
+            bool hasQualName    = qualCols.Contains("_003");
+
             var credCount = await CountAsync(conn, $"SELECT COUNT(*) FROM [{credTable}];");
+            var qualCount = await CountAsync(conn, $"SELECT COUNT(*) FROM [{qualTable}];");
             var cregCount = await CountAsync(conn, $"SELECT COUNT(*) FROM [{cregTable}];");
 
-            await using var countCommand = conn.CreateConfiguredCommand();
-            countCommand.CommandText = BuildPopulationCountSql(qualTable, credTable, cregTable);
-            await using var countReader = await countCommand.ExecuteReaderAsync();
+            var (approvedQualCount, credPopCount, passCount, failCount) =
+                await RunRule15PrepAndGetCountsAsync(conn, credTable, qualTable, cregTable,
+                    qualApprovedCol, qualApprovedVal, credQualJoinCol, credCregJoinCol1, credCregJoinCol2, cregStudentCol,
+                    hasCredFiller, hasCredCredit1, hasCredCredit2, hasQualName);
 
-            var approvedQualificationCount = 0;
-            var approvedCredentialCount = 0;
-            var registeredCredentialCount = 0;
-            if (await countReader.ReadAsync())
-            {
-                approvedQualificationCount = GetInt(countReader, 0);
-                approvedCredentialCount = GetInt(countReader, 1);
-                registeredCredentialCount = GetInt(countReader, 2);
-            }
-
-            await countReader.CloseAsync();
-
-            var reviewRows = await LoadControlRowsAsync(conn, qualTable, credTable, cregTable, includeAllReviewRows ? null : BrowserPreviewRowLimit);
+            var reviewRows = await LoadControlRowsFromPrepAsync(conn, includeAllReviewRows ? null : BrowserPreviewRowLimit);
             reviewRows = NormalizeReviewRows(reviewRows);
 
-            var controlSummaries = BuildControlSummaries(approvedCredentialCount, registeredCredentialCount);
-            var totalValidated = controlSummaries.Sum(x => x.TotalCount);
-            var passCount = controlSummaries.Sum(x => x.PassCount);
-            var failCount = controlSummaries.Sum(x => x.FailCount);
-            var isPreviewOnly = !includeAllReviewRows && totalValidated > reviewRows.Count;
+            var totalValidated = credPopCount;
+            var isPreviewOnly  = !includeAllReviewRows && totalValidated > reviewRows.Count;
+
+            var controlSummaries = BuildControlSummaries(credPopCount, passCount, qualApprovedCol, qualApprovedVal, credQualJoinCol, credCregJoinCol1, credCregJoinCol2);
 
             return new Rule15ValidationSummary
             {
@@ -678,9 +698,9 @@ FROM ApprovedCredentialResults;";
                 StudRecordCount = qualCount,
                 BridgeRecordCount = credCount,
                 CrseRecordCount = cregCount,
-                ApprovedQualificationCount = approvedQualificationCount,
-                ApprovedCredentialCount = approvedCredentialCount,
-                RegisteredCredentialCount = registeredCredentialCount,
+                ApprovedQualificationCount = approvedQualCount,
+                ApprovedCredentialCount = credPopCount,
+                RegisteredCredentialCount = passCount,
                 TotalRequested = totalValidated,
                 TotalValidated = totalValidated,
                 DisplayedCount = reviewRows.Count,
@@ -695,15 +715,19 @@ FROM ApprovedCredentialResults;";
                 StudTable = request.StudTable,
                 BridgeTable = request.BridgeTable,
                 CrseTable = request.CrseTable,
+                QualApprovedCol = qualApprovedCol,
+                QualApprovedVal = qualApprovedVal,
+                CredQualJoinCol = credQualJoinCol,
+                CredCregJoinCol1 = credCregJoinCol1,
+                CredCregJoinCol2 = credCregJoinCol2,
+                CregStudentCol = cregStudentCol,
                 TableLinkageText = $"{request.StudTable} -> {request.BridgeTable} -> {request.CrseTable}",
-                RuleModeText = "100% population testing of approved credential rows",
+                RuleModeText = "100% population testing of CRED rows (CRED -> QUAL approval filter -> CREG registration check)",
                 ProcedureSteps = BuildProcedureSteps(request.StudTable, request.BridgeTable, request.CrseTable),
                 ClientId = request.ClientId,
                 ControlSummaries = controlSummaries,
                 ReviewRows = reviewRows,
-                Warning = includeAllReviewRows
-                    ? "Rule 15 completed with the full approved-credential result set."
-                    : "Counts reflect the full approved-credential result set. Browser review rows are limited for performance."
+                Warning = null
             };
         }
 
@@ -771,20 +795,187 @@ WHERE RunID = @RunID;";
             return runId;
         }
 
-        private static string BuildPopulationCountSql(string qualTable, string credTable, string cregTable) => $@"
-{BuildRule15SourceCtes(qualTable, credTable, cregTable)}
+        private static string BuildPopulationCountSql(
+            string credTable, string qualTable, string cregTable,
+            string qualApprovedCol = "_004", string qualApprovedVal = "A",
+            string credQualJoinCol = "_001", string credCregJoinCol1 = "_001", string credCregJoinCol2 = "_030") => $@"
+WITH CredPop AS (
+    SELECT DISTINCT
+        CONVERT(nvarchar(255), CRED.[{credCregJoinCol1}]) AS CRED__LINK1,
+        CONVERT(nvarchar(255), CRED.[{credCregJoinCol2}]) AS CRED__LINK2,
+        CONVERT(nvarchar(255), CRED.[{credQualJoinCol}])  AS CRED__QUAL_KEY
+    FROM [{credTable}] CRED
+    WHERE CRED.[{credCregJoinCol1}] IS NOT NULL AND CRED.[{credCregJoinCol2}] IS NOT NULL
+),
+ApprQual AS (
+    SELECT DISTINCT CONVERT(nvarchar(255), QUAL.[{credQualJoinCol}]) AS QUAL__LINK
+    FROM [{qualTable}] QUAL
+    WHERE ISNULL(CONVERT(nvarchar(255), QUAL.[{qualApprovedCol}]), '') = '{qualApprovedVal}'
+),
+CregSmp AS (
+    SELECT CONVERT(nvarchar(255), CREG.[{credCregJoinCol1}]) AS CREG__LINK1,
+           CONVERT(nvarchar(255), CREG.[{credCregJoinCol2}]) AS CREG__LINK2
+    FROM [{cregTable}] CREG
+    WHERE CREG.[{credCregJoinCol1}] IS NOT NULL AND CREG.[{credCregJoinCol2}] IS NOT NULL
+    GROUP BY CREG.[{credCregJoinCol1}], CREG.[{credCregJoinCol2}]
+)
 SELECT
-    (SELECT COUNT(*) FROM ApprovedQualifications) AS ApprovedQualificationCount,
+    (SELECT COUNT(*) FROM ApprQual) AS ApprovedQualificationCount,
     COUNT(1) AS ApprovedCredentialCount,
-    SUM(CASE WHEN CREG__001 IS NOT NULL THEN 1 ELSE 0 END) AS RegisteredCredentialCount
-FROM ApprovedCredentialResults;";
+    SUM(CASE WHEN CS.CREG__LINK1 IS NOT NULL THEN 1 ELSE 0 END) AS RegisteredCredentialCount
+FROM CredPop CP
+INNER JOIN ApprQual AQ ON AQ.QUAL__LINK = CP.CRED__QUAL_KEY
+LEFT JOIN CregSmp CS ON CS.CREG__LINK1 = CP.CRED__LINK1 AND CS.CREG__LINK2 = CP.CRED__LINK2;";
 
-        private async Task<List<Rule15ValidationRowRecord>> LoadControlRowsAsync(SqlConnection connection, string studTable, string bridgeTable, string crseTable, int? maxRows)
+        // ── New prep-SQL pattern (like Rule 12) ───────────────────────────────────
+
+        private static string BuildRule15PrepSql(
+            string credTable, string qualTable, string cregTable,
+            string qualApprovedCol, string qualApprovedVal,
+            string credQualJoinCol, string credCregJoinCol1, string credCregJoinCol2, string cregStudentCol,
+            bool hasCredFiller, bool hasCredCredit1, bool hasCredCredit2, bool hasQualName)
         {
-            await using var command = connection.CreateConfiguredCommand();
-            command.CommandText = BuildAllControlsSql(studTable, bridgeTable, crseTable, maxRows);
+            var credFillerSel  = hasCredFiller  ? "    CONVERT(NVARCHAR(255), CRED.[_065]) AS [Filler1]," : "    NULL AS [Filler1],";
+            var credCredit1Sel = hasCredCredit1 ? "    CONVERT(NVARCHAR(255), CRED.[_036]) AS [Course_Level_Credit_Value]," : "    NULL AS [Course_Level_Credit_Value],";
+            var credCredit2Sel = hasCredCredit2 ? "    CONVERT(NVARCHAR(255), CRED.[_050]) AS [Completed_Research_Course_Credit_Value]" : "    NULL AS [Completed_Research_Course_Credit_Value]";
+            var qualNameSel    = hasQualName    ? $"    CONVERT(NVARCHAR(500), QUAL.[_003]) AS [Qualification_Name_Designator]," : "    NULL AS [Qualification_Name_Designator],";
+            var ctrlLabel = $"CRED.{credCregJoinCol1} AND QUAL.{qualApprovedCol}=''{qualApprovedVal}'' AND CRED.{credCregJoinCol1}=CREG.{credCregJoinCol1} AND CRED.{credCregJoinCol2}=CREG.{credCregJoinCol2}";
 
-            await using var reader = await command.ExecuteReaderAsync();
+            return $@"
+DROP TABLE IF EXISTS #Rule15_CRED_Extracted_Population;
+DROP TABLE IF EXISTS #Rule15_Approved_Qualifications;
+DROP TABLE IF EXISTS #Rule15_CREG_Extracted_Population;
+DROP TABLE IF EXISTS #Rule15_Validation;
+
+-- STEP 1: Extract 100% CRED population
+SELECT DISTINCT
+    ROW_NUMBER() OVER (ORDER BY
+        UPPER(LTRIM(RTRIM(CONVERT(NVARCHAR(255), CRED.[{credCregJoinCol1}])))),
+        UPPER(LTRIM(RTRIM(CONVERT(NVARCHAR(255), CRED.[{credCregJoinCol2}]))))
+    ) AS [Extract_Number],
+    UPPER(LTRIM(RTRIM(CONVERT(NVARCHAR(255), CRED.[{credCregJoinCol1}])))) AS [Qualification_Code],
+    UPPER(LTRIM(RTRIM(CONVERT(NVARCHAR(255), CRED.[{credCregJoinCol2}])))) AS [Course_Code],
+    UPPER(LTRIM(RTRIM(CONVERT(NVARCHAR(255), CRED.[{credQualJoinCol}])))) AS [CRED__QUAL_KEY],
+{credFillerSel}
+{credCredit1Sel}
+{credCredit2Sel}
+INTO #Rule15_CRED_Extracted_Population
+FROM [{credTable}] CRED
+WHERE CRED.[{credCregJoinCol1}] IS NOT NULL
+  AND CRED.[{credCregJoinCol2}] IS NOT NULL
+  AND LTRIM(RTRIM(CONVERT(NVARCHAR(255), CRED.[{credCregJoinCol1}]))) <> ''
+  AND LTRIM(RTRIM(CONVERT(NVARCHAR(255), CRED.[{credCregJoinCol2}]))) <> '';
+
+CREATE INDEX IX_Rule15_CRED ON #Rule15_CRED_Extracted_Population ([Qualification_Code], [Course_Code]);
+
+-- STEP 2: Extract approved QUAL population
+SELECT DISTINCT
+    UPPER(LTRIM(RTRIM(CONVERT(NVARCHAR(255), QUAL.[{credQualJoinCol}])))) AS [QUAL__JOIN_KEY],
+{qualNameSel}
+    UPPER(LTRIM(RTRIM(CONVERT(NVARCHAR(50), QUAL.[{qualApprovedCol}])))) AS [Approval_Status]
+INTO #Rule15_Approved_Qualifications
+FROM [{qualTable}] QUAL
+WHERE UPPER(LTRIM(RTRIM(CONVERT(NVARCHAR(50), QUAL.[{qualApprovedCol}])))) = '{qualApprovedVal}'
+  AND QUAL.[{credQualJoinCol}] IS NOT NULL
+  AND LTRIM(RTRIM(CONVERT(NVARCHAR(255), QUAL.[{credQualJoinCol}]))) <> '';
+
+CREATE INDEX IX_Rule15_QUAL ON #Rule15_Approved_Qualifications ([QUAL__JOIN_KEY]);
+
+-- STEP 3: Extract CREG registration population
+SELECT
+    UPPER(LTRIM(RTRIM(CONVERT(NVARCHAR(255), CREG.[{credCregJoinCol1}])))) AS [CREG__JOIN_KEY1],
+    UPPER(LTRIM(RTRIM(CONVERT(NVARCHAR(255), CREG.[{credCregJoinCol2}])))) AS [CREG__JOIN_KEY2],
+    MIN(CONVERT(NVARCHAR(255), CREG.[{cregStudentCol}])) AS [First_Student_Number],
+    COUNT(DISTINCT CONVERT(NVARCHAR(255), CREG.[{cregStudentCol}])) AS [Registered_Student_Count]
+INTO #Rule15_CREG_Extracted_Population
+FROM [{cregTable}] CREG
+WHERE CREG.[{credCregJoinCol1}] IS NOT NULL
+  AND CREG.[{credCregJoinCol2}] IS NOT NULL
+  AND LTRIM(RTRIM(CONVERT(NVARCHAR(255), CREG.[{credCregJoinCol1}]))) <> ''
+  AND LTRIM(RTRIM(CONVERT(NVARCHAR(255), CREG.[{credCregJoinCol2}]))) <> ''
+GROUP BY
+    UPPER(LTRIM(RTRIM(CONVERT(NVARCHAR(255), CREG.[{credCregJoinCol1}])))),
+    UPPER(LTRIM(RTRIM(CONVERT(NVARCHAR(255), CREG.[{credCregJoinCol2}]))));
+
+CREATE INDEX IX_Rule15_CREG ON #Rule15_CREG_Extracted_Population ([CREG__JOIN_KEY1], [CREG__JOIN_KEY2]);
+
+-- STEP 4: Validate CRED -> QUAL -> CREG
+SELECT
+    CP.[Extract_Number],
+    1 AS [Control_Sort],
+    'Control_1' AS [Control_Type],
+    'CONTROL 1: {ctrlLabel}' AS [Control_Label],
+    CP.[Qualification_Code],
+    CP.[Course_Code],
+    AQ.[Qualification_Name_Designator],
+    AQ.[Approval_Status],
+    CP.[Filler1],
+    CP.[Course_Level_Credit_Value],
+    CP.[Completed_Research_Course_Credit_Value],
+    CREG.[First_Student_Number],
+    CREG.[Registered_Student_Count],
+    CASE WHEN CREG.[CREG__JOIN_KEY1] IS NOT NULL THEN 'FOUND' ELSE 'NOT FOUND' END AS [CREG__MATCH],
+    CASE
+        WHEN AQ.[QUAL__JOIN_KEY] IS NULL     THEN 'FAIL'
+        WHEN CREG.[CREG__JOIN_KEY1] IS NULL  THEN 'FAIL'
+        ELSE 'PASS'
+    END AS [Validation_Result],
+    CASE
+        WHEN AQ.[QUAL__JOIN_KEY] IS NULL
+            THEN 'Qualification code in CRED is not approved or does not exist in QUAL.'
+        WHEN CREG.[CREG__JOIN_KEY1] IS NULL
+            THEN 'Credential qualification/course combination does not exist in CREG.'
+        ELSE 'Approved qualification and matching CREG registration found.'
+    END AS [Validation_Reason]
+INTO #Rule15_Validation
+FROM #Rule15_CRED_Extracted_Population CP
+LEFT JOIN #Rule15_Approved_Qualifications AQ   ON AQ.[QUAL__JOIN_KEY]  = CP.[CRED__QUAL_KEY]
+LEFT JOIN #Rule15_CREG_Extracted_Population CREG
+    ON CREG.[CREG__JOIN_KEY1] = CP.[Qualification_Code]
+   AND CREG.[CREG__JOIN_KEY2] = CP.[Course_Code];";
+        }
+
+        private static string BuildRule15CountAfterPrepSql() => @"
+SELECT
+    (SELECT COUNT(1) FROM #Rule15_Approved_Qualifications)     AS ApprovedQualCount,
+    (SELECT COUNT(1) FROM #Rule15_CRED_Extracted_Population)   AS CredPopCount,
+    SUM(CASE WHEN [Validation_Result] = 'PASS' THEN 1 ELSE 0 END) AS PassCount,
+    SUM(CASE WHEN [Validation_Result] = 'FAIL' THEN 1 ELSE 0 END) AS FailCount
+FROM #Rule15_Validation;";
+
+        private static async Task<(int approvedQualCount, int credPopCount, int passCount, int failCount)>
+            RunRule15PrepAndGetCountsAsync(
+                SqlConnection conn,
+                string credTable, string qualTable, string cregTable,
+                string qualApprovedCol, string qualApprovedVal,
+                string credQualJoinCol, string credCregJoinCol1, string credCregJoinCol2, string cregStudentCol,
+                bool hasCredFiller, bool hasCredCredit1, bool hasCredCredit2, bool hasQualName)
+        {
+            await using var cmd = conn.CreateConfiguredCommand();
+            cmd.CommandText = "SET NOCOUNT ON;\n"
+                + BuildRule15PrepSql(credTable, qualTable, cregTable, qualApprovedCol, qualApprovedVal,
+                    credQualJoinCol, credCregJoinCol1, credCregJoinCol2, cregStudentCol,
+                    hasCredFiller, hasCredCredit1, hasCredCredit2, hasQualName)
+                + "\n" + BuildRule15CountAfterPrepSql();
+            cmd.CommandTimeout = 300;
+            await using var reader = await cmd.ExecuteReaderAsync();
+            do
+            {
+                if (reader.FieldCount >= 4 && await reader.ReadAsync())
+                    return (GetInt(reader, 0), GetInt(reader, 1), GetInt(reader, 2), GetInt(reader, 3));
+            }
+            while (await reader.NextResultAsync());
+            return (0, 0, 0, 0);
+        }
+
+        private static async Task<List<Rule15ValidationRowRecord>> LoadControlRowsFromPrepAsync(
+            SqlConnection conn, int? maxRows)
+        {
+            await using var cmd = conn.CreateConfiguredCommand();
+            var top = maxRows.HasValue && maxRows.Value > 0 ? $"TOP {maxRows.Value} " : "";
+            cmd.CommandText = $"SELECT {top}* FROM #Rule15_Validation ORDER BY [Extract_Number];";
+
+            await using var reader = await cmd.ExecuteReaderAsync();
             var rows = new List<Rule15ValidationRowRecord>();
             while (await reader.ReadAsync())
             {
@@ -802,101 +993,38 @@ FROM ApprovedCredentialResults;";
                     ControlType = ReadValue(displayValues, "Control_Type"),
                     ControlLabel = ReadValue(displayValues, "Control_Label"),
                     ValidationResult = ReadValue(displayValues, "Validation_Result"),
-                    ValidationExplanation = ReadValue(displayValues, "Validation_Explanation"),
+                    ValidationExplanation = ReadValue(displayValues, "Validation_Reason"),
                     DisplayValues = displayValues
                 });
 
                 EnrichRule15DisplayValues(rows[^1]);
             }
-
             return rows;
         }
 
-        private static string BuildAllControlsSql(string qualTable, string credTable, string cregTable, int? maxRows)
+        private static async Task<List<string>> GetColumnsOnConnectionAsync(SqlConnection conn, string tableName)
         {
-            var topClause = maxRows.HasValue && maxRows.Value > 0 ? $"TOP {maxRows.Value}" : string.Empty;
-
-            return $@"
-{BuildRule15SourceCtes(qualTable, credTable, cregTable)}
-SELECT {topClause}
-    1 AS Control_Sort,
-    'Control_1' AS Control_Type,
-    'CONTROL 1: QUAL._004 = ''A'' and a matching registration exists on dbo_CREG' AS Control_Label,
-    CASE
-        WHEN ResultRows.CREG__001 IS NOT NULL THEN 'PASS' ELSE 'FAIL'
-    END AS Validation_Result,
-    CASE
-        WHEN ResultRows.CREG__001 IS NOT NULL
-            THEN 'Matched approved credential row to at least one student registration.'
-        ELSE 'Approved credential row has no matching student registration.'
-    END AS Validation_Explanation,
-    ResultRows.QUAL__001,
-    ResultRows.QUAL__004,
-    ResultRows.CRED__001,
-    ResultRows.CRED__030,
-    ResultRows.CREG__001,
-    ResultRows.CREG__030
-FROM ApprovedCredentialResults ResultRows
-ORDER BY ResultRows.CRED__001, ResultRows.CRED__030;";
+            await using var cmd = conn.CreateConfiguredCommand();
+            cmd.CommandText = "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = @T ORDER BY ORDINAL_POSITION;";
+            cmd.Parameters.AddWithValue("@T", tableName);
+            await using var reader = await cmd.ExecuteReaderAsync();
+            var cols = new List<string>();
+            while (await reader.ReadAsync())
+                if (!reader.IsDBNull(0)) cols.Add(reader.GetString(0));
+            return cols;
         }
 
-        private static string BuildRule15SourceCtes(string qualTable, string credTable, string cregTable) => $@"
-WITH ApprovedQualifications AS
-(
-    SELECT DISTINCT
-        CONVERT(nvarchar(255), QUAL.[_001]) AS Qual_001,
-        CONVERT(nvarchar(255), QUAL.[_004]) AS Qual_004
-    FROM [{qualTable}] QUAL
-    WHERE ISNULL(CONVERT(nvarchar(255), QUAL.[_004]), '') = 'A'
-),
-ApprovedCredentialRows AS
-(
-    SELECT DISTINCT
-        CONVERT(nvarchar(255), QUAL.[_001]) AS QUAL__001,
-        CONVERT(nvarchar(255), QUAL.[_004]) AS QUAL__004,
-        CONVERT(nvarchar(255), CRED.[_001]) AS CRED__001,
-        CONVERT(nvarchar(255), CRED.[_030]) AS CRED__030
-    FROM [{qualTable}] QUAL
-    INNER JOIN [{credTable}] CRED
-        ON QUAL.[_001] = CRED.[_001]
-    WHERE ISNULL(CONVERT(nvarchar(255), QUAL.[_004]), '') = 'A'
-      AND CRED.[_001] IS NOT NULL
-      AND CRED.[_030] IS NOT NULL
-),
-RegisteredCredentials AS
-(
-    SELECT DISTINCT
-        CONVERT(nvarchar(255), CREG.[_001]) AS CREG__001,
-        CONVERT(nvarchar(255), CREG.[_030]) AS CREG__030
-    FROM [{cregTable}] CREG
-    WHERE CREG.[_001] IS NOT NULL
-      AND CREG.[_030] IS NOT NULL
-),
-ApprovedCredentialResults AS
-(
-    SELECT
-        Approved.QUAL__001,
-        Approved.QUAL__004,
-        Approved.CRED__001,
-        Approved.CRED__030,
-        Registered.CREG__001,
-        Registered.CREG__030
-    FROM ApprovedCredentialRows Approved
-    LEFT JOIN RegisteredCredentials Registered
-        ON Registered.CREG__001 = Approved.CRED__001
-       AND Registered.CREG__030 = Approved.CRED__030
-)";
-
         private static List<Rule15ControlSummaryItemViewModel> BuildControlSummaries(
-            int approvedCredentialCount,
-            int registeredCredentialCount)
+            int approvedCredentialCount, int registeredCredentialCount,
+            string qualApprovedCol = "_004", string qualApprovedVal = "A",
+            string credQualJoinCol = "_001", string credCregJoinCol1 = "_001", string credCregJoinCol2 = "_030")
         {
             return new List<Rule15ControlSummaryItemViewModel>
             {
                 BuildControlSummary(
                     "Control_1",
                     "Control 1",
-                    "QUAL._004 = 'A' AND CREG._001 = CRED._001 AND CREG._030 = CRED._030",
+                    $"CRED.{credCregJoinCol1} AND QUAL.{qualApprovedCol}='{qualApprovedVal}' AND CRED.{credCregJoinCol1}=CREG.{credCregJoinCol1} AND CRED.{credCregJoinCol2}=CREG.{credCregJoinCol2}",
                     approvedCredentialCount,
                     registeredCredentialCount)
             };
@@ -1138,16 +1266,23 @@ ApprovedCredentialResults AS
                 "Return the full approved-credential population; no sampling is applied."
             };
 
-        private async Task EnsureColumnsExistAsync(string server, string database, string driver, string studTable, string bridgeTable, string crseTable)
+        private async Task EnsureColumnsExistAsync(
+            string server, string database, string driver, string studTable, string bridgeTable, string crseTable,
+            string qualApprovedCol = "_004", string credQualJoinCol = "_001",
+            string credCregJoinCol1 = "_001", string credCregJoinCol2 = "_030", string cregStudentCol = "_007")
         {
-            var studColumns = await GetTableColumnsAsync(server, database, driver, studTable);
-            var bridgeColumns = await GetTableColumnsAsync(server, database, driver, bridgeTable);
-            var crseColumns = await GetTableColumnsAsync(server, database, driver, crseTable);
+            // studTable=CRED, bridgeTable=QUAL, crseTable=CREG
+            var credColumns = await GetTableColumnsAsync(server, database, driver, studTable);
+            var qualColumns = await GetTableColumnsAsync(server, database, driver, bridgeTable);
+            var cregColumns = await GetTableColumnsAsync(server, database, driver, crseTable);
 
-            EnsureHasColumns(studTable, studColumns, "_001", "_004");
-            EnsureHasColumns(bridgeTable, bridgeColumns, "_001", "_030");
-            EnsureHasColumns(crseTable, crseColumns, "_001", "_030");
+            EnsureHasColumns(studTable, credColumns, credQualJoinCol, credCregJoinCol1, credCregJoinCol2);
+            EnsureHasColumns(bridgeTable, qualColumns, credQualJoinCol, qualApprovedCol);
+            EnsureHasColumns(crseTable, cregColumns, credCregJoinCol1, credCregJoinCol2, cregStudentCol);
         }
+
+        public Task<List<string>> GetTableColumnsListAsync(string server, string database, string driver, string tableName)
+            => GetTableColumnsAsync(server, database, driver, tableName);
 
         private async Task<List<string>> GetTableColumnsAsync(string server, string database, string driver, string tableName)
         {
@@ -1535,35 +1670,44 @@ ORDER BY RunTimestamp DESC, RunID DESC;";
         private static void EnrichRule15DisplayValues(Rule15ValidationRowRecord row)
         {
             var values = row.DisplayValues;
-            var validationResult = ReadValue(values, "Validation_Result");
-            var isPass = string.Equals(validationResult, "PASS", StringComparison.OrdinalIgnoreCase);
-            var qual001 = FormatRule15ColumnValue(ReadValue(values, "QUAL__001"));
-            var qual004 = FormatRule15ColumnValue(ReadValue(values, "QUAL__004"));
-            var cred001 = FormatRule15ColumnValue(ReadValue(values, "CRED__001"));
-            var cred030 = FormatRule15ColumnValue(ReadValue(values, "CRED__030"));
-            var creg001 = FormatRule15ColumnValue(ReadValue(values, "CREG__001"));
-            var creg030 = FormatRule15ColumnValue(ReadValue(values, "CREG__030"));
+            var isPass        = string.Equals(ReadValue(values, "Validation_Result"), "PASS", StringComparison.OrdinalIgnoreCase);
+            var approvalStatus = ReadValue(values, "Approval_Status");
+            var qualCode       = FormatRule15ColumnValue(ReadValue(values, "Qualification_Code"));
+            var courseCode     = FormatRule15ColumnValue(ReadValue(values, "Course_Code"));
+            var firstStudent   = FormatRule15ColumnValue(ReadValue(values, "First_Student_Number"));
+            var cregMatch      = ReadValue(values, "CREG__MATCH");
+            var controlLabel   = ReadValue(values, "Control_Label");
+            var isQualFound    = !string.IsNullOrWhiteSpace(approvalStatus);
 
-            const string criteriaText = "QUAL._004 = 'A' AND CREG._001 = CRED._001 AND CREG._030 = CRED._030";
-            var validationExplanation = isPass
-                ? $"Passed because approved qualification '{qual001}' with approval status '{qual004}' has a matching registration for credential course '{cred030}'."
-                : $"Failed because approved qualification '{qual001}' with credential course '{cred030}' has no matching registration in dbo_CREG.";
-            var qualCriteriaMessage = $"Approved qualification check passed because QUAL._004='{qual004}'.";
-            var credLinkMessage = $"Credential row selected from dbo_CRED for qualification '{cred001}' and course '{cred030}'.";
-            var registrationMessage = isPass
-                ? $"Matched registration row CREG._001='{creg001}' and CREG._030='{creg030}'."
-                : "No matching dbo_CREG registration row was found for this credential course.";
-            var finalResultMessage = isPass
-                ? "Passed this criteria because at least one student registration exists for the approved credential course."
-                : "Failed this criteria because no student registration exists for the approved credential course.";
+            string qualCriteriaMessage, registrationMessage, validationExplanation, finalResultMessage;
+            if (isPass)
+            {
+                qualCriteriaMessage   = $"'{approvalStatus}': FOUND";
+                registrationMessage   = $"FOUND — QualCode='{qualCode}', CourseCode='{courseCode}', Student='{firstStudent}'.";
+                validationExplanation = $"QUAL Approval_Status='{approvalStatus}': FOUND | CREG: FOUND ('{qualCode}','{courseCode}') | Student: '{firstStudent}'";
+                finalResultMessage    = "Passed: CRED credential found in approved QUAL and matched in CREG.";
+            }
+            else if (!isQualFound)
+            {
+                qualCriteriaMessage   = "NOT FOUND in approved QUAL";
+                registrationMessage   = "No CREG check — qual not approved.";
+                validationExplanation = $"QUAL approval: NOT FOUND — CRED Qualification_Code '{qualCode}' not in approved QUAL.";
+                finalResultMessage    = "Failed: CRED qualification not found in approved QUAL.";
+            }
+            else
+            {
+                qualCriteriaMessage   = $"'{approvalStatus}': FOUND";
+                registrationMessage   = $"NOT FOUND — no CREG match for QualCode='{qualCode}', CourseCode='{courseCode}'.";
+                validationExplanation = $"QUAL Approval_Status='{approvalStatus}': FOUND | CREG registration: NOT FOUND (no match for '{qualCode}'+'{courseCode}')";
+                finalResultMessage    = "Failed: CRED found in approved QUAL but NOT matched in CREG.";
+            }
 
-            values["FINAL_RULE_TEXT"] = criteriaText;
-            values["Validation_Explanation"] = validationExplanation;
             values["QUAL_CRITERIA_MESSAGE"] = qualCriteriaMessage;
-            values["CRED_LINK_MESSAGE"] = credLinkMessage;
-            values["CREG_LINK_MESSAGE"] = registrationMessage;
-            values["FINAL_RESULT_MESSAGE"] = finalResultMessage;
-            row.ValidationExplanation = validationExplanation;
+            values["FINAL_RULE_TEXT"]        = controlLabel;
+            values["Validation_Explanation"] = validationExplanation;
+            values["CREG_LINK_MESSAGE"]      = registrationMessage;
+            values["FINAL_RESULT_MESSAGE"]   = finalResultMessage;
+            row.ValidationExplanation        = validationExplanation;
         }
 
         private static string FormatRule15ColumnValue(string? value) =>

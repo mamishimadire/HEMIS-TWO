@@ -116,10 +116,9 @@
                 <div class="accordion-body" id="body-config" style="display:none">
                     <div class="info-box info-box--red">
                         <strong>Rule 18 Logic:</strong><br />
-                        <span>Join <strong>dbo_STUD._007</strong> to the bridge table <strong>_007</strong>.</span><br />
-                        <span>Join the bridge table <strong>_030</strong> to <strong>dbo_CRSE._030</strong>.</span><br />
-                        <span>Filter the joined data into the three control populations below.</span><br />
-                        <span>The validation tests 100% of the matching population for each control using the actual values in the source columns.</span>
+                        <span>Join <strong>STUD.[_001]</strong> to <strong>CRED.[_001]</strong> (Student Qualification Code).</span><br />
+                        <span>Join <strong>CRED.[_030]</strong> to <strong>CRSE.[_030]</strong> (Course Code link).</span><br />
+                        <span>Column mappings are configurable and auto-detected below. Filter the joined data into three control populations.</span>
                     </div>
                     <div class="form-grid">
                         <div class="field-group">
@@ -127,12 +126,30 @@
                             <select id="studTable"></select>
                         </div>
                         <div class="field-group">
-                            <label for="cregTable">Bridge Table</label>
+                            <label for="cregTable">CRED Table (Bridge)</label>
                             <select id="cregTable"></select>
                         </div>
                         <div class="field-group">
                             <label for="crseTable">CRSE Table</label>
                             <select id="crseTable"></select>
+                        </div>
+                    </div>
+                    <div class="form-grid" style="margin-top:10px">
+                        <div class="field-group">
+                            <label for="credJoinCol">CRED — Join Column <small style="font-weight:normal;color:#64748b">(links to STUD)</small></label>
+                            <select id="credJoinCol"><option value="_001">_001</option></select>
+                        </div>
+                        <div class="field-group">
+                            <label for="credCourseCol">CRED — Course Column <small style="font-weight:normal;color:#64748b">(links to CRSE)</small></label>
+                            <select id="credCourseCol"><option value="_030">_030</option></select>
+                        </div>
+                        <div class="field-group">
+                            <label for="crseCourseCol">CRSE — Course Column <small style="font-weight:normal;color:#64748b">(matches CRED)</small></label>
+                            <select id="crseCourseCol"><option value="_030">_030</option></select>
+                        </div>
+                        <div class="field-group">
+                            <label for="crseNameCol">CRSE — Course Name Column</label>
+                            <select id="crseNameCol"><option value="_058">_058</option></select>
                         </div>
                     </div>
                     <div class="alert alert--info" style="margin-top:16px">
@@ -346,6 +363,10 @@ window.toggleAccordion = function (section) {
         studTable: document.getElementById('studTable'),
         cregTable: document.getElementById('cregTable'),
         crseTable: document.getElementById('crseTable'),
+        credJoinCol: document.getElementById('credJoinCol'),
+        credCourseCol: document.getElementById('credCourseCol'),
+        crseCourseCol: document.getElementById('crseCourseCol'),
+        crseNameCol: document.getElementById('crseNameCol'),
         c1FilterCol: document.getElementById('c1FilterCol'),
         c1FilterValue: document.getElementById('c1FilterValue'),
         nsfasFilterCol: document.getElementById('nsfasFilterCol'),
@@ -500,6 +521,10 @@ window.toggleAccordion = function (section) {
             bridgeTable: els.cregTable?.value || defaultBridgeTable,
             cregTable: els.cregTable?.value || defaultBridgeTable,
             crseTable: els.crseTable?.value || 'dbo_CRSE',
+            credJoinCol: els.credJoinCol?.value || '_001',
+            credCourseCol: els.credCourseCol?.value || '_030',
+            crseCourseCol: els.crseCourseCol?.value || '_030',
+            crseNameCol: els.crseNameCol?.value || '_058',
             control1FilterCol: els.c1FilterCol?.value || '_019',
             control1FilterValue: els.c1FilterValue?.value || 'NS',
             nsfasFilterCol: els.nsfasFilterCol?.value || '_019',
@@ -545,6 +570,7 @@ window.toggleAccordion = function (section) {
             crseTbl ? loadColumnValues(crseTbl, els.foundationFilterCol?.value || '_091', els.foundationFilterValue, 'Y') : Promise.resolve()
         ]);
     }
+
 
     async function loadTableColumnNames(tableName, colSelect, fallbackCol) {
         if (!els.database?.value || !tableName || !colSelect) return;
@@ -834,6 +860,10 @@ window.toggleAccordion = function (section) {
         restoreFilterSelect(els.foundationFilterValue, workspace.foundationFilterValue);
         restoreFilterSelect(els.distanceFilterCol, workspace.distanceFilterCol);
         restoreFilterSelect(els.distanceFilterValue, workspace.distanceFilterValue);
+        restoreFilterSelect(els.credJoinCol, workspace.credJoinCol || '_001');
+        restoreFilterSelect(els.credCourseCol, workspace.credCourseCol || '_030');
+        restoreFilterSelect(els.crseCourseCol, workspace.crseCourseCol || '_030');
+        restoreFilterSelect(els.crseNameCol, workspace.crseNameCol || '_058');
 
         els.workspaceRunState.textContent = workspace.runId ? `Run #${workspace.runId}` : 'No saved run loaded';
         els.workspaceRunLabel.textContent = workspace.runId ? `Rule 18 Run #${workspace.runId}` : 'No saved run yet';
@@ -924,15 +954,34 @@ window.toggleAccordion = function (section) {
         await refreshColumnsAndValues();
     }
 
+    async function loadCredColumns(preferredJoin, preferredCourse) {
+        const credTbl = els.cregTable?.value;
+        if (!credTbl) return;
+        await Promise.all([
+            loadTableColumnNames(credTbl, els.credJoinCol, preferredJoin || '_001'),
+            loadTableColumnNames(credTbl, els.credCourseCol, preferredCourse || '_030')
+        ]);
+    }
+
+    async function loadCrseColumns(preferredCourse, preferredName) {
+        const crseTbl = els.crseTable?.value;
+        if (!crseTbl) return;
+        await Promise.all([
+            loadTableColumnNames(crseTbl, els.crseCourseCol, preferredCourse || '_030'),
+            loadTableColumnNames(crseTbl, els.crseNameCol, preferredName || '_058'),
+            loadTableColumnNames(crseTbl, els.foundationFilterCol, '_091')
+        ]);
+    }
+
     async function refreshColumnsAndValues() {
         const studTbl = els.studTable?.value;
-        const crseTbl = els.crseTable?.value;
         if (!studTbl) return;
         await Promise.all([
             loadTableColumnNames(studTbl, els.c1FilterCol, '_019'),
             loadTableColumnNames(studTbl, els.nsfasFilterCol, '_019'),
             loadTableColumnNames(studTbl, els.distanceFilterCol, '_024'),
-            crseTbl ? loadTableColumnNames(crseTbl, els.foundationFilterCol, '_091') : Promise.resolve()
+            loadCredColumns(),
+            loadCrseColumns()
         ]);
         await loadAllFilterValues();
     }
@@ -943,17 +992,19 @@ window.toggleAccordion = function (section) {
             const data = await postJson(`${apiBasePath}/VerifyTables`, getRequest());
             if (!data.success) throw new Error(data.error || 'Verification failed.');
 
-            const c1Col = els.c1FilterCol?.value || '_019';
-            const c1Val = els.c1FilterValue?.value || 'NS';
+            const nsfasCol = els.nsfasFilterCol?.value || '_019';
+            const nsfasVal = els.nsfasFilterValue?.value || 'NS';
+            const foundCol = els.foundationFilterCol?.value || '_091';
+            const foundVal = els.foundationFilterValue?.value || 'Y';
             els.configOutput.innerHTML = `
                 <div class="alert alert--success">
                     STUD: <strong>${formatNumber(data.studRecordCount)}</strong> |
                     Bridge: <strong>${formatNumber(data.bridgeRecordCount)}</strong> |
                     CRSE: <strong>${formatNumber(data.crseRecordCount)}</strong> |
-                    Control 1 population (<code>${escapeHtml(c1Col)}='${escapeHtml(c1Val)}'</code>): <strong>${formatNumber(data.control1PopulationCount)}</strong> |
-                    Control 2 population: <strong>${formatNumber(data.control2PopulationCount)}</strong> |
-                    Control 3 population: <strong>${formatNumber(data.control3PopulationCount)}</strong> |
-                    Control 4 population: <strong>${formatNumber(data.control4PopulationCount)}</strong>
+                    NSFAS population (<code>${escapeHtml(nsfasCol)}='${escapeHtml(nsfasVal)}'</code>): <strong>${formatNumber(data.nsfasPopulationCount)}</strong> |
+                    Control 1 (NSFAS+Foundation): <strong>${formatNumber(data.control1PopulationCount)}</strong> |
+                    Control 2 (NSFAS+Foundation+Distance): <strong>${formatNumber(data.control2PopulationCount)}</strong> |
+                    Control 3 (NSFAS+Not Foundation+Not Distance): <strong>${formatNumber(data.control3PopulationCount)}</strong>
                 </div>`;
         } finally {
             hideSpinner();
@@ -985,8 +1036,7 @@ window.toggleAccordion = function (section) {
             const control1 = (data.controlSummaries || []).find(item => item.controlType === 'Control_1');
             const control2 = (data.controlSummaries || []).find(item => item.controlType === 'Control_2');
             const control3 = (data.controlSummaries || []).find(item => item.controlType === 'Control_3');
-            const control4 = (data.controlSummaries || []).find(item => item.controlType === 'Control_4');
-            setWorkspaceState(`Rule 18 validation completed. NSFAS population: ${formatNumber(data.nsfasPopulationCount)} | C1: ${formatNumber(control1?.passCount || 0)} | C2: ${formatNumber(control2?.passCount || 0)} | C3: ${formatNumber(control3?.passCount || 0)} | C4: ${formatNumber(control4?.passCount || 0)}. Click Save Workspace before signoff.`, 'success');
+            setWorkspaceState(`Rule 18 validation completed. NSFAS population: ${formatNumber(data.nsfasPopulationCount)} | C1: ${formatNumber(control1?.passCount || 0)} | C2: ${formatNumber(control2?.passCount || 0)} | C3: ${formatNumber(control3?.passCount || 0)}. Click Save Workspace before signoff.`, 'success');
         } finally {
             hideSpinner();
         }
@@ -1088,7 +1138,6 @@ window.toggleAccordion = function (section) {
         const control1 = (summary.controlSummaries || []).find(item => item.controlType === 'Control_1');
         const control2 = (summary.controlSummaries || []).find(item => item.controlType === 'Control_2');
         const control3 = (summary.controlSummaries || []).find(item => item.controlType === 'Control_3');
-        const control4 = (summary.controlSummaries || []).find(item => item.controlType === 'Control_4');
 
         const controlRows = (summary.controlSummaries || [])
             .map(item => `<tr><td>${escapeHtml(item.controlLabel)}</td><td>${escapeHtml(item.criteriaText)}</td><td colspan="3">${formatNumber(item.totalCount)}</td><td>${item.passCount.toLocaleString()}</td><td>${item.failCount.toLocaleString()}</td><td>${escapeHtml(item.status)}</td></tr>`)
@@ -1103,10 +1152,9 @@ window.toggleAccordion = function (section) {
                 <div class="stat-card stat-card--fail"><div class="stat-card__label">Non-Matching Rows</div><div class="stat-card__value">${summary.failCount.toLocaleString()}</div></div>
             </div>
             <div class="alert alert--info" style="margin-top:16px">
-                C1 PASS: <strong>${formatNumber(control1?.passCount || 0)}</strong> |
-                C2 PASS: <strong>${formatNumber(control2?.passCount || 0)}</strong> |
-                C3 PASS: <strong>${formatNumber(control3?.passCount || 0)}</strong> |
-                C4 PASS: <strong>${formatNumber(control4?.passCount || 0)}</strong>
+                C1 (NSFAS+Foundation): <strong>${formatNumber(control1?.passCount || 0)}</strong> |
+                C2 (NSFAS+Foundation+Distance): <strong>${formatNumber(control2?.passCount || 0)}</strong> |
+                C3 (NSFAS+Not Foundation+Not Distance): <strong>${formatNumber(control3?.passCount || 0)}</strong>
             </div>
             <div class="card" style="padding:20px;margin-top:20px">
                 <h3 class="section-title" style="margin-top:0">Run Summary</h3>
@@ -1146,88 +1194,28 @@ window.toggleAccordion = function (section) {
         return `${resultText} this Criteria: ${criteriaText || ''}`;
     }
 
-    function renderControl1Section(summary) {
-        if (state.controlFilter !== 'ALL' && state.controlFilter !== 'Control_1') return '';
-        const controlMeta = (summary.controlSummaries || []).find(item => item.controlType === 'Control_1');
-        const rows = getFilteredRows(summary).filter(row => row.controlType === 'Control_1');
-        const criteriaText = controlMeta?.criteriaText || '';
-        const c1Col = summary.control1FilterCol || '_019';
-        const c1Val = summary.control1FilterValue || 'NS';
-        const c1Key = 'STUD_' + c1Col;
-
-        const rowHtml = rows.map(row => {
-            const rawV = row.displayValues || {}; const v = Object.fromEntries(Object.entries(rawV).map(([k, val]) => [k.toUpperCase(), val]));
-            const resultText = String(row.validationResult || '').toUpperCase() === 'FAIL' ? 'FAIL' : 'PASS';
-            return `
-                <tr>
-                    <td>${escapeHtml(v.STUD__001 || '')}</td>
-                    <td>${escapeHtml(v.STUD__007 || '')}</td>
-                    <td>${escapeHtml(v[c1Key] || '')}</td>
-                    <td class="final-cell ${resultText === 'FAIL' ? 'is-fail' : 'is-pass'}" style="font-weight:800">${escapeHtml(resultText)}</td>
-                </tr>`;
-        }).join('');
-
-        return `
-            <div class="rule18-control-card">
-                <div class="rule18-control-title">${escapeHtml(getControlHeading('Control_1', criteriaText))}</div>
-                <div class="rule18-mini-meta">100% population | Filter: <code>${escapeHtml(c1Col)}='${escapeHtml(c1Val)}'</code> | Total: <strong>${formatNumber(controlMeta?.totalCount || 0)}</strong></div>
-                ${rows.length === 0 ? `<div class="alert alert--info" style="margin:0">No rows match the selected control/result filters in the current browser result set.</div>` : `
-                <div class="rule18-table-wrap">
-                    <table class="rule18-grid">
-                        <thead>
-                            <tr>
-                                <th colspan="3" class="group-stud">dbo_STUD (100% population)</th>
-                                <th class="group-final">Result</th>
-                            </tr>
-                            <tr>
-                                <th>_001</th>
-                                <th>_007</th>
-                                <th>${escapeHtml(c1Col)}</th>
-                                <th>PASS/FAIL</th>
-                            </tr>
-                        </thead>
-                        <tbody>${rowHtml}</tbody>
-                    </table>
-                </div>`}
-            </div>`;
-    }
-
     function renderControlSection(summary, controlType) {
         if (state.controlFilter !== 'ALL' && state.controlFilter !== controlType) return '';
         const controlMeta = (summary.controlSummaries || []).find(item => item.controlType === controlType);
         const rows = getFilteredRows(summary).filter(row => row.controlType === controlType);
-
         const criteriaText = controlMeta?.criteriaText || '';
-        const bridgeTableName = summary.bridgeTable || summary.cregTable || defaultBridgeTable;
-
-        const nsfasCol = summary.nsfasFilterCol || '_019';
-        const foundCol = summary.foundationFilterCol || '_091';
-        const distCol = summary.distanceFilterCol || '_024';
-        const includeDistance = controlType === 'Control_3';
-
-        const nsfasKey = 'STUD_' + nsfasCol;
-        const foundKey = 'CRSE_' + foundCol;
-        const distKey = 'STUD_' + distCol;
-
-        const studCriteriaText = includeDistance
-            ? `${nsfasCol}='${summary.nsfasFilterValue || 'NS'}' AND ${distCol}='${summary.distanceFilterValue || 'D'}'`
-            : `${nsfasCol}='${summary.nsfasFilterValue || 'NS'}'`;
 
         const rowHtml = rows.map(row => {
             const rawV = row.displayValues || {}; const v = Object.fromEntries(Object.entries(rawV).map(([k, val]) => [k.toUpperCase(), val]));
             const resultText = String(row.validationResult || '').toUpperCase() === 'FAIL' ? 'FAIL' : 'PASS';
             return `
                 <tr>
-                    <td>${escapeHtml(v.STUD__001 || '')}</td>
-                    <td>${escapeHtml(v.STUD__007 || '')}</td>
-                    <td>${escapeHtml(v[nsfasKey] || '')}</td>
-                    ${includeDistance ? `<td>${escapeHtml(v[distKey] || '')}</td>` : ''}
-                    <td class="criteria-cell"></td>
-                    <td>${escapeHtml(v.BRIDGE__001 || '')}</td>
-                    <td>${escapeHtml(v.BRIDGE__030 || '')}</td>
-                    <td class="mid-pass-cell"></td>
-                    <td>${escapeHtml(v.CRSE__030 || '')}</td>
-                    <td>${escapeHtml(v[foundKey] || '')}</td>
+                    <td>${escapeHtml(v.STUDENT_NUMBER || '')}</td>
+                    <td>${escapeHtml(v.STUDENT_QUALIFICATION_CODE || '')}</td>
+                    <td>${escapeHtml(v.NSFAS_STATUS || '')}</td>
+                    <td>${escapeHtml(v.ATTENDANCE_MODE || '')}</td>
+                    <td>${escapeHtml(v.QUALIFICATION_FULFILLED_INDICATOR || '')}</td>
+                    <td>${escapeHtml(v.CREG_QUALIFICATION_CODE || '')}</td>
+                    <td>${escapeHtml(v.CREG_STUDENT_NUMBER || '')}</td>
+                    <td>${escapeHtml(v.CREG_COURSE_CODE || '')}</td>
+                    <td>${escapeHtml(v.CRSE_COURSE_CODE || '')}</td>
+                    <td>${escapeHtml(v.FOUNDATION_COURSE_INDICATOR || '')}</td>
+                    <td>${escapeHtml(v.CRSE_058 || '')}</td>
                     <td class="final-cell ${resultText === 'FAIL' ? 'is-fail' : 'is-pass'}">
                         <div class="result-text">${escapeHtml(resultText)}</div>
                     </td>
@@ -1237,30 +1225,30 @@ window.toggleAccordion = function (section) {
         return `
             <div class="rule18-control-card">
                 <div class="rule18-control-title">${escapeHtml(getControlHeading(controlType, criteriaText))}</div>
+                <div class="rule18-mini-meta">Total: <strong>${formatNumber(controlMeta?.totalCount || 0)}</strong></div>
                 ${rows.length === 0 ? `<div class="alert alert--info" style="margin:0">No rows match the selected control/result filters in the current browser result set.</div>` : `
                 <div class="rule18-table-wrap">
                     <table class="rule18-grid">
                         <thead>
                             <tr>
-                                <th colspan="${includeDistance ? 4 : 3}" class="group-stud">dbo_STUD</th>
-                                <th class="criteria-head">Criteria:<br />${escapeHtml(studCriteriaText)}</th>
-                                <th colspan="2" class="group-bridge">${escapeHtml(bridgeTableName)}</th>
-                                <th class="criteria-head"></th>
-                                <th colspan="2" class="group-crse">dbo_CRSE</th>
-                                <th class="group-final">Final results</th>
+                                <th colspan="5" class="group-stud">dbo_STUD</th>
+                                <th colspan="3" class="group-bridge">dbo_CREG</th>
+                                <th colspan="3" class="group-crse">dbo_CRSE</th>
+                                <th class="group-final">Result</th>
                             </tr>
                             <tr>
-                                <th>_001</th>
-                                <th>_007</th>
-                                <th>${escapeHtml(nsfasCol)}</th>
-                                ${includeDistance ? `<th>${escapeHtml(distCol)}</th>` : ''}
-                                <th></th>
-                                <th>_001</th>
-                                <th>_030</th>
-                                <th></th>
-                                <th>_030</th>
-                                <th>${escapeHtml(foundCol)}</th>
-                                <th class="final-head">pass/fail</th>
+                                <th>Student_Number</th>
+                                <th>Student_Qualification_Code</th>
+                                <th>NSFAS_Status</th>
+                                <th>Attendance_Mode</th>
+                                <th>Qualification_Fulfilled_Indicator</th>
+                                <th>CREG_Qualification_Code</th>
+                                <th>CREG_Student_Number</th>
+                                <th>CREG_Course_Code</th>
+                                <th>CRSE_Course_Code</th>
+                                <th>Foundation_Course_Indicator</th>
+                                <th>CRSE_058</th>
+                                <th class="final-head">PASS/FAIL</th>
                             </tr>
                         </thead>
                         <tbody>${rowHtml}</tbody>
@@ -1288,10 +1276,9 @@ window.toggleAccordion = function (section) {
                     <label for="liveControlFilter">Control Filter</label>
                     <select id="liveControlFilter">
                         <option value="ALL">All controls</option>
-                        <option value="Control_1">Control 1</option>
-                        <option value="Control_2">Control 2</option>
-                        <option value="Control_3">Control 3</option>
-                        <option value="Control_4">Control 4</option>
+                        <option value="Control_1">Control 1 - NSFAS Foundation</option>
+                        <option value="Control_2">Control 2 - Distance</option>
+                        <option value="Control_3">Control 3 - Non-Foundation</option>
                     </select>
                 </div>
                 <div class="field-group" style="margin:0;min-width:180px">
@@ -1308,10 +1295,9 @@ window.toggleAccordion = function (section) {
             </div>
             <div class="rule18-results-wrap">
                 ${summary.isPreviewOnly ? `<div class="alert alert--warning">Only the saved browser preview is shown here. Downloads keep the saved Rule 18 result set.</div>` : ''}
-                ${renderControl1Section(summary)}
+                ${renderControlSection(summary, 'Control_1')}
                 ${renderControlSection(summary, 'Control_2')}
                 ${renderControlSection(summary, 'Control_3')}
-                ${renderControlSection(summary, 'Control_4')}
             </div>`;
 
         const controlFilter = document.getElementById('liveControlFilter');
@@ -1334,7 +1320,12 @@ window.toggleAccordion = function (section) {
             els.configOutput.innerHTML = `<div class="alert alert--error">${escapeHtml(err.message)}</div>`;
         }));
         els.studTable?.addEventListener('change', () => refreshColumnsAndValues().catch(() => {}));
-        els.crseTable?.addEventListener('change', () => refreshColumnsAndValues().catch(() => {}));
+        els.cregTable?.addEventListener('change', () => loadCredColumns().catch(() => {}));
+        els.crseTable?.addEventListener('change', () => loadCrseColumns().catch(() => {}));
+        els.credJoinCol?.addEventListener('change', () => {});
+        els.credCourseCol?.addEventListener('change', () => {});
+        els.crseCourseCol?.addEventListener('change', () => {});
+        els.crseNameCol?.addEventListener('change', () => {});
         els.c1FilterCol?.addEventListener('change', () => loadColumnValues(els.studTable?.value, els.c1FilterCol.value, els.c1FilterValue, 'NS').catch(() => {}));
         els.nsfasFilterCol?.addEventListener('change', () => loadColumnValues(els.studTable?.value, els.nsfasFilterCol.value, els.nsfasFilterValue, 'NS').catch(() => {}));
         els.foundationFilterCol?.addEventListener('change', () => loadColumnValues(els.crseTable?.value, els.foundationFilterCol.value, els.foundationFilterValue, 'Y').catch(() => {}));

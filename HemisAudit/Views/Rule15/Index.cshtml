@@ -60,14 +60,14 @@
                 </option>
             }
         </select>
-        <small>Rule 15 tests 100% of approved credential courses through the <code>dbo_QUAL -> dbo_CRED -> dbo_CREG</code> chain. No sampling is used.</small>
+        <small>Rule 15 tests 100% of approved credential courses through the <code>dbo_CRED -> dbo_QUAL -> dbo_CREG</code> chain. No sampling is used.</small>
     </div>
 
     <div class="rule-header">
         <div class="rule-header__icon">R15</div>
         <div>
             <h1 class="rule-header__title">HEMIS RULE 15: Course Credentials Validation</h1>
-            <p class="rule-header__sub">100% population testing of approved credential courses using the <code>dbo_QUAL -> dbo_CRED -> dbo_CREG</code> linkage.</p>
+            <p class="rule-header__sub">100% population testing of approved credential courses using the <code>dbo_CRED -> dbo_QUAL -> dbo_CREG</code> linkage.</p>
         </div>
         <div class="rule-header__badge" id="statusBadge" style="display:none"></div>
     </div>
@@ -116,26 +116,52 @@
                 <div class="accordion-body" id="body-config" style="display:none">
                     <div class="info-box info-box--red">
                         <strong>Rule 15 Logic:</strong><br />
-                        <span>Step 1: filter <strong>dbo_QUAL</strong> to approved qualifications where <strong>_004 = 'A'</strong>.</span><br />
-                        <span>Step 2: join approved qualifications to <strong>dbo_CRED</strong> on <strong>_001</strong> and test whether <strong>dbo_CREG</strong> contains a matching registration on <strong>(_001, _030)</strong>.</span><br />
-                        <span>The validation tests 100% of the approved credential-course population and marks each row PASS or FAIL based on registration existence.</span>
+                        <span>Step 1: start with <strong>dbo_CRED</strong> (credential courses).</span><br />
+                        <span>Step 2: join <strong>dbo_QUAL</strong> to filter to approved qualifications (configurable approval column = value).</span><br />
+                        <span>Step 3: test whether <strong>dbo_CREG</strong> contains a matching registration for each credential course (configurable join columns). Show student number from CREG.</span>
                     </div>
                     <div class="form-grid">
                         <div class="field-group">
-                            <label for="studTable">QUAL Table</label>
+                            <label for="studTable">CRED Table (base)</label>
                             <select id="studTable"></select>
                         </div>
                         <div class="field-group">
-                            <label for="cregTable">CRED Table</label>
+                            <label for="cregTable">QUAL Table (approval filter)</label>
                             <select id="cregTable"></select>
                         </div>
                         <div class="field-group">
-                            <label for="crseTable">CREG Table</label>
+                            <label for="crseTable">CREG Table (registration)</label>
                             <select id="crseTable"></select>
                         </div>
                     </div>
-                    <div class="alert alert--info" style="margin-top:16px">
-                        <strong>Control 1:</strong> <code>QUAL._004 = 'A' AND CREG._001 = CRED._001 AND CREG._030 = CRED._030</code>
+                    <div class="form-grid" style="margin-top:16px">
+                        <div class="field-group">
+                            <label for="qualApprovedCol">QUAL Approval Column</label>
+                            <select id="qualApprovedCol"><option value="_004">_004</option></select>
+                        </div>
+                        <div class="field-group">
+                            <label for="qualApprovedVal">Approval Value</label>
+                            <input id="qualApprovedVal" type="text" value="A" maxlength="10" style="width:80px" />
+                        </div>
+                        <div class="field-group">
+                            <label for="credQualJoinCol">CRED-QUAL Join Column</label>
+                            <select id="credQualJoinCol"><option value="_001">_001</option></select>
+                        </div>
+                        <div class="field-group">
+                            <label for="credCregJoinCol1">CRED-CREG Join Col 1</label>
+                            <select id="credCregJoinCol1"><option value="_001">_001</option></select>
+                        </div>
+                        <div class="field-group">
+                            <label for="credCregJoinCol2">CRED-CREG Join Col 2</label>
+                            <select id="credCregJoinCol2"><option value="_030">_030</option></select>
+                        </div>
+                        <div class="field-group">
+                            <label for="cregStudentCol">CREG Student Number Column</label>
+                            <select id="cregStudentCol"><option value="_007">_007</option></select>
+                        </div>
+                    </div>
+                    <div class="alert alert--info" style="margin-top:16px" id="criteriaPreview">
+                        <strong>Control 1:</strong> <code id="criteriaPreviewText">QUAL._004 = 'A' AND CREG._001 = CRED._001 AND CREG._030 = CRED._030</code>
                     </div>
                     <div id="configOutput" class="status-output"></div>
                 </div>
@@ -289,6 +315,13 @@ window.toggleAccordion = function (section) {
         studTable: document.getElementById('studTable'),
         cregTable: document.getElementById('cregTable'),
         crseTable: document.getElementById('crseTable'),
+        qualApprovedCol: document.getElementById('qualApprovedCol'),
+        qualApprovedVal: document.getElementById('qualApprovedVal'),
+        credQualJoinCol: document.getElementById('credQualJoinCol'),
+        credCregJoinCol1: document.getElementById('credCregJoinCol1'),
+        credCregJoinCol2: document.getElementById('credCregJoinCol2'),
+        cregStudentCol: document.getElementById('cregStudentCol'),
+        criteriaPreviewText: document.getElementById('criteriaPreviewText'),
         connectionOutput: document.getElementById('connectionOutput'),
         configOutput: document.getElementById('configOutput'),
         analysisPane: document.getElementById('analysisPane'),
@@ -424,6 +457,19 @@ window.toggleAccordion = function (section) {
         }
     }
 
+    function getCriteriaText() {
+        const qa = els.qualApprovedCol?.value || '_004';
+        const qv = els.qualApprovedVal?.value || 'A';
+        const qj = els.credQualJoinCol?.value || '_001';
+        const j1 = els.credCregJoinCol1?.value || '_001';
+        const j2 = els.credCregJoinCol2?.value || '_030';
+        return `QUAL.${qa}='${qv}' AND CREG.${j1}=CRED.${j1} AND CREG.${j2}=CRED.${j2}`;
+    }
+
+    function updateCriteriaPreview() {
+        if (els.criteriaPreviewText) els.criteriaPreviewText.textContent = getCriteriaText();
+    }
+
     function getRequest() {
         return {
             clientId: parseInt(els.clientId.value || '0', 10) || 0,
@@ -431,10 +477,16 @@ window.toggleAccordion = function (section) {
             server: els.server?.value.trim() || '',
             database: els.database?.value || '',
             driver: els.driver?.value || 'ODBC Driver 17 for SQL Server',
-            studTable: els.studTable?.value || 'dbo_QUAL',
-            bridgeTable: els.cregTable?.value || defaultBridgeTable,
-            cregTable: els.cregTable?.value || defaultBridgeTable,
-            crseTable: els.crseTable?.value || 'dbo_CREG'
+            studTable: els.studTable?.value || 'dbo_CRED',
+            bridgeTable: els.cregTable?.value || 'dbo_QUAL',
+            cregTable: els.cregTable?.value || 'dbo_QUAL',
+            crseTable: els.crseTable?.value || 'dbo_CREG',
+            qualApprovedCol: els.qualApprovedCol?.value || '_004',
+            qualApprovedVal: els.qualApprovedVal?.value || 'A',
+            credQualJoinCol: els.credQualJoinCol?.value || '_001',
+            credCregJoinCol1: els.credCregJoinCol1?.value || '_001',
+            credCregJoinCol2: els.credCregJoinCol2?.value || '_030',
+            cregStudentCol: els.cregStudentCol?.value || '_007'
         };
     }
 
@@ -689,6 +741,13 @@ window.toggleAccordion = function (section) {
         populateSelect(els.studTable, workspace.studTable ? [workspace.studTable] : [], workspace.studTable);
         populateSelect(els.cregTable, [workspace.bridgeTable || workspace.cregTable || defaultBridgeTable], workspace.bridgeTable || workspace.cregTable || defaultBridgeTable);
         populateSelect(els.crseTable, workspace.crseTable ? [workspace.crseTable] : [], workspace.crseTable);
+        if (workspace.qualApprovedCol) populateSelect(els.qualApprovedCol, [workspace.qualApprovedCol], workspace.qualApprovedCol);
+        if (els.qualApprovedVal) els.qualApprovedVal.value = workspace.qualApprovedVal || 'A';
+        if (workspace.credQualJoinCol) populateSelect(els.credQualJoinCol, [workspace.credQualJoinCol], workspace.credQualJoinCol);
+        if (workspace.credCregJoinCol1) populateSelect(els.credCregJoinCol1, [workspace.credCregJoinCol1], workspace.credCregJoinCol1);
+        if (workspace.credCregJoinCol2) populateSelect(els.credCregJoinCol2, [workspace.credCregJoinCol2], workspace.credCregJoinCol2);
+        if (workspace.cregStudentCol) populateSelect(els.cregStudentCol, [workspace.cregStudentCol], workspace.cregStudentCol);
+        updateCriteriaPreview();
 
         els.workspaceRunState.textContent = workspace.runId ? `Run #${workspace.runId}` : 'No saved run loaded';
         els.workspaceRunLabel.textContent = workspace.runId ? `Rule 15 Run #${workspace.runId}` : 'No saved run yet';
@@ -772,10 +831,42 @@ window.toggleAccordion = function (section) {
 
         if (!data.success) throw new Error(data.error || 'Could not load tables.');
 
-        populateSelect(els.studTable, data.tables || [], data.autoStudTable);
-        populateSelect(els.cregTable, data.tables || [], data.autoBridgeTable || data.autoCregTable);
-        populateSelect(els.crseTable, data.tables || [], data.autoCrseTable);
+        // studTable = CRED (base), cregTable = QUAL (filter), crseTable = CREG (registration)
+        populateSelect(els.studTable, data.tables || [], data.autoBridgeTable || data.autoCredTable);
+        populateSelect(els.cregTable, data.tables || [], data.autoStudTable || data.autoQualTable);
+        populateSelect(els.crseTable, data.tables || [], data.autoCrseTable || data.autoRegistrationTable);
         setAlert(els.configOutput, 'success', `Loaded ${data.tables.length} table(s).`);
+        await loadFilterColumns();
+    }
+
+    async function loadFilterColumns() {
+        const baseReq = { server: els.server?.value.trim() || '', database: els.database?.value || '', driver: els.driver?.value || 'ODBC Driver 17 for SQL Server' };
+        const credTbl = els.studTable?.value, qualTbl = els.cregTable?.value, cregTbl = els.crseTable?.value;
+        if (!baseReq.server || !baseReq.database || !credTbl || !qualTbl || !cregTbl) return;
+        try {
+            const [credRes, qualRes, cregRes] = await Promise.all([
+                postJson(`${apiBasePath}/GetTableColumns`, { ...baseReq, tableName: credTbl }),
+                postJson(`${apiBasePath}/GetTableColumns`, { ...baseReq, tableName: qualTbl }),
+                postJson(`${apiBasePath}/GetTableColumns`, { ...baseReq, tableName: cregTbl })
+            ]);
+            const curQa = els.qualApprovedCol?.value || '_004';
+            const curQj = els.credQualJoinCol?.value || '_001';
+            const curJ1 = els.credCregJoinCol1?.value || '_001';
+            const curJ2 = els.credCregJoinCol2?.value || '_030';
+            const curSt = els.cregStudentCol?.value || '_007';
+            if (qualRes.success) {
+                populateSelect(els.qualApprovedCol, qualRes.columns, curQa);
+                populateSelect(els.credQualJoinCol, qualRes.columns, curQj);
+            }
+            if (credRes.success) {
+                populateSelect(els.credCregJoinCol1, credRes.columns, curJ1);
+                populateSelect(els.credCregJoinCol2, credRes.columns, curJ2);
+            }
+            if (cregRes.success) {
+                populateSelect(els.cregStudentCol, cregRes.columns, curSt);
+            }
+            updateCriteriaPreview();
+        } catch { /* non-fatal */ }
     }
 
     async function verifyTables() {
@@ -985,24 +1076,33 @@ window.toggleAccordion = function (section) {
         }
 
         const criteriaText = controlMeta?.criteriaText || '';
-        const credTableName = summary.bridgeTable || summary.cregTable || defaultBridgeTable;
+        // studTable=CRED, cregTable=QUAL, crseTable=CREG
+        const credTableName = summary.studTable || 'dbo_CRED';
+        const qualTableName = summary.bridgeTable || summary.cregTable || 'dbo_QUAL';
         const registrationTableName = summary.crseTable || 'dbo_CREG';
+        const qaCol = summary.qualApprovedCol || '_004';
+        const qaVal = summary.qualApprovedVal || 'A';
+        const qjCol = summary.credQualJoinCol || '_001';
+        const j1Col = summary.credCregJoinCol1 || '_001';
+        const j2Col = summary.credCregJoinCol2 || '_030';
+        const stCol = summary.cregStudentCol || '_007';
 
         const rowHtml = rows.map(row => {
             const rawV = row.displayValues || {}; const v = Object.fromEntries(Object.entries(rawV).map(([k, val]) => [k.toUpperCase(), val]));
             const resultText = String(row.validationResult || '').toUpperCase() === 'FAIL' ? 'FAIL' : 'PASS';
             return `
                 <tr>
-                    <td>${escapeHtml(v.QUAL__001 || '')}</td>
-                    <td>${escapeHtml(v.QUAL__004 || '')}</td>
-                    <td class="criteria-cell"></td>
-                    <td>${escapeHtml(v.CRED__001 || '')}</td>
-                    <td>${escapeHtml(v.CRED__030 || '')}</td>
-                    <td class="mid-pass-cell"></td>
-                    <td>${escapeHtml(v.CREG__001 || '')}</td>
-                    <td>${escapeHtml(v.CREG__030 || '')}</td>
+                    <td>${escapeHtml(v.QUAL__APPROVED || '')}</td>
+                    <td class="criteria-cell ${row.validationResult === 'FAIL' ? '' : 'is-pass'}">${escapeHtml(qaCol)}='${escapeHtml(qaVal)}'</td>
+                    <td>${escapeHtml(v.CRED__LINK1 || '')}</td>
+                    <td>${escapeHtml(v.CRED__LINK2 || '')}</td>
+                    <td class="mid-pass-cell ${row.validationResult === 'FAIL' ? 'is-fail' : 'is-pass'}">${escapeHtml(v.CREG__LINK1 ? 'FOUND' : 'NOT FOUND')}</td>
+                    <td>${escapeHtml(v.CREG__LINK1 || '')}</td>
+                    <td>${escapeHtml(v.CREG__LINK2 || '')}</td>
+                    <td>${escapeHtml(v.CREG__STUDENT || '')}</td>
                     <td class="final-cell ${row.validationResult === 'FAIL' ? 'is-fail' : 'is-pass'}">
                         <div class="result-text">${escapeHtml(resultText)}</div>
+                        <span class="message-text" style="font-size:11px;color:inherit;opacity:0.85">${escapeHtml(row.validationExplanation || '')}</span>
                     </td>
                 </tr>`;
         }).join('');
@@ -1015,22 +1115,23 @@ window.toggleAccordion = function (section) {
                     <table class="rule15-grid">
                         <thead>
                             <tr>
-                                <th colspan="2" class="group-stud">dbo_QUAL</th>
-                                <th class="criteria-head">Criteria:<br />QUAL._004 = 'A'</th>
+                                <th class="group-stud">${escapeHtml(qualTableName)}</th>
+                                <th class="criteria-head">Criteria</th>
                                 <th colspan="2" class="group-bridge">${escapeHtml(credTableName)}</th>
-                                <th class="criteria-head"></th>
+                                <th class="criteria-head">CREG match</th>
                                 <th colspan="2" class="group-crse">${escapeHtml(registrationTableName)}</th>
+                                <th class="group-crse">Student No</th>
                                 <th class="group-final">Final results</th>
                             </tr>
                             <tr>
-                                <th>_001</th>
-                                <th>_004</th>
+                                <th>${escapeHtml(qaCol)}</th>
                                 <th></th>
-                                <th>_001</th>
-                                <th>_030</th>
+                                <th>${escapeHtml(j1Col)}</th>
+                                <th>${escapeHtml(j2Col)}</th>
                                 <th></th>
-                                <th>_001</th>
-                                <th>_030</th>
+                                <th>${escapeHtml(j1Col)}</th>
+                                <th>${escapeHtml(j2Col)}</th>
+                                <th>${escapeHtml(stCol)}</th>
                                 <th class="final-head">pass/fail</th>
                             </tr>
                         </thead>
@@ -1146,6 +1247,14 @@ window.toggleAccordion = function (section) {
     document.getElementById('downloadCsvBtn')?.addEventListener('click', () => state.summary && downloadBlob(`${apiBasePath}/DownloadCsv`, state.summary, 'Rule15_Course_Credentials.csv').catch(err => setWorkspaceState(err.message, 'error')));
     document.getElementById('downloadSqlBtn')?.addEventListener('click', () => downloadBlob(`${apiBasePath}/DownloadSql`, getRequest(), 'Rule15_Course_Credentials.sql').catch(err => setWorkspaceState(err.message, 'error')));
     els.clientId?.addEventListener('change', () => loadWorkspace().catch(err => setWorkspaceState(err.message, 'error')));
+    els.studTable?.addEventListener('change', () => loadFilterColumns().catch(() => {}));
+    els.cregTable?.addEventListener('change', () => loadFilterColumns().catch(() => {}));
+    els.crseTable?.addEventListener('change', () => loadFilterColumns().catch(() => {}));
+    els.qualApprovedCol?.addEventListener('change', updateCriteriaPreview);
+    els.qualApprovedVal?.addEventListener('input', updateCriteriaPreview);
+    els.credQualJoinCol?.addEventListener('change', updateCriteriaPreview);
+    els.credCregJoinCol1?.addEventListener('change', updateCriteriaPreview);
+    els.credCregJoinCol2?.addEventListener('change', updateCriteriaPreview);
 
     renderAnalysis(null);
     renderResults();

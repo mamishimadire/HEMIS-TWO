@@ -272,35 +272,40 @@
             row.controlType === controlType &&
             (resultFilter === 'ALL' || String(row.validationResult || '').toUpperCase() === resultFilter));
         const criteriaText = controlMeta?.criteriaText || '';
-        const credTableName = summary.bridgeTable || summary.cregTable || 'dbo_CRED';
-        const registrationTableName = summary.crseTable || 'dbo_CREG';
+        const credTableName   = summary.studTable   || 'dbo_CRED';
+        const qualTableName   = summary.bridgeTable || 'dbo_QUAL';
+        const cregTableName   = summary.crseTable   || 'dbo_CREG';
+        const cj1     = summary.credCregJoinCol1 || '_001';
+        const cj2     = summary.credCregJoinCol2 || '_030';
+        const aCol    = summary.qualApprovedCol  || '_004';
+        const studCol = summary.cregStudentCol   || '_007';
 
         const rowHtml = rows.map(row => {
             const rawV = row.displayValues || {}; const v = Object.fromEntries(Object.entries(rawV).map(([k, val]) => [k.toUpperCase(), val]));
-            const resultText = row.validationResult === 'FAIL' ? 'Fail' : 'Pass';
-            const qualCriteriaMessage = v.QUAL_CRITERIA_MESSAGE || `${resultText} this criteria on dbo_QUAL: ${criteriaText}`;
-            const credMessage = v.CRED_LINK_MESSAGE || `${resultText} credential selection check`;
-            const registrationMessage = v.CREG_LINK_MESSAGE || `${resultText} registration linkage check`;
-            const finalRuleText = v.FINAL_RULE_TEXT || criteriaText;
-            const finalMessage = v.FINAL_RESULT_MESSAGE || `${resultText} this Criteria: ${criteriaText}`;
+            const isPass = row.validationResult !== 'FAIL';
+            const resultText = isPass ? 'Pass' : 'Fail';
+            const approvalStatus     = v.APPROVAL_STATUS || '';
+            const qualCriteriaMsg    = v.QUAL_CRITERIA_MESSAGE || (approvalStatus ? `'${approvalStatus}': FOUND` : 'NOT FOUND in approved QUAL');
+            const registrationMsg    = v.CREG_LINK_MESSAGE || (isPass ? 'FOUND' : 'NOT FOUND');
+            const finalRuleText      = v.FINAL_RULE_TEXT   || criteriaText;
+            const finalMessage       = v.FINAL_RESULT_MESSAGE || `${resultText}: ${criteriaText}`;
+            const cregMatchDisplay   = v.CREG__MATCH || (isPass ? 'FOUND' : 'NOT FOUND');
             return `
                 <tr>
-                    <td>${escapeHtml(v.QUAL__001 || '')}</td>
-                    <td>${escapeHtml(v.QUAL__004 || '')}</td>
-                    <td class="criteria-cell ${row.validationResult === 'FAIL' ? 'is-fail' : 'is-pass'}">
-                        <span class="result-text">${escapeHtml(resultText)}:</span>
-                        <span class="message-text">${escapeHtml(qualCriteriaMessage)}</span>
+                    <td>${escapeHtml(v.QUALIFICATION_CODE || '')}</td>
+                    <td>${escapeHtml(v.COURSE_CODE || '')}</td>
+                    <td class="criteria-cell ${isPass ? 'is-pass' : 'is-fail'}">
+                        <span class="result-text">${escapeHtml(approvalStatus)}</span>
+                        <span class="message-text">${escapeHtml(qualCriteriaMsg)}</span>
                     </td>
-                    <td>${escapeHtml(v.CRED__001 || '')}</td>
-                    <td>${escapeHtml(v.CRED__030 || '')}</td>
-                    <td class="mid-pass-cell ${row.validationResult === 'FAIL' ? 'is-fail' : 'is-pass'}">
-                        <span class="message-text">${escapeHtml(credMessage)}</span>
+                    <td class="mid-pass-cell ${isPass ? 'is-pass' : 'is-fail'}">
+                        <span class="message-text">${escapeHtml(cregMatchDisplay)}</span>
                     </td>
-                    <td>${escapeHtml(v.CREG__001 || '')}</td>
-                    <td>${escapeHtml(v.CREG__030 || '')}</td>
-                    <td class="final-cell ${row.validationResult === 'FAIL' ? 'is-fail' : 'is-pass'}">
+                    <td>${escapeHtml(v.FIRST_STUDENT_NUMBER || '')}</td>
+                    <td>${escapeHtml(v.REGISTERED_STUDENT_COUNT || '')}</td>
+                    <td class="final-cell ${isPass ? 'is-pass' : 'is-fail'}">
                         <div>${escapeHtml(finalRuleText)}</div>
-                        <div>${escapeHtml(registrationMessage)}</div>
+                        <div>${escapeHtml(registrationMsg)}</div>
                         <div>${escapeHtml(finalMessage)}</div>
                     </td>
                 </tr>`;
@@ -314,22 +319,20 @@
                     <table class="rule15-grid">
                         <thead>
                             <tr>
-                                <th colspan="2" class="group-stud">dbo_QUAL</th>
-                                <th class="criteria-head">Criteria:<br />${escapeHtml(criteriaText)}</th>
                                 <th colspan="2" class="group-bridge">${escapeHtml(credTableName)}</th>
-                                <th class="criteria-head"></th>
-                                <th colspan="2" class="group-crse">${escapeHtml(registrationTableName)}</th>
+                                <th class="criteria-head">${escapeHtml(qualTableName)}.${escapeHtml(aCol)}</th>
+                                <th class="group-stud">CREG match</th>
+                                <th class="group-stud">First Student</th>
+                                <th class="group-stud">Reg. Count</th>
                                 <th class="group-final">Final results</th>
                             </tr>
                             <tr>
-                                <th>_001</th>
-                                <th>_004</th>
+                                <th>Qualification_Code</th>
+                                <th>Course_Code</th>
+                                <th>Approval_Status</th>
                                 <th></th>
-                                <th>_001</th>
-                                <th>_030</th>
-                                <th></th>
-                                <th>_001</th>
-                                <th>_030</th>
+                                <th>First_Student_Number</th>
+                                <th>Registered_Student_Count</th>
                                 <th class="final-head">${escapeHtml(criteriaText)}</th>
                             </tr>
                         </thead>

@@ -59,15 +59,19 @@ namespace HemisAudit.Services
                 while (await reader.ReadAsync())
                     tables.Add(reader.GetString(0));
 
-                var autoTable = tables.FirstOrDefault(t =>
+                var autoStudTable = tables.FirstOrDefault(t =>
                         t.Equals("dbo_STUD", StringComparison.OrdinalIgnoreCase))
                     ?? tables.FirstOrDefault();
+                var autoQualTable = tables.FirstOrDefault(t =>
+                        t.Equals("dbo_QUAL", StringComparison.OrdinalIgnoreCase))
+                    ?? tables.FirstOrDefault(t => t.Contains("QUAL", StringComparison.OrdinalIgnoreCase));
 
                 return new TableListResult
                 {
                     Success = true,
                     Tables = tables,
-                    AutoStudTable = autoTable
+                    AutoStudTable = autoStudTable,
+                    AutoQualTable = autoQualTable
                 };
             }
             catch (Exception ex)
@@ -279,7 +283,7 @@ SELECT TOP 1
     ISNULL(vr.AuditDatabase, '') AS AuditDatabase,
     ISNULL(vr.StudTable, '') AS TableName,
     ISNULL(vr.DeceasedTable, '') AS FilterColumn,
-    ISNULL(vr.StudColumn, '') AS BreakdownColumn,
+    ISNULL(vr.StudColumn, '') AS QualTable,
     ISNULL(vr.DeceasedColumn, '') AS FilterValue,
     ISNULL(vr.Status, '') AS Status,
     vr.LastEditedByUserName,
@@ -311,7 +315,9 @@ ORDER BY vr.RunTimestamp DESC, vr.RunID DESC;";
                 Database = reader.IsDBNull(3) ? "" : reader.GetString(3),
                 TableName = reader.IsDBNull(4) ? "" : reader.GetString(4),
                 FilterColumn = reader.IsDBNull(5) ? "" : reader.GetString(5),
-                BreakdownColumn = reader.IsDBNull(6) ? "" : reader.GetString(6),
+                QualTable   = reader.IsDBNull(6) ? "dbo_QUAL" : reader.GetString(6),
+                QualJoinCol = deserializedSummary?.QualJoinCol ?? "_001",
+                QualNameCol = deserializedSummary?.QualNameCol ?? "_003",
                 FilterValue = reader.IsDBNull(7) ? "F" : reader.GetString(7),
                 CurrentStatus = reader.IsDBNull(8) ? "" : reader.GetString(8),
                 LastEditedByUserName = reader.IsDBNull(9) ? null : reader.GetString(9),
@@ -441,7 +447,7 @@ SET HemisServer = @HemisServer,
     AuditDatabase = @AuditDatabase,
     StudTable = @TableName,
     DeceasedTable = @FilterColumn,
-    StudColumn = @BreakdownColumn,
+    StudColumn = @QualTable,
     DeceasedColumn = @FilterValue,
     LastEditedByUserName = @LastEditedByUserName,
     LastEditedAt = GETDATE(),
@@ -457,11 +463,11 @@ WHERE RunID = @RunID
                 command.Parameters.AddWithValue("@AuditDatabase", request.Database);
                 command.Parameters.AddWithValue("@TableName", request.TableName);
                 command.Parameters.AddWithValue("@FilterColumn", request.FilterColumn);
-                command.Parameters.AddWithValue("@BreakdownColumn", request.BreakdownColumn);
+                command.Parameters.AddWithValue("@QualTable", request.QualTable);
                 command.Parameters.AddWithValue("@FilterValue", request.FilterValue);
                 command.Parameters.AddWithValue("@LastEditedByUserName", (object?)reviewerName ?? DBNull.Value);
                 command.Parameters.AddWithValue("@PreviousHash", (object?)previousHash ?? DBNull.Value);
-                command.Parameters.AddWithValue("@RecordHash", ComputeHash($@"WorkspaceSave|Rule17|{request.RunId.Value}|{request.ClientId}|{request.Server}|{request.Database}|{request.TableName}|{request.FilterColumn}|{request.FilterValue}|{request.BreakdownColumn}|{request.SampleSize}|{request.ShowAllRecords}|{(reviewerName ?? reviewerEmail)}|{DateTime.UtcNow:o}|{previousHash}"));
+                command.Parameters.AddWithValue("@RecordHash", ComputeHash($@"WorkspaceSave|Rule17|{request.RunId.Value}|{request.ClientId}|{request.Server}|{request.Database}|{request.TableName}|{request.QualTable}|{request.FilterColumn}|{request.FilterValue}|{request.SampleSize}|{request.ShowAllRecords}|{(reviewerName ?? reviewerEmail)}|{DateTime.UtcNow:o}|{previousHash}"));
                 await command.ExecuteNonQueryAsync();
 
                 var workspace = await GetCurrentWorkspaceStateAsync(request.ClientId, reviewerEmail, includeSummary: false);
@@ -628,65 +634,79 @@ END";
         {
             ValidateSqlRequest(request);
 
-            var safeTable = Sanitise(request.TableName);
-            var safeFilterColumn = Sanitise(request.FilterColumn);
+            var safeTable    = Sanitise(request.TableName);
+            var safeQual     = Sanitise(request.QualTable);
+            var safeJoin     = Sanitise(request.QualJoinCol);
+            var safeName     = Sanitise(request.QualNameCol);
+            var safeFilter   = Sanitise(request.FilterColumn);
             var parsedValues = ParseFilterValues(request.FilterValue);
-            var normalizedValues = parsedValues
-                .Select(NormalizeComparableValue)
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList();
-            var rawValueList = string.Join(", ", parsedValues.Select(value => $"'{EscapeSqlString(value)}'"));
-            var normalizedValueList = string.Join(", ", normalizedValues.Select(value => $"'{EscapeSqlString(value)}'"));
-            var trimmedExpression = $"LTRIM(RTRIM(CAST([{safeFilterColumn}] AS nvarchar(4000))))";
-            var normalizedExpression = BuildNormalizedSqlExpression(trimmedExpression);
-            var sqlFilterPredicate = $"({trimmedExpression} IN ({rawValueList}) OR {normalizedExpression} IN ({normalizedValueList}))";
+            var rawList      = string.Join(", ", parsedValues.Select(v => $"'{EscapeSqlString(v)}'"));
+            var trimExpr     = $"LTRIM(RTRIM(ISNULL(CAST(S.[{safeFilter}] AS NVARCHAR(255)), '')))";
+            var sqlPredicate = $"{trimExpr} IN ({rawList})";
 
             var sql = $@"-- ============================================================================
--- HEMIS Rule 17: Graduate Students Fulfilled Qualification Validation
+-- HEMIS RULE 17: GRADUATE STUDENTS FULFILLED QUALIFICATION VALIDATION
+-- STUD Table : [{safeTable}]
+-- QUAL Table : [{safeQual}]
+-- Join       : S.[_001] = QUAL.[{safeJoin}]
+-- QUAL Name  : QUAL.[{safeName}] AS Qualification_Name
+-- Filter     : S.[{safeFilter}] IN ({string.Join(", ", parsedValues)})
 -- ============================================================================
--- Table: [{safeTable}]
--- Filter Column: [{safeFilterColumn}]
--- Filter Values (raw): {string.Join(", ", parsedValues)}
--- Filter Values (normalized): {string.Join(", ", normalizedValues)}
--- Logic: 100% of the filtered dbo_STUD population is returned when [{safeFilterColumn}] matches an entered value
--- ============================================================================";
 
-            sql += $@"
+DROP TABLE IF EXISTS #Rule17_Graduates;
 
--- STEP 1: COUNT FILTERED RECORDS
-SELECT COUNT(*) AS Matching_Record_Count
-FROM [{safeTable}]
-WHERE {sqlFilterPredicate};
-
--- STEP 2: BREAKDOWN OF SOURCE VALUES IN [{safeFilterColumn}]
+-- STEP 1: Extract full graduate population
 SELECT
-    LTRIM(RTRIM(CAST([{safeFilterColumn}] AS nvarchar(255)))) AS Filter_Column_Value,
+    ROW_NUMBER() OVER (
+        ORDER BY S.[_007], S.[_001]
+    ) AS Extract_Number,
+    'Rule_17'                                    AS Rule_Number,
+    'Control_1'                                  AS Control_Type,
+    S.[_007]                                     AS Student_Number,
+    S.[_008]                                     AS South_African_ID_Number,
+    S.[_001]                                     AS Qualification_Code,
+    QUAL.[{safeName}]                            AS Qualification_Name,
+    S.[_010]                                     AS Entrance_Category,
+    S.[_011]                                     AS Date_Of_Birth,
+    S.[_012]                                     AS Gender,
+    S.[_013]                                     AS Race,
+    S.[_014]                                     AS Nationality,
+    S.[_049]                                     AS Citizen_Resident_Status,
+    S.[_019]                                     AS NSFAS_Status,
+    S.[_021]                                     AS Previous_Years_Activity,
+    S.[_024]                                     AS Attendance_Mode,
+    S.[_025]                                     AS Qualification_Fulfilled_Indicator,
+    S.[_066]                                     AS Student_Last_Name,
+    S.[_067]                                     AS Student_First_Name,
+    S.[_068]                                     AS Student_Middle_Name,
+    'PASS'                                       AS Validation_Result
+INTO #Rule17_Graduates
+FROM [{safeTable}] S
+INNER JOIN [{safeQual}] QUAL ON S.[_001] = QUAL.[{safeJoin}]
+WHERE {sqlPredicate};
+
+-- STEP 2: Return extracted records
+SELECT *
+FROM #Rule17_Graduates
+ORDER BY Extract_Number;
+
+-- STEP 3: Summary
+SELECT
+    Rule_Number,
+    Control_Type,
+    COUNT(*) AS Total_Records
+FROM #Rule17_Graduates
+GROUP BY Rule_Number, Control_Type;
+
+-- STEP 4: Breakdown of Qualification Fulfilled Indicator
+SELECT
+    Qualification_Fulfilled_Indicator,
     COUNT(*) AS Record_Count
-FROM [{safeTable}]
-GROUP BY LTRIM(RTRIM(CAST([{safeFilterColumn}] AS nvarchar(255))))
-ORDER BY COUNT(*) DESC, Filter_Column_Value ASC;
+FROM #Rule17_Graduates
+GROUP BY Qualification_Fulfilled_Indicator
+ORDER BY Record_Count DESC;
 
--- STEP 3: RETURN ONLY FILTERED RECORDS
-SELECT
-    'Control_1' AS Control_Type,
-    ROW_NUMBER() OVER (ORDER BY [{safeFilterColumn}] ASC) AS Sample_Number,
-    ISNULL(CAST([{safeFilterColumn}] AS nvarchar(255)), '') AS Qualification_Fulfilled_Indicator_025,
-    'PASS' AS Validation_Result,
-    *
-FROM [{safeTable}]
-WHERE {sqlFilterPredicate}
-ORDER BY [{safeFilterColumn}] ASC;
-
--- STEP 4: SUMMARY
-SELECT
-    (SELECT COUNT(*)
-     FROM [{safeTable}]
-     WHERE {sqlFilterPredicate}) AS Filtered_Record_Count,
-    (SELECT COUNT(*)
-     FROM [{safeTable}]
-     WHERE {sqlFilterPredicate}) AS Pass_Record_Count,
-    0 AS Fail_Record_Count;
-";
+DROP TABLE IF EXISTS #Rule17_Graduates;";
 
             return Task.FromResult(sql.Trim());
         }
@@ -697,75 +717,80 @@ SELECT
             await using var conn = new SqlConnection(connStr);
             await conn.OpenAsync();
 
-            var safeTable = Sanitise(request.TableName);
-            var safeFilterColumn = Sanitise(request.FilterColumn);
-            var parsedValues = ParseFilterValues(request.FilterValue);
+            var safeTable      = Sanitise(request.TableName);
+            var safeQualTable  = Sanitise(request.QualTable);
+            var safeQualJoin   = Sanitise(request.QualJoinCol);
+            var safeQualName   = Sanitise(request.QualNameCol);
+            var safeFilterCol  = Sanitise(request.FilterColumn);
+            var parsedValues   = ParseFilterValues(request.FilterValue);
             var normalizedValues = parsedValues
                 .Select(NormalizeComparableValue)
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
+
             await using var countCommand = conn.CreateConfiguredCommand();
-            var countPredicate = BuildFilterPredicate(countCommand, safeFilterColumn, parsedValues, normalizedValues);
+            var countPredicate = BuildFilterPredicate(countCommand, safeFilterCol, parsedValues, normalizedValues, "S");
             countCommand.CommandText = $@"
 SELECT COUNT(*)
-FROM [{safeTable}]
+FROM [{safeTable}] S
+INNER JOIN [{safeQualTable}] QUAL ON S.[_001] = QUAL.[{safeQualJoin}]
 WHERE {countPredicate};";
-            var filteredCount = Convert.ToInt32(await countCommand.ExecuteScalarAsync());
-            var totalValidated = filteredCount;
-            var passCount = filteredCount;
-            var failCount = 0;
+            var filteredCount  = Convert.ToInt32(await countCommand.ExecuteScalarAsync());
+            var passCount      = filteredCount;
 
             var breakdown = new List<Rule17BreakdownItemViewModel>();
-            await using (var breakdownCommand = conn.CreateConfiguredCommand())
+            await using (var bdCmd = conn.CreateConfiguredCommand())
             {
-                breakdownCommand.CommandText = $@"
+                bdCmd.CommandText = $@"
 SELECT
-    LTRIM(RTRIM(CAST([{safeFilterColumn}] AS nvarchar(255)))) AS BreakdownValue,
+    LTRIM(RTRIM(CAST(S.[{safeFilterCol}] AS nvarchar(255)))) AS BreakdownValue,
     COUNT(*) AS RecordCount
-FROM [{safeTable}]
-GROUP BY LTRIM(RTRIM(CAST([{safeFilterColumn}] AS nvarchar(255))))
+FROM [{safeTable}] S
+INNER JOIN [{safeQualTable}] QUAL ON S.[_001] = QUAL.[{safeQualJoin}]
+WHERE {BuildFilterPredicate(bdCmd, safeFilterCol, parsedValues, normalizedValues, "S", "BD")}
+GROUP BY LTRIM(RTRIM(CAST(S.[{safeFilterCol}] AS nvarchar(255))))
 ORDER BY COUNT(*) DESC, BreakdownValue ASC;";
-
-                await using var breakdownReader = await breakdownCommand.ExecuteReaderAsync();
-                while (await breakdownReader.ReadAsync())
-                {
+                await using var bdReader = await bdCmd.ExecuteReaderAsync();
+                while (await bdReader.ReadAsync())
                     breakdown.Add(new Rule17BreakdownItemViewModel
                     {
-                        Value = breakdownReader.IsDBNull(0) ? "(blank)" : breakdownReader.GetString(0),
-                        Count = breakdownReader.IsDBNull(1) ? 0 : Convert.ToInt32(breakdownReader.GetValue(1))
+                        Value = bdReader.IsDBNull(0) ? "(blank)" : bdReader.GetString(0),
+                        Count = bdReader.IsDBNull(1) ? 0 : Convert.ToInt32(bdReader.GetValue(1))
                     });
-                }
             }
 
             var matchingRows = filteredCount > 0
-                ? await LoadFilteredRowsAsync(conn, safeTable, safeFilterColumn, request.FilterColumn, parsedValues, normalizedValues, BrowserPreviewRowLimit)
+                ? await LoadFilteredRowsAsync(conn, safeTable, safeQualTable, safeQualJoin, safeQualName, safeFilterCol, request.FilterColumn, parsedValues, normalizedValues, BrowserPreviewRowLimit)
                 : new List<Rule17ValidationRowRecord>();
 
             var displayedCount = matchingRows.Count;
 
             return new Rule17ValidationSummary
             {
-                Success = true,
-                TotalValidated = totalValidated,
-                MatchingCount = passCount,
+                Success      = true,
+                TotalValidated = filteredCount,
+                MatchingCount  = passCount,
                 DisplayedCount = displayedCount,
-                PassCount = passCount,
-                FailCount = failCount,
-                ExceptionRate = totalValidated > 0 ? 100m : 0m,
-                Status = totalValidated > 0 ? "COMPLETE" : "NO MATCHING DATA",
-                Timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
-                Database = request.Database,
-                TableName = request.TableName,
+                PassCount    = passCount,
+                FailCount    = 0,
+                ExceptionRate = filteredCount > 0 ? 100m : 0m,
+                Status       = filteredCount > 0 ? "COMPLETE" : "NO MATCHING DATA",
+                Timestamp    = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
+                Database     = request.Database,
+                TableName    = request.TableName,
+                QualTable    = request.QualTable,
+                QualJoinCol  = request.QualJoinCol,
+                QualNameCol  = request.QualNameCol,
                 FilterColumn = request.FilterColumn,
-                FilterValue = string.Join(", ", parsedValues),
+                FilterValue  = string.Join(", ", parsedValues),
                 BreakdownColumn = request.FilterColumn,
-                SampleSize = Math.Max(request.SampleSize, 1),
+                SampleSize   = Math.Max(request.SampleSize, 1),
                 ShowAllRecords = true,
-                Sampled = false,
+                Sampled      = false,
                 IsPreviewOnly = filteredCount > displayedCount,
-                PreviewLimit = filteredCount > displayedCount ? displayedCount : 0,
-                ClientId = request.ClientId,
-                Breakdown = breakdown,
+                PreviewLimit  = filteredCount > displayedCount ? displayedCount : 0,
+                ClientId     = request.ClientId,
+                Breakdown    = breakdown,
                 MatchingRows = matchingRows
             };
         }
@@ -792,7 +817,7 @@ INSERT INTO dbo.ValidationRuns
 VALUES
 (
     @ClientID, @UserID, 17, @RuleName, @Status, @TotalRecords, @PassCount, @FailCount, @ExceptionRate, GETDATE(),
-    @HemisServer, @AuditDatabase, @TableName, @FilterColumn, @BreakdownColumn, @FilterValue,
+    @HemisServer, @AuditDatabase, @TableName, @FilterColumn, @QualTable, @FilterValue,
     @ExceptionsJSON, @ResultsJSON, @RunByUserName, NULL, NULL, @PreviousHash, NULL, 1
 );
 SELECT CAST(SCOPE_IDENTITY() AS int);";
@@ -808,7 +833,7 @@ SELECT CAST(SCOPE_IDENTITY() AS int);";
             command.Parameters.AddWithValue("@AuditDatabase", request.Database);
             command.Parameters.AddWithValue("@TableName", request.TableName);
             command.Parameters.AddWithValue("@FilterColumn", request.FilterColumn);
-            command.Parameters.AddWithValue("@BreakdownColumn", request.BreakdownColumn);
+            command.Parameters.AddWithValue("@QualTable", request.QualTable);
             command.Parameters.AddWithValue("@FilterValue", request.FilterValue.Trim());
             var persistedSummary = CreateBrowserPreview(summary);
             command.Parameters.AddWithValue("@ExceptionsJSON", ValidationPayloadCodec.Encode(JsonConvert.SerializeObject(summary.MatchingRows)));
@@ -866,12 +891,21 @@ ORDER BY ORDINAL_POSITION;";
                 throw new InvalidOperationException("Database is required.");
             if (string.IsNullOrWhiteSpace(request.TableName))
                 throw new InvalidOperationException("Source table is required.");
+            if (string.IsNullOrWhiteSpace(request.QualTable))
+                throw new InvalidOperationException("QUAL table is required.");
+            if (string.IsNullOrWhiteSpace(request.QualJoinCol))
+                request.QualJoinCol = "_001";
+            if (string.IsNullOrWhiteSpace(request.QualNameCol))
+                request.QualNameCol = "_003";
             if (string.IsNullOrWhiteSpace(request.FilterColumn))
                 throw new InvalidOperationException("Filter column is required.");
             if (string.IsNullOrWhiteSpace(request.FilterValue))
                 throw new InvalidOperationException("Filter value is required.");
 
             ValidateObjectName(request.TableName);
+            ValidateObjectName(request.QualTable);
+            ValidateObjectName(request.QualJoinCol);
+            ValidateObjectName(request.QualNameCol);
             ValidateObjectName(request.FilterColumn);
             if (!string.IsNullOrWhiteSpace(request.BreakdownColumn))
                 ValidateObjectName(request.BreakdownColumn);
@@ -891,12 +925,21 @@ ORDER BY ORDINAL_POSITION;";
                 throw new InvalidOperationException("Database is required.");
             if (string.IsNullOrWhiteSpace(request.TableName))
                 throw new InvalidOperationException("Source table is required.");
+            if (string.IsNullOrWhiteSpace(request.QualTable))
+                throw new InvalidOperationException("QUAL table is required.");
+            if (string.IsNullOrWhiteSpace(request.QualJoinCol))
+                request.QualJoinCol = "_001";
+            if (string.IsNullOrWhiteSpace(request.QualNameCol))
+                request.QualNameCol = "_003";
             if (string.IsNullOrWhiteSpace(request.FilterColumn))
                 throw new InvalidOperationException("Filter column is required.");
             if (string.IsNullOrWhiteSpace(request.FilterValue))
                 throw new InvalidOperationException("Filter value is required.");
 
             ValidateObjectName(request.TableName);
+            ValidateObjectName(request.QualTable);
+            ValidateObjectName(request.QualJoinCol);
+            ValidateObjectName(request.QualNameCol);
             ValidateObjectName(request.FilterColumn);
             if (!string.IsNullOrWhiteSpace(request.BreakdownColumn))
                 ValidateObjectName(request.BreakdownColumn);
@@ -930,15 +973,16 @@ ORDER BY ORDINAL_POSITION;";
         private static string NormalizeComparableValue(string? value) =>
             NumericFilterValueHelper.NormalizeNumericLikeValue(value);
 
-        private static string BuildFilterPredicate(SqlCommand command, string safeFilterColumn, IReadOnlyList<string> rawValues, IReadOnlyList<string> normalizedValues)
+        private static string BuildFilterPredicate(SqlCommand command, string safeFilterColumn, IReadOnlyList<string> rawValues, IReadOnlyList<string> normalizedValues, string tableAlias = "", string paramPrefix = "")
         {
-            var trimmedExpression = $"LTRIM(RTRIM(CAST([{safeFilterColumn}] AS nvarchar(4000))))";
+            var colRef = string.IsNullOrEmpty(tableAlias) ? $"[{safeFilterColumn}]" : $"{tableAlias}.[{safeFilterColumn}]";
+            var trimmedExpression = $"LTRIM(RTRIM(CAST({colRef} AS nvarchar(4000))))";
             var normalizedExpression = BuildNormalizedSqlExpression(trimmedExpression);
 
             var rawParameterNames = new List<string>();
             for (var i = 0; i < rawValues.Count; i++)
             {
-                var parameterName = $"@RawValue{i}";
+                var parameterName = $"@{paramPrefix}RawValue{i}";
                 command.Parameters.AddWithValue(parameterName, rawValues[i]);
                 rawParameterNames.Add(parameterName);
             }
@@ -946,7 +990,7 @@ ORDER BY ORDINAL_POSITION;";
             var normalizedParameterNames = new List<string>();
             for (var i = 0; i < normalizedValues.Count; i++)
             {
-                var parameterName = $"@NormalizedValue{i}";
+                var parameterName = $"@{paramPrefix}NormalizedValue{i}";
                 command.Parameters.AddWithValue(parameterName, normalizedValues[i]);
                 normalizedParameterNames.Add(parameterName);
             }
@@ -1319,8 +1363,11 @@ ORDER BY RunTimestamp DESC, RunID DESC;";
                 ExceptionRate = summary.ExceptionRate,
                 Status = summary.Status,
                 Timestamp = summary.Timestamp,
-                Database = summary.Database,
-                TableName = summary.TableName,
+                Database    = summary.Database,
+                TableName   = summary.TableName,
+                QualTable   = summary.QualTable,
+                QualJoinCol = summary.QualJoinCol,
+                QualNameCol = summary.QualNameCol,
                 FilterColumn = summary.FilterColumn,
                 FilterValue = summary.FilterValue,
                 BreakdownColumn = summary.BreakdownColumn,
@@ -1357,6 +1404,9 @@ ORDER BY RunTimestamp DESC, RunID DESC;";
             return await LoadFilteredRowsAsync(
                 conn,
                 Sanitise(summary.TableName),
+                Sanitise(!string.IsNullOrWhiteSpace(summary.QualTable) ? summary.QualTable : "dbo_QUAL"),
+                Sanitise(!string.IsNullOrWhiteSpace(summary.QualJoinCol) ? summary.QualJoinCol : "_001"),
+                Sanitise(!string.IsNullOrWhiteSpace(summary.QualNameCol) ? summary.QualNameCol : "_003"),
                 Sanitise(summary.FilterColumn),
                 summary.FilterColumn,
                 parsedValues,
@@ -1367,6 +1417,9 @@ ORDER BY RunTimestamp DESC, RunID DESC;";
         private async Task<List<Rule17ValidationRowRecord>> LoadFilteredRowsAsync(
             SqlConnection conn,
             string safeTable,
+            string safeQualTable,
+            string safeQualJoin,
+            string safeQualName,
             string safeFilterColumn,
             string requestedFilterColumn,
             List<string> parsedValues,
@@ -1374,17 +1427,35 @@ ORDER BY RunTimestamp DESC, RunID DESC;";
             int? maxRows)
         {
             await using var dataCommand = conn.CreateConfiguredCommand();
-            var dataPredicate = BuildFilterPredicate(dataCommand, safeFilterColumn, parsedValues, normalizedValues);
+            var dataPredicate = BuildFilterPredicate(dataCommand, safeFilterColumn, parsedValues, normalizedValues, "S");
             var topClause = maxRows.HasValue && maxRows.Value > 0 ? $"TOP {maxRows.Value} " : "";
             dataCommand.CommandText = $@"
 SELECT {topClause}
-    'Control_1' AS Control_Type,
-    ROW_NUMBER() OVER (ORDER BY (SELECT NULL)) AS Sample_Number,
-    ISNULL(CAST([{safeFilterColumn}] AS nvarchar(255)), '') AS Qualification_Fulfilled_Indicator_025,
-    'PASS' AS Validation_Result,
-    *
-FROM [{safeTable}]
-WHERE {dataPredicate};";
+    ROW_NUMBER() OVER (ORDER BY S.[_007], S.[_001])         AS Extract_Number,
+    'Rule_17'                                               AS Rule_Number,
+    'Control_1'                                             AS Control_Type,
+    CAST(S.[_007]  AS nvarchar(255))                       AS Student_Number,
+    CAST(S.[_008]  AS nvarchar(255))                       AS South_African_ID_Number,
+    CAST(S.[_001]  AS nvarchar(255))                       AS Qualification_Code,
+    CAST(QUAL.[{safeQualName}] AS nvarchar(255))           AS Qualification_Name,
+    CAST(S.[_010]  AS nvarchar(255))                       AS Entrance_Category,
+    CAST(S.[_011]  AS nvarchar(255))                       AS Date_Of_Birth,
+    CAST(S.[_012]  AS nvarchar(255))                       AS Gender,
+    CAST(S.[_013]  AS nvarchar(255))                       AS Race,
+    CAST(S.[_014]  AS nvarchar(255))                       AS Nationality,
+    CAST(S.[_049]  AS nvarchar(255))                       AS Citizen_Resident_Status,
+    CAST(S.[_019]  AS nvarchar(255))                       AS NSFAS_Status,
+    CAST(S.[_021]  AS nvarchar(255))                       AS Previous_Years_Activity,
+    CAST(S.[_024]  AS nvarchar(255))                       AS Attendance_Mode,
+    CAST(S.[_025]  AS nvarchar(255))                       AS Qualification_Fulfilled_Indicator,
+    CAST(S.[_066]  AS nvarchar(255))                       AS Student_Last_Name,
+    CAST(S.[_067]  AS nvarchar(255))                       AS Student_First_Name,
+    CAST(S.[_068]  AS nvarchar(255))                       AS Student_Middle_Name,
+    'PASS'                                                  AS Validation_Result
+FROM [{safeTable}] S
+INNER JOIN [{safeQualTable}] QUAL ON S.[_001] = QUAL.[{safeQualJoin}]
+WHERE {dataPredicate}
+ORDER BY S.[_007], S.[_001];";
 
             await using var reader = await dataCommand.ExecuteReaderAsync();
             var rows = new List<Rule17ValidationRowRecord>();

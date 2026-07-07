@@ -170,6 +170,20 @@ namespace HemisAudit.Controllers
             Json(await RequireDataAnalystAsync(async () => await _rule16.GetTablesAsync(model.Server, model.Database, model.Driver)));
 
         [HttpPost]
+        public async Task<IActionResult> GetTableColumns([FromBody] Rule16ColumnValuesRequest request)
+        {
+            try
+            {
+                var cols = await _rule16.GetTableColumnsListAsync(request.Server, request.Database, request.Driver, request.TableName);
+                return Json(new { success = true, columns = cols });
+            }
+            catch (Exception ex)
+            {
+                return Json(new { success = false, error = ex.Message, columns = Array.Empty<string>() });
+            }
+        }
+
+        [HttpPost]
         public async Task<IActionResult> VerifyTables([FromBody] Rule16VerifyRequest request) =>
             Json(await RequireDataAnalystAsync(async () => await _rule16.VerifyTablesAsync(request)));
 

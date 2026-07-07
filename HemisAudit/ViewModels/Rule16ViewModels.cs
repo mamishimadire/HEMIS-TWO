@@ -45,6 +45,15 @@ namespace HemisAudit.ViewModels
         public string? Error { get; set; }
     }
 
+    public class Rule16ColumnValuesRequest
+    {
+        public string Server { get; set; } = "";
+        public string Database { get; set; } = "";
+        public string Driver { get; set; } = "ODBC Driver 17 for SQL Server";
+        public string TableName { get; set; } = "";
+        public string ColumnName { get; set; } = "";
+    }
+
     public class Rule16ValidationRequest
     {
         public int ClientId { get; set; }
@@ -63,6 +72,12 @@ namespace HemisAudit.ViewModels
         public int SampleControl1Size { get; set; } = 5;
         public int SampleControl2Size { get; set; } = 3;
         public int SampleControl3Size { get; set; } = 32;
+        public string UnfulfilledCol { get; set; } = "_025";
+        public string UnfulfilledVal { get; set; } = "N";
+        public string FoundationCol { get; set; } = "_091";
+        public string FoundationVal { get; set; } = "Y";
+        public string DistanceCol { get; set; } = "_024";
+        public string DistanceVal { get; set; } = "D";
     }
 
     public class Rule16ControlSummaryItemViewModel
@@ -115,6 +130,12 @@ namespace HemisAudit.ViewModels
             set => BridgeTable = value;
         }
         public string CrseTable { get; set; } = "dbo_CRSE";
+        public string UnfulfilledCol { get; set; } = "_025";
+        public string UnfulfilledVal { get; set; } = "N";
+        public string FoundationCol { get; set; } = "_091";
+        public string FoundationVal { get; set; } = "Y";
+        public string DistanceCol { get; set; } = "_024";
+        public string DistanceVal { get; set; } = "D";
         public string TableLinkageText { get; set; } = "";
         public string RuleModeText { get; set; } = "";
         public List<string> ProcedureSteps { get; set; } = new();
@@ -162,6 +183,12 @@ namespace HemisAudit.ViewModels
             set => BridgeTable = value;
         }
         public string CrseTable { get; set; } = "dbo_CRSE";
+        public string UnfulfilledCol { get; set; } = "_025";
+        public string UnfulfilledVal { get; set; } = "N";
+        public string FoundationCol { get; set; } = "_091";
+        public string FoundationVal { get; set; } = "Y";
+        public string DistanceCol { get; set; } = "_024";
+        public string DistanceVal { get; set; } = "D";
         public int SampleControl1Size { get; set; } = 5;
         public int SampleControl2Size { get; set; } = 3;
         public int SampleControl3Size { get; set; } = 32;

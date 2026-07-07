@@ -75,6 +75,9 @@ namespace HemisAudit.ViewModels
         public string Database { get; set; } = "";
         public string Driver { get; set; } = "ODBC Driver 17 for SQL Server";
         public string TableName { get; set; } = "dbo_STUD";
+        public string QualTable { get; set; } = "dbo_QUAL";
+        public string QualJoinCol { get; set; } = "_001";
+        public string QualNameCol { get; set; } = "_003";
         public string FilterColumn { get; set; } = "_025";
         public string FilterValue { get; set; } = "F";
         public string BreakdownColumn { get; set; } = "";
@@ -111,6 +114,9 @@ namespace HemisAudit.ViewModels
         public string Timestamp { get; set; } = "";
         public string Database { get; set; } = "";
         public string TableName { get; set; } = "";
+        public string QualTable { get; set; } = "";
+        public string QualJoinCol { get; set; } = "_001";
+        public string QualNameCol { get; set; } = "_003";
         public string FilterColumn { get; set; } = "";
         public string FilterValue { get; set; } = "";
         public string BreakdownColumn { get; set; } = "";
@@ -154,6 +160,9 @@ namespace HemisAudit.ViewModels
         public string Database { get; set; } = "";
         public string Driver { get; set; } = "ODBC Driver 17 for SQL Server";
         public string TableName { get; set; } = "dbo_STUD";
+        public string QualTable { get; set; } = "dbo_QUAL";
+        public string QualJoinCol { get; set; } = "_001";
+        public string QualNameCol { get; set; } = "_003";
         public string FilterColumn { get; set; } = "_025";
         public string FilterValue { get; set; } = "F";
         public string BreakdownColumn { get; set; } = "";

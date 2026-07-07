@@ -129,17 +129,29 @@
             <div class="accordion-body" id="body-config" style="display:none">
                 <div class="info-box info-box--red">
                     <strong>Rule 17 Logic:</strong><br />
-                    Rule 17 uses <strong>dbo_STUD</strong> and the qualification-fulfilled indicator <strong>_025</strong>.
+                    STUD is joined to QUAL on <strong>STUD._001 = QUAL.[Join Col]</strong>. The QUAL <strong>Name Col</strong> appears as <em>Qualification_Name</em> in every result row.
                     <br />
-                    Rule 17 uses <strong>100% testing of the filtered population</strong>: only rows in <strong>dbo_STUD</strong> where `_025` matches the selected value are returned and validated.
+                    Only STUD rows where the filter column matches the selected value are returned (100% testing).
                 </div>
                 <div class="form-grid">
                     <div class="field-group">
-                        <label for="tableName">Source Table</label>
+                        <label for="tableName">STUD Table</label>
                         <select id="tableName"></select>
                     </div>
                     <div class="field-group">
-                        <label for="filterColumn">Filter Column</label>
+                        <label for="qualTable">QUAL Table</label>
+                        <select id="qualTable"></select>
+                    </div>
+                    <div class="field-group">
+                        <label for="qualJoinCol">QUAL Join Column <small style="color:#64748b">(joins to STUD._001)</small></label>
+                        <select id="qualJoinCol"><option value="_001">_001</option></select>
+                    </div>
+                    <div class="field-group">
+                        <label for="qualNameCol">QUAL Name Column <small style="color:#64748b">(Qualification_Name)</small></label>
+                        <select id="qualNameCol"><option value="_003">_003</option></select>
+                    </div>
+                    <div class="field-group">
+                        <label for="filterColumn">Filter Column (on STUD)</label>
                         <select id="filterColumn"></select>
                     </div>
                     <div class="field-group">
@@ -297,6 +309,9 @@
         driver: document.getElementById('driver'),
         database: document.getElementById('database'),
         tableName: document.getElementById('tableName'),
+        qualTable: document.getElementById('qualTable'),
+        qualJoinCol: document.getElementById('qualJoinCol'),
+        qualNameCol: document.getElementById('qualNameCol'),
         filterColumn: document.getElementById('filterColumn'),
         filterValue: document.getElementById('filterValue'),
         breakdownColumn: document.getElementById('breakdownColumn'),
@@ -457,6 +472,9 @@
         els.driver.value = workspace.driver || 'ODBC Driver 17 for SQL Server';
         ensureOption(els.database, workspace.database || '');
         ensureOption(els.tableName, workspace.tableName || '');
+        ensureOption(els.qualTable, workspace.qualTable || 'dbo_QUAL');
+        ensureOption(els.qualJoinCol, workspace.qualJoinCol || '_001');
+        ensureOption(els.qualNameCol, workspace.qualNameCol || '_003');
         ensureOption(els.filterColumn, workspace.filterColumn || '');
         els.breakdownColumn.value = workspace.breakdownColumn || workspace.filterColumn || '_025';
         ensureOption(els.filterValue, workspace.filterValue || 'F', workspace.filterValue || 'F');
@@ -540,6 +558,9 @@
             database: els.database.value,
             driver: els.driver.value,
             tableName: els.tableName.value,
+            qualTable: els.qualTable.value || 'dbo_QUAL',
+            qualJoinCol: els.qualJoinCol.value || '_001',
+            qualNameCol: els.qualNameCol.value || '_003',
             filterColumn: els.filterColumn.value,
             filterValue: filterValue,
             breakdownColumn: els.filterColumn.value || '_025',
@@ -606,17 +627,17 @@
             return;
         }
 
-        els.tableName.innerHTML = '<option value="">Select table</option>';
-        data.tables.forEach(table => {
-            const option = document.createElement('option');
-            option.value = table;
-            option.textContent = table;
-            els.tableName.appendChild(option);
-        });
+        const tableOptions = data.tables.map(t => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join('');
+        els.tableName.innerHTML = `<option value="">Select table</option>${tableOptions}`;
+        els.qualTable.innerHTML = `<option value="">Select table</option>${tableOptions}`;
 
         if (data.autoStudTable) {
             els.tableName.value = data.autoStudTable;
             await loadColumns();
+        }
+        if (data.autoQualTable) {
+            els.qualTable.value = data.autoQualTable;
+            await loadQualColumns();
         }
     }
 
@@ -653,6 +674,27 @@
         if (els.filterColumn.value) {
             await loadValues();
         }
+    }
+
+    async function loadQualColumns() {
+        if (!els.qualTable.value) return;
+        const data = await postJson(`${apiBasePath}/GetColumns`, {
+            server: els.server.value.trim(),
+            database: els.database.value,
+            driver: els.driver.value,
+            tableName: els.qualTable.value
+        });
+        if (!data.success || !data.columns || !data.columns.length) return;
+
+        const setOpts = (select, cols, preferred) => {
+            const cur = select.value;
+            select.innerHTML = cols.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('');
+            const toSet = cur && cols.includes(cur) ? cur : (cols.includes(preferred) ? preferred : cols[0]);
+            if (toSet) select.value = toSet;
+        };
+        setOpts(els.qualJoinCol, data.columns, '_001');
+        setOpts(els.qualNameCol, data.columns, '_003');
+        setAlert(els.configOutput, 'info', `QUAL columns loaded: ${data.columns.length} column(s) from ${els.qualTable.value}.`);
     }
 
     async function loadValues() {
@@ -871,7 +913,8 @@
                 <h3 class="section-title" style="margin-top:0">Run Summary</h3>
                 <div class="form-grid">
                     <div><div style="color:#757575;font-size:12px;text-transform:uppercase;font-weight:700">Database</div><div>${escapeHtml(summary.database)}</div></div>
-                    <div><div style="color:#757575;font-size:12px;text-transform:uppercase;font-weight:700">Table</div><div>${escapeHtml(summary.tableName)}</div></div>
+                    <div><div style="color:#757575;font-size:12px;text-transform:uppercase;font-weight:700">STUD Table</div><div>${escapeHtml(summary.tableName)}</div></div>
+                    <div><div style="color:#757575;font-size:12px;text-transform:uppercase;font-weight:700">QUAL Table</div><div>${escapeHtml(summary.qualTable || 'dbo_QUAL')} — Join: STUD._001 = QUAL.${escapeHtml(summary.qualJoinCol || '_001')} | Name col: ${escapeHtml(summary.qualNameCol || '_003')}</div></div>
                     <div><div style="color:#757575;font-size:12px;text-transform:uppercase;font-weight:700">Filter Rule</div><div>${escapeHtml(summary.filterColumn)} = '${escapeHtml(summary.filterValue)}'</div></div>
                     <div><div style="color:#757575;font-size:12px;text-transform:uppercase;font-weight:700">Rows Loaded In Browser</div><div>${summary.displayedCount.toLocaleString()}</div></div>
                     <div><div style="color:#757575;font-size:12px;text-transform:uppercase;font-weight:700">Result Logic</div><div>Only rows where ${escapeHtml(summary.filterColumn)} matches '${escapeHtml(summary.filterValue)}' are returned.</div></div>
@@ -888,7 +931,7 @@
     function renderDetails(summary) {
         const allRows = summary.matchingRows || [];
         const previewRows = allRows.length ? allRows : [];
-        const headers = collectPreviewHeaders(previewRows);
+        const headers = collectPreviewHeaders();
         const headHtml = headers.map(header => `<th>${escapeHtml(header)}</th>`).join('');
         const visibleRows = previewRows.slice(0, 10);
         const bodyHtml = visibleRows.map(row => {
@@ -995,31 +1038,27 @@
             </div>`;
     }
 
-    function collectPreviewHeaders(rows) {
-        const preferred = ['Control_Type', 'Sample_Number', 'Qualification_Fulfilled_Indicator_025', 'Validation_Result', '_007', '_008', '_001', '_009', '_025', '_011'];
-        const displayKeys = Array.from(new Set((rows || [])
-            .flatMap(row => Object.keys(row.displayValues || {}))));
-        const extraUnderscoreHeaders = displayKeys
-            .filter(key => key.startsWith('_') && !preferred.includes(key))
-            .sort((a, b) => a.localeCompare(b))
-            .slice(0, 4);
-        return preferred
-            .filter(header => header === 'Control_Type' || header === 'Sample_Number' || header === 'Qualification_Fulfilled_Indicator_025' || header === 'Validation_Result' || displayKeys.includes(header))
-            .concat(extraUnderscoreHeaders);
+    function collectPreviewHeaders() {
+        return [
+            'Student_Number', 'South_African_ID_Number', 'Qualification_Code', 'Qualification_Name',
+            'Entrance_Category', 'Date_Of_Birth', 'Gender', 'Race', 'Nationality',
+            'Citizen_Resident_Status', 'NSFAS_Status', 'Previous_Years_Activity', 'Attendance_Mode',
+            'Qualification_Fulfilled_Indicator',
+            'Student_Last_Name', 'Student_First_Name', 'Student_Middle_Name',
+            'Validation_Result'
+        ];
+    }
+
+    function dvGet(row, key) {
+        const dv = row.displayValues || {};
+        if (Object.prototype.hasOwnProperty.call(dv, key)) return dv[key] ?? '';
+        const k = Object.keys(dv).find(x => x.toLowerCase() === key.toLowerCase());
+        return k ? (dv[k] ?? '') : '';
     }
 
     function getPreviewCellValue(row, header) {
-        const displayValues = row.displayValues || {};
-        switch (header) {
-            case 'Control_Type':
-                return 'Control_1';
-            case 'Sample_Number':
-                return row.validationNumber ?? '';
-            case 'Qualification_Fulfilled_Indicator_025':
-                return displayValues['_025'] || displayValues['Qualification_Fulfilled_Indicator_025'] || '';
-            default:
-                return displayValues[header] || '';
-        }
+        if (header === 'Validation_Result') return dvGet(row, 'Validation_Result') || 'PASS';
+        return dvGet(row, header);
     }
 
     async function downloadBlob(url, payload, defaultName) {
@@ -1068,6 +1107,12 @@
         await markWorkspaceDirty();
         await loadColumns();
     });
+    els.qualTable.addEventListener('change', async function () {
+        await markWorkspaceDirty();
+        await loadQualColumns();
+    });
+    els.qualJoinCol.addEventListener('change', markWorkspaceDirty);
+    els.qualNameCol.addEventListener('change', markWorkspaceDirty);
     els.filterColumn.addEventListener('change', async function () {
         await markWorkspaceDirty();
         await loadValues();

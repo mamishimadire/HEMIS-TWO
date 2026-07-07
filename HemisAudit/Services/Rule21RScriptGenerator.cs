@@ -1,4 +1,4 @@
-﻿using HemisAudit.ViewModels;
+using HemisAudit.ViewModels;
 
 namespace HemisAudit.Services;
 
@@ -9,9 +9,15 @@ public static class Rule21RScriptGenerator
 
     public static string Generate(Rule21ValidationRequest req)
     {
-        var tableName   = RString(req.TableName);
-        var filterColumn= RString(req.FilterColumn);
-        var filterValue = RString(req.FilterValue);
+        var studTable        = RString(req.StudTable);
+        var qualTable        = RString(req.QualTable);
+        var nalTable         = RString(req.NalTable);
+        var fteCol           = RString(req.StudFirstTimeColumn ?? "_010");
+        var fteValue         = RString(req.StudFirstTimeValue ?? "F");
+        var stud007Col       = RString(req.Stud007Column ?? "_007");
+        var studQualRefCol   = RString(req.StudQualRefColumn ?? "_001");
+        var nalCategoryCol   = RString(req.NalCategoryColumn ?? "Category");
+        var nalCategoryValue = RString(req.NalCategoryValue ?? "C");
 
         return RScriptScaffold.BuildDataLoadingPrelude() + $@"
 
@@ -41,26 +47,42 @@ print_summary <- function(dt, rule_label) {{
   }}
 }}
 
-# Rule 21: First Time Entering Students Filtered Validation
-cesm_table <- '{tableName}'
-pg_types   <- ''
-governing  <- 'ALL'
+stud_table         <- '{studTable}'
+qual_table         <- '{qualTable}'
+nal_table          <- '{nalTable}'
+fte_col            <- '{fteCol}'
+fte_value          <- '{fteValue}'
+stud_007_col       <- '{stud007Col}'
+stud_qual_ref_col  <- '{studQualRefCol}'
+nal_category_col   <- '{nalCategoryCol}'
+nal_category_value <- '{nalCategoryValue}'
 
-cesm <- copy(ds[[cesm_table]]); safe_names(cesm)
-filter_col <- gsub('^_', 'X', '{filterColumn}')
-filter_val <- '{filterValue}'
+stud <- copy(ds[[stud_table]]); safe_names(stud)
+nal  <- if (nchar(nal_table) > 0 && table_exists(nal_table)) copy(ds[[nal_table]]) else data.table()
 
-force_char_trim(cesm, c('X001', 'X007'))
+sc   <- gsub('^_', 'X', stud_007_col)
+ftc  <- gsub('^_', 'X', fte_col)
+sqrc <- gsub('^_', 'X', stud_qual_ref_col)
+force_char_trim(stud, c(sc, ftc, sqrc))
 
-cat(sprintf('-- Rule 21: First Time Entering Students Filtered Validation --\n'))
-cat(sprintf('Table: %s  Rows: %d\n', cesm_table, nrow(cesm)))
+fte <- stud[norm(col_val(.SD, ftc)) == norm(fte_value)]
+cat(sprintf('First-time entering students: %d\n', nrow(fte)))
 
-if (nchar(filter_col) > 0 && filter_col %in% names(cesm)) {{
-  matched <- cesm[norm(col_val(.SD, filter_col)) == norm(filter_val)]
-  cat(sprintf('Filter (%s == %s): %d rows\n', filter_col, filter_val, nrow(matched)))
+if (nrow(nal) > 0) {{
+  safe_names(nal)
+  nalc <- gsub('^_', 'X', nal_category_col)
+  nal_nonaligned <- nal[norm(col_val(.SD, nalc)) == norm(nal_category_value)]
+  nal_quals <- unique(nal_nonaligned[, .(NAL_QUAL = norm(col_val(.SD, 'X001')))])
+  fte[, QUAL := norm(col_val(.SD, sqrc))]
+  exceptions <- fte[QUAL %in% nal_quals$NAL_QUAL,
+                    .(StudentNo = col_val(.SD, sc), QualCode = QUAL, Status = 'FAIL - Linked to non-aligned qual')]
 }} else {{
-  cat('No filter applied.\n')
+  cat('NAL table not provided; skipping non-aligned qualification check.\n')
+  exceptions <- data.table()
 }}
+
+print_summary(exceptions, 'Rule 21: FTE vs Non-Aligned Quals')
+if (nrow(exceptions) == 0) cat('No exceptions found.\n') else print(exceptions)
 ";
     }
 }

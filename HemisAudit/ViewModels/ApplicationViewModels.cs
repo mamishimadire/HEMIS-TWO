@@ -618,6 +618,7 @@ namespace HemisAudit.ViewModels
         public List<string> Tables { get; set; } = new();
         public string? AutoStudTable { get; set; }
         public string? AutoDeceasedTable { get; set; }
+        public string? AutoQualTable { get; set; }
         public string? Error { get; set; }
     }
 

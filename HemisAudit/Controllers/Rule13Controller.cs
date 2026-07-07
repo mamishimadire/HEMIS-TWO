@@ -161,7 +161,15 @@ namespace HemisAudit.Controllers
                 CregTable = review.Summary.CregTable,
                 CrseTable = review.Summary.CrseTable,
                 PgTypesText = review.Summary.PgTypesText,
-                GoverningPartCodes = review.Summary.GoverningPartCodes
+                GoverningPartCodes = review.Summary.GoverningPartCodes,
+                PqmTable    = review.Summary.PqmTable,
+                CesmIdCol   = review.Summary.CesmIdCol,
+                CesmCodeCol = review.Summary.CesmCodeCol,
+                QualIdCol   = review.Summary.QualIdCol,
+                QualNameCol = review.Summary.QualNameCol,
+                PqmNameCol  = review.Summary.PqmNameCol,
+                PqmCode1Col = review.Summary.PqmCode1Col,
+                PqmCode2Col = review.Summary.PqmCode2Col,
             });
 
             return View(review);
@@ -174,6 +182,10 @@ namespace HemisAudit.Controllers
         [HttpPost]
         public async Task<IActionResult> GetTables([FromBody] ConnectionViewModel model) =>
             Json(await RequireDataAnalystAsync(async () => await _rule13.GetTablesAsync(model.Server, model.Database, model.Driver)));
+
+        [HttpPost]
+        public async Task<IActionResult> GetColumns([FromBody] GetColumnsRequest request) =>
+            Json(await RequireDataAnalystAsync(async () => await _rule13.GetColumnsAsync(request.Server, request.Database, request.Driver, request.TableName, request.TableRole)));
 
         [HttpPost]
         public async Task<IActionResult> VerifyTables([FromBody] Rule13VerifyRequest request) =>
@@ -624,7 +636,15 @@ namespace HemisAudit.Controllers
                 CregTable = review.Summary.CregTable,
                 CrseTable = review.Summary.CrseTable,
                 PgTypesText = review.Summary.PgTypesText,
-                GoverningPartCodes = review.Summary.GoverningPartCodes
+                GoverningPartCodes = review.Summary.GoverningPartCodes,
+                PqmTable    = review.Summary.PqmTable,
+                CesmIdCol   = review.Summary.CesmIdCol,
+                CesmCodeCol = review.Summary.CesmCodeCol,
+                QualIdCol   = review.Summary.QualIdCol,
+                QualNameCol = review.Summary.QualNameCol,
+                PqmNameCol  = review.Summary.PqmNameCol,
+                PqmCode1Col = review.Summary.PqmCode1Col,
+                PqmCode2Col = review.Summary.PqmCode2Col,
             };
 
             var bytes = _export.ExportSql(await _rule13.GenerateSqlAsync(request));

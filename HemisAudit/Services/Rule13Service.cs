@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Security.Cryptography;
 using HemisAudit.ViewModels;
 using Microsoft.Data.SqlClient;
@@ -77,7 +78,8 @@ namespace HemisAudit.Services
                     AutoStudTable = FindFirst(tables, ["dbo_CESM", "CESM"], ["cesm"]),
                     AutoQualTable = FindFirst(tables, ["dbo_QUAL", "QUAL"], ["qual"]),
                     AutoCregTable = FindFirst(tables, ["dbo_STUD", "STUD"], ["stud"]),
-                    AutoCrseTable = FindFirst(tables, ["dbo_STUD", "STUD"], ["stud"])
+                    AutoCrseTable = FindFirst(tables, ["dbo_STUD", "STUD"], ["stud"]),
+                    AutoPqmTable = tables.FirstOrDefault(t => t.Equals("PQM", StringComparison.OrdinalIgnoreCase) || t.Contains("PQM", StringComparison.OrdinalIgnoreCase))
                 };
             }
             catch (Exception ex)
@@ -241,6 +243,15 @@ ORDER BY vr.RunTimestamp DESC, vr.RunID DESC;";
                     ? string.Join(", ", deserializedSummary.PgTypes)
                     : deserializedSummary.PgTypesText;
                 workspace.GoverningPartCodes = NormalizeGoverningPartCodes(deserializedSummary.GoverningPartCodes);
+                workspace.PqmTable    = deserializedSummary.PqmTable    ?? "";
+                workspace.CesmIdCol   = deserializedSummary.CesmIdCol   ?? "_001";
+                workspace.CesmCodeCol = deserializedSummary.CesmCodeCol ?? "_006";
+                workspace.QualIdCol   = deserializedSummary.QualIdCol   ?? "_001";
+                workspace.QualNameCol = deserializedSummary.QualNameCol ?? "_003";
+                workspace.StudIdCol   = deserializedSummary.StudIdCol   ?? "_001";
+                workspace.PqmNameCol  = deserializedSummary.PqmNameCol  ?? "Authorised_Qualification_Name";
+                workspace.PqmCode1Col = deserializedSummary.PqmCode1Col ?? "CESM_Code";
+                workspace.PqmCode2Col = deserializedSummary.PqmCode2Col ?? "CESM_Code2";
             }
 
             await reader.CloseAsync();
@@ -545,64 +556,314 @@ END";
         {
             ValidateRequest(request);
 
-            var cesmTable = Sanitise(request.StudTable);
-            var qualTable = Sanitise(request.QualTable);
-            var studTable = Sanitise(request.CregTable);
+            var cesmTable   = Sanitise(request.StudTable);
+            var qualTable   = Sanitise(request.QualTable);
+            var studTable   = Sanitise(request.CregTable);
+            var cesmIdCol   = Sanitise(string.IsNullOrWhiteSpace(request.CesmIdCol)   ? "_001" : request.CesmIdCol);
+            var cesmCodeCol = Sanitise(string.IsNullOrWhiteSpace(request.CesmCodeCol) ? "_006" : request.CesmCodeCol);
+            var qualIdCol   = Sanitise(string.IsNullOrWhiteSpace(request.QualIdCol)   ? "_001" : request.QualIdCol);
+            var qualNameCol = Sanitise(string.IsNullOrWhiteSpace(request.QualNameCol) ? "_003" : request.QualNameCol);
 
             var sql = $@"-- ============================================================================
 -- HEMIS RULE 13: CESM QUALIFICATION POPULATION VALIDATION
--- ============================================================================
--- Database: {request.Database}
--- Scope: 100% of CESM qualifications where dbo_CESM._006 <> 'ZZZZZZ'
--- Join Path: {request.StudTable} -> {request.QualTable} on _001
---            {request.QualTable} -> {request.CregTable} on _001
--- PASS Rule: qualification has at least one linked STUD row
+-- 100% POPULATION WITH PROPER EXTRACTION
 -- ============================================================================
 
-WITH CesmPopulation AS (
-    SELECT DISTINCT
-        CAST(CESM.[_001] AS nvarchar(255)) AS Qualification_Code_001,
-        CAST(ISNULL(CESM.[_006], '') AS nvarchar(255)) AS Major_Field_CESM_006
-    FROM [{cesmTable}] CESM
-    WHERE CESM.[_001] IS NOT NULL
-      AND LTRIM(RTRIM(ISNULL(CESM.[_006], ''))) NOT IN ('', 'ZZZZZZ')
-),
-QualificationLinks AS (
-    SELECT
-        P.Qualification_Code_001,
-        P.Major_Field_CESM_006,
-        MAX(CAST(ISNULL(QUAL.[_003], '') AS nvarchar(255))) AS Qualification_Description_003,
-        MIN(CAST(STUD.[_001] AS nvarchar(255))) AS First_Stud_001,
-        COUNT(DISTINCT CAST(STUD.[_001] AS nvarchar(255))) AS Student_Count
-    FROM CesmPopulation P
-    LEFT JOIN [{qualTable}] QUAL
-        ON CAST(QUAL.[_001] AS nvarchar(255)) = P.Qualification_Code_001
-    LEFT JOIN [{studTable}] STUD
-        ON CAST(STUD.[_001] AS nvarchar(255)) = CAST(QUAL.[_001] AS nvarchar(255))
-    GROUP BY
-        P.Qualification_Code_001,
-        P.Major_Field_CESM_006
-)
-SELECT
-    ROW_NUMBER() OVER (ORDER BY Qualification_Code_001) AS Validation_Number,
-    Qualification_Code_001,
-    Major_Field_CESM_006,
-    Qualification_Description_003,
-    First_Stud_001,
-    'PASS' AS Step1_CESM_Check,
-    Student_Count,
-    CASE WHEN Student_Count >= 1 THEN 'PASS' ELSE 'FAIL' END AS Step2_Student_Linkage,
-    CASE WHEN Student_Count >= 1 THEN 'PASS' ELSE 'FAIL' END AS Overall_Status
-FROM QualificationLinks
-ORDER BY Qualification_Code_001;
+DROP TABLE IF EXISTS #Rule13_CESM_Extracted_Population;
+DROP TABLE IF EXISTS #Rule13_Validation;
+
+-- ============================================================================
+-- STEP 1: EXTRACT 100% CESM POPULATION
+-- ============================================================================
+
+SELECT DISTINCT
+    ROW_NUMBER() OVER (ORDER BY CESM.[{cesmIdCol}], CESM.[{cesmCodeCol}]) AS [Extract_Number],
+    CAST(CESM.[{cesmIdCol}] AS NVARCHAR(255)) AS [Qualification_Code],
+    CAST(CESM.[{cesmCodeCol}] AS NVARCHAR(255)) AS [Major_Field_CESM],
+    QUAL.[{qualNameCol}] AS [Qualification_Name_Designator],
+    QUAL.[_004] AS [Qualification_Approval_Status],
+    QUAL.[_005] AS [Qualification_Type_Descriptor],
+    QUAL.[_084] AS [Legacy_Indicator],
+    QUAL.[_085] AS [NQF_Exit_Level],
+    QUAL.[_086] AS [Minimum_Total_Credits]
+INTO #Rule13_CESM_Extracted_Population
+FROM [{cesmTable}] CESM
+LEFT JOIN [{qualTable}] QUAL
+    ON CAST(QUAL.[{qualIdCol}] AS NVARCHAR(255)) = CAST(CESM.[{cesmIdCol}] AS NVARCHAR(255))
+WHERE CESM.[{cesmIdCol}] IS NOT NULL
+  AND LTRIM(RTRIM(ISNULL(CAST(CESM.[{cesmCodeCol}] AS NVARCHAR(255)), ''))) NOT IN ('', 'ZZZZZZ');
+
+-- ============================================================================
+-- STEP 2: VALIDATE CESM POPULATION AGAINST STUDENT LINKAGE
+-- ============================================================================
 
 SELECT
-    COUNT(*) AS Valid_CESM_Qualifications,
-    SUM(CASE WHEN Student_Count >= 1 THEN 1 ELSE 0 END) AS PASS_Count,
-    SUM(CASE WHEN Student_Count < 1 THEN 1 ELSE 0 END) AS FAIL_Count
-FROM QualificationLinks;";
+    P.[Extract_Number],
+    P.[Qualification_Code],
+    P.[Major_Field_CESM],
+    P.[Qualification_Name_Designator],
+    P.[Qualification_Approval_Status],
+    P.[Qualification_Type_Descriptor],
+    P.[Legacy_Indicator],
+    P.[NQF_Exit_Level],
+    P.[Minimum_Total_Credits],
+    COUNT(DISTINCT CAST(STUD.[_007] AS NVARCHAR(255))) AS [Linked_Student_Count],
+    CASE WHEN COUNT(DISTINCT CAST(STUD.[_007] AS NVARCHAR(255))) >= 1 THEN 'PASS' ELSE 'FAIL' END AS [Validation_Result],
+    CASE
+        WHEN COUNT(DISTINCT CAST(STUD.[_007] AS NVARCHAR(255))) >= 1
+            THEN 'CESM qualification has at least one linked student record.'
+        ELSE 'CESM qualification has no linked student record in [{studTable}].'
+    END AS [Validation_Reason]
+INTO #Rule13_Validation
+FROM #Rule13_CESM_Extracted_Population P
+LEFT JOIN [{studTable}] STUD
+    ON CAST(STUD.[{cesmIdCol}] AS NVARCHAR(255)) = CAST(P.[Qualification_Code] AS NVARCHAR(255))
+GROUP BY
+    P.[Extract_Number], P.[Qualification_Code], P.[Major_Field_CESM],
+    P.[Qualification_Name_Designator], P.[Qualification_Approval_Status],
+    P.[Qualification_Type_Descriptor], P.[Legacy_Indicator], P.[NQF_Exit_Level], P.[Minimum_Total_Credits];
+
+-- ============================================================================
+-- STEP 3: FULL EXTRACTED POPULATION
+-- ============================================================================
+
+SELECT * FROM #Rule13_CESM_Extracted_Population ORDER BY [Extract_Number];
+
+-- ============================================================================
+-- STEP 4: FULL VALIDATION RESULT
+-- ============================================================================
+
+SELECT * FROM #Rule13_Validation ORDER BY [Extract_Number];
+
+-- ============================================================================
+-- STEP 5: EXCEPTIONS ONLY
+-- ============================================================================
+
+SELECT * FROM #Rule13_Validation WHERE [Validation_Result] = 'FAIL' ORDER BY [Extract_Number];
+
+-- ============================================================================
+-- STEP 6: SUMMARY
+-- ============================================================================
+
+SELECT
+    COUNT(*)                                                                              AS [Total_CESM_Qualifications],
+    SUM(CASE WHEN [Validation_Result] = 'PASS' THEN 1 ELSE 0 END)                       AS [PASS_Count],
+    SUM(CASE WHEN [Validation_Result] = 'FAIL' THEN 1 ELSE 0 END)                       AS [FAIL_Count],
+    CAST(SUM(CASE WHEN [Validation_Result] = 'FAIL' THEN 1 ELSE 0 END) * 100.0
+         / NULLIF(COUNT(*), 0) AS DECIMAL(5,2))                                          AS [Exception_Rate_Pct]
+FROM #Rule13_Validation;
+
+DROP TABLE IF EXISTS #Rule13_CESM_Extracted_Population;
+DROP TABLE IF EXISTS #Rule13_Validation;
+-- ============================================================================
+-- END RULE 13
+-- ============================================================================";
 
             return Task.FromResult(sql.Trim());
+        }
+
+        // ============================================================================
+        // PQM helper record and matching methods
+        // ============================================================================
+
+        private record PqmRow(string? Code1, string? Code2, string? Name);
+
+        private static string Digits(string? v) =>
+            v == null ? "" : string.Concat(v.Where(char.IsDigit));
+
+        private static string TrimLeadingZeros(string s) =>
+            s.TrimStart('0') is { Length: > 0 } t ? t : s;
+
+        private static string NormName(string? v)
+        {
+            if (v == null) return "";
+            return System.Text.RegularExpressions.Regex.Replace(v.Trim().ToUpperInvariant(), @"\s+", " ");
+        }
+
+        private static bool HasSameLeadingDigits(string left, string right, int digits) =>
+            left.Length >= digits && right.Length >= digits &&
+            string.Equals(left[..digits], right[..digits], StringComparison.Ordinal);
+
+        private static int CesmReviewPriority(string reason) => reason switch
+        {
+            "first 4 digits matched" => 0,
+            "first 4 digits matched after removing leading zeros" => 1,
+            "first 3 digits matched" => 2,
+            "first 3 digits matched after removing leading zeros" => 3,
+            _ => 99
+        };
+
+        private record CesmReviewMatch(string Reason, string? PqmCode, string? PqmName);
+
+        private static CesmReviewMatch? GetCesmReviewMatch(string? cesmCode, List<PqmRow> pqm)
+        {
+            if (string.IsNullOrWhiteSpace(cesmCode)) return null;
+            var rawCode = Digits(cesmCode);
+            if (rawCode.Length < 3) return null;
+            var trimmedCode = TrimLeadingZeros(rawCode);
+            CesmReviewMatch? best = null;
+            foreach (var p in pqm)
+            {
+                foreach (var pqmCode in new[] { p.Code1, p.Code2 }.Where(c => !string.IsNullOrWhiteSpace(c)))
+                {
+                    var pqmRaw = Digits(pqmCode);
+                    if (string.IsNullOrEmpty(pqmRaw)) continue;
+                    var pqmTrimmed = TrimLeadingZeros(pqmRaw);
+                    string? reason = null;
+                    if (HasSameLeadingDigits(rawCode, pqmRaw, 4)) reason = "first 4 digits matched";
+                    else if (HasSameLeadingDigits(trimmedCode, pqmTrimmed, 4)) reason = "first 4 digits matched after removing leading zeros";
+                    else if (HasSameLeadingDigits(rawCode, pqmRaw, 3)) reason = "first 3 digits matched";
+                    else if (HasSameLeadingDigits(trimmedCode, pqmTrimmed, 3)) reason = "first 3 digits matched after removing leading zeros";
+                    if (reason != null)
+                    {
+                        if (best == null || CesmReviewPriority(reason) < CesmReviewPriority(best.Reason))
+                            best = new CesmReviewMatch(reason, pqmCode?.Trim(), p.Name);
+                        if (best.Reason == "first 4 digits matched") return best;
+                    }
+                }
+            }
+            return best;
+        }
+
+        private static bool ExactCodeMatch(string hDigits, string? pqmCode)
+        {
+            var p = Digits(pqmCode);
+            return !string.IsNullOrEmpty(hDigits) && !string.IsNullOrEmpty(p) &&
+                   string.Equals(hDigits, p, StringComparison.Ordinal);
+        }
+
+        private static bool CodeMatches(string hDigits, string? pqmCode, int n = 4)
+        {
+            var p = Digits(pqmCode);
+            if (string.IsNullOrEmpty(hDigits) || string.IsNullOrEmpty(p)) return false;
+            var use = Math.Min(n, Math.Min(hDigits.Length, p.Length));
+            return use >= 2 && string.Equals(hDigits[..use], p[..use], StringComparison.Ordinal);
+        }
+
+        private static string? ResolveMatchedPqmCode(string hemisDigits, PqmRow pqm)
+        {
+            if (CodeMatches(hemisDigits, pqm.Code1)) return pqm.Code1?.Trim();
+            if (CodeMatches(hemisDigits, pqm.Code2)) return pqm.Code2?.Trim();
+            return pqm.Code1?.Trim() ?? pqm.Code2?.Trim();
+        }
+
+        private static void ApplyPqmMatch(Rule13ReviewRowViewModel row, string? cesmCode, string? qualName, List<PqmRow> pqm)
+        {
+            var hDigits = Digits(cesmCode);
+            var hNorm = NormName(qualName);
+
+            var codeRows = pqm.Where(p => CodeMatches(hDigits, p.Code1) || CodeMatches(hDigits, p.Code2)).ToList();
+            var combined = codeRows.Where(p => string.Equals(NormName(p.Name), hNorm, StringComparison.Ordinal)).ToList();
+
+            if (combined.Count > 0)
+            {
+                var best = combined[0];
+                var resolvedPqmCode = ResolveMatchedPqmCode(hDigits, best);
+                bool isExact = ExactCodeMatch(hDigits, best.Code1) || ExactCodeMatch(hDigits, best.Code2);
+                row.PqmCode = resolvedPqmCode ?? "";
+                row.PqmName = best.Name ?? "";
+                row.PqmCodeMatch = true;
+                row.PqmNameMatch = true;
+                row.PqmNeedsReview = !isExact;
+                row.PqmResult = "PASS";
+                row.ValidationResult = "PASS";
+                row.PqmExceptionReason = isExact ? "" :
+                    $"Pass - CESM review required because CESM leading digits matched against PQM.CESM_CODE. " +
+                    $"Qualification Name ({row.QualificationDescription003}): '{qualName}' = Authorised_Qualification_Name: '{best.Name}' | " +
+                    $"CESM._006: '{cesmCode}' | PQM CESM_Code: '{resolvedPqmCode}'";
+                row.ValidationExplanation = isExact
+                    ? $"PASS — PQM code '{resolvedPqmCode}' (exact) and name '{qualName}' confirmed against PQM register."
+                    : $"PASS (review) — CESM leading digits matched PQM code '{resolvedPqmCode}'. Name '{qualName}' confirmed. Review CESM code precision.";
+                return;
+            }
+
+            if (codeRows.Count == 0)
+            {
+                var review = GetCesmReviewMatch(cesmCode, pqm);
+                if (review != null)
+                {
+                    var reviewNameMatches = string.Equals(NormName(review.PqmName), hNorm, StringComparison.Ordinal);
+                    row.PqmCode = review.PqmCode ?? "";
+                    row.PqmName = review.PqmName ?? "";
+                    row.PqmCodeMatch = false;
+                    row.PqmNameMatch = reviewNameMatches;
+                    row.PqmNeedsReview = reviewNameMatches;
+                    row.PqmResult = reviewNameMatches ? "PASS" : "FAIL";
+                    row.ValidationResult = row.PqmResult;
+                    row.PqmExceptionReason = reviewNameMatches
+                        ? $"Pass - CESM review required ({review.Reason}). " +
+                          $"Qualification Name: '{qualName}' = Authorised_Qualification_Name: '{review.PqmName}' | " +
+                          $"CESM._006: '{cesmCode}' | PQM CESM_Code: '{review.PqmCode}' (CESM leading digits matched for review)"
+                        : $"Fail - qualification name did not align. " +
+                          $"Qualification Name: '{qualName}' ≠ Authorised_Qualification_Name: '{review.PqmName}' | " +
+                          $"CESM._006: '{cesmCode}' | PQM CESM_Code: '{review.PqmCode}' (CESM leading digits matched for review)";
+                    row.ValidationExplanation = reviewNameMatches
+                        ? $"PASS (review) — {review.Reason}. Name '{qualName}' confirmed. CESM '{cesmCode}' → PQM '{review.PqmCode}'."
+                        : $"FAIL — Name mismatch after leading-digit CESM match. Expected '{qualName}', PQM has '{review.PqmName}'. CESM '{cesmCode}' → PQM '{review.PqmCode}'.";
+                    return;
+                }
+                row.PqmCode = "";
+                row.PqmName = "";
+                row.PqmCodeMatch = false;
+                row.PqmNameMatch = false;
+                row.PqmNeedsReview = false;
+                row.PqmResult = "FAIL";
+                row.ValidationResult = "FAIL";
+                row.PqmExceptionReason = $"Fail - no PQM match found. CESM._006: '{cesmCode}' not found in PQM (no 4-digit prefix match in CESM_Code or CESM_Code2)";
+                row.ValidationExplanation = $"FAIL — No PQM match. CESM code '{cesmCode}' not found in PQM register (CESM_Code / CESM_Code2).";
+                return;
+            }
+
+            // Code matched but name didn't
+            var bestCode = codeRows[0];
+            var resolvedCode = ResolveMatchedPqmCode(hDigits, bestCode);
+            var pqmNames = string.Join(" | ", codeRows.Take(3).Select(p => p.Name?.Trim()).Where(n => n != null).Distinct());
+            row.PqmCode = resolvedCode ?? "";
+            row.PqmName = bestCode.Name ?? "";
+            row.PqmCodeMatch = true;
+            row.PqmNameMatch = false;
+            row.PqmNeedsReview = false;
+            row.PqmResult = "FAIL";
+            row.ValidationResult = "FAIL";
+            row.PqmExceptionReason = $"Fail - qualification name did not align. " +
+                $"Qualification Name: '{qualName}' ≠ Authorised_Qualification_Name: '{pqmNames}' | " +
+                $"CESM._006: '{cesmCode}' | PQM CESM_Code: '{resolvedCode}'";
+            row.ValidationExplanation = $"FAIL — Name mismatch. CESM code '{cesmCode}' → PQM '{resolvedCode}'. PQM name(s): '{pqmNames}'. Expected: '{qualName}'.";
+        }
+
+        public async Task<ColumnListResult> GetColumnsAsync(string server, string database, string driver, string tableName, string tableRole)
+        {
+            try
+            {
+                var connStr = BuildConnectionString(server, database, driver);
+                await using var conn = new SqlConnection(connStr);
+                await conn.OpenAsync();
+                await using var cmd = conn.CreateConfiguredCommand();
+                cmd.CommandText = "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME=@t ORDER BY ORDINAL_POSITION";
+                cmd.Parameters.AddWithValue("@t", tableName);
+                await using var reader = await cmd.ExecuteReaderAsync();
+                var columns = new List<string>();
+                while (await reader.ReadAsync())
+                    columns.Add(reader.GetString(0));
+
+                string? autoSelected = tableRole?.ToLowerInvariant() switch
+                {
+                    "cesm_id"   => columns.FirstOrDefault(c => c.Equals("_001", StringComparison.OrdinalIgnoreCase)) ?? columns.FirstOrDefault(),
+                    "cesm_code" => columns.FirstOrDefault(c => c.Equals("_006", StringComparison.OrdinalIgnoreCase)) ?? columns.FirstOrDefault(),
+                    "qual_id"   => columns.FirstOrDefault(c => c.Equals("_001", StringComparison.OrdinalIgnoreCase)) ?? columns.FirstOrDefault(),
+                    "qual_name" => columns.FirstOrDefault(c => c.Equals("_003", StringComparison.OrdinalIgnoreCase)) ?? columns.FirstOrDefault(),
+                    "pqm_name"  => columns.FirstOrDefault(c => c.Contains("Authorised", StringComparison.OrdinalIgnoreCase) || c.Contains("Qualification_Name", StringComparison.OrdinalIgnoreCase)) ?? columns.FirstOrDefault(),
+                    "pqm_code1" => columns.FirstOrDefault(c => c.Equals("CESM_Code", StringComparison.OrdinalIgnoreCase) || c.Equals("CESM_Code1", StringComparison.OrdinalIgnoreCase)) ?? columns.FirstOrDefault(),
+                    "pqm_code2" => columns.FirstOrDefault(c => c.Equals("CESM_Code2", StringComparison.OrdinalIgnoreCase)) ?? columns.FirstOrDefault(),
+                    _           => columns.FirstOrDefault()
+                };
+
+                return new ColumnListResult { Success = true, Columns = columns, AutoSelected = autoSelected };
+            }
+            catch (Exception ex)
+            {
+                return new ColumnListResult { Success = false, Error = ex.Message };
+            }
         }
 
         private async Task<Rule13ValidationSummary> AnalyseAsync(Rule13ValidationRequest request, bool includeAllReviewRows)
@@ -611,45 +872,75 @@ FROM QualificationLinks;";
             await using var conn = new SqlConnection(connStr);
             await conn.OpenAsync();
 
-            var cesmTable = Sanitise(request.StudTable);
-            var qualTable = Sanitise(request.QualTable);
-            var studTable = Sanitise(request.CregTable);
+            var cesmTable   = Sanitise(request.StudTable);
+            var qualTable   = Sanitise(request.QualTable);
+            var studTable   = Sanitise(request.CregTable);
+            var cesmIdCol   = Sanitise(string.IsNullOrWhiteSpace(request.CesmIdCol)   ? "_001" : request.CesmIdCol);
+            var cesmCodeCol = Sanitise(string.IsNullOrWhiteSpace(request.CesmCodeCol) ? "_006" : request.CesmCodeCol);
+            var qualIdCol   = Sanitise(string.IsNullOrWhiteSpace(request.QualIdCol)   ? "_001" : request.QualIdCol);
+            var qualNameCol = Sanitise(string.IsNullOrWhiteSpace(request.QualNameCol) ? "_003" : request.QualNameCol);
+            var studIdCol   = Sanitise(string.IsNullOrWhiteSpace(request.StudIdCol)   ? "_001" : request.StudIdCol);
+            var pqmTable    = Sanitise(request.PqmTable ?? "");
+            var pqmNameCol  = Sanitise(string.IsNullOrWhiteSpace(request.PqmNameCol)  ? "Authorised_Qualification_Name" : request.PqmNameCol);
+            var pqmCode1Col = Sanitise(string.IsNullOrWhiteSpace(request.PqmCode1Col) ? "CESM_Code" : request.PqmCode1Col);
+            var pqmCode2Col = Sanitise(string.IsNullOrWhiteSpace(request.PqmCode2Col) ? "CESM_Code2" : request.PqmCode2Col);
+            var hasPqm = !string.IsNullOrWhiteSpace(pqmTable);
 
+            // Step 1: Build temp tables (#Rule13_CESM_Extracted_Population, #Rule13_Validation)
+            await using (var prepCmd = conn.CreateConfiguredCommand())
+            {
+                prepCmd.CommandTimeout = SqlCommandTimeoutSeconds;
+                prepCmd.CommandText = $@"
+DROP TABLE IF EXISTS #Rule13_CESM_Extracted_Population;
+DROP TABLE IF EXISTS #Rule13_Validation;
+
+SELECT DISTINCT
+    ROW_NUMBER() OVER (ORDER BY CESM.[{cesmIdCol}], CESM.[{cesmCodeCol}]) AS [Extract_Number],
+    CAST(CESM.[{cesmIdCol}] AS NVARCHAR(255)) AS [Qualification_Code],
+    CAST(CESM.[{cesmCodeCol}] AS NVARCHAR(255)) AS [Major_Field_CESM],
+    CAST(ISNULL(QUAL.[{qualNameCol}], '') AS NVARCHAR(500)) AS [Qualification_Name_Designator],
+    CAST(ISNULL(QUAL.[_004], '') AS NVARCHAR(50))  AS [Qualification_Approval_Status],
+    CAST(ISNULL(QUAL.[_005], '') AS NVARCHAR(100)) AS [Qualification_Type_Descriptor],
+    CAST(ISNULL(QUAL.[_084], '') AS NVARCHAR(50))  AS [Legacy_Indicator],
+    CAST(ISNULL(QUAL.[_085], '') AS NVARCHAR(50))  AS [NQF_Exit_Level],
+    CAST(ISNULL(QUAL.[_086], '') AS NVARCHAR(50))  AS [Minimum_Total_Credits]
+INTO #Rule13_CESM_Extracted_Population
+FROM [{cesmTable}] CESM
+LEFT JOIN [{qualTable}] QUAL ON CAST(QUAL.[{qualIdCol}] AS NVARCHAR(255)) = CAST(CESM.[{cesmIdCol}] AS NVARCHAR(255))
+WHERE CESM.[{cesmIdCol}] IS NOT NULL
+  AND LTRIM(RTRIM(ISNULL(CAST(CESM.[{cesmCodeCol}] AS NVARCHAR(255)), ''))) NOT IN ('', 'ZZZZZZ');
+
+SELECT
+    P.[Extract_Number],
+    P.[Qualification_Code],
+    P.[Major_Field_CESM],
+    P.[Qualification_Name_Designator],
+    P.[Qualification_Approval_Status],
+    P.[Qualification_Type_Descriptor],
+    P.[Legacy_Indicator],
+    P.[NQF_Exit_Level],
+    P.[Minimum_Total_Credits],
+    COUNT(DISTINCT CAST(STUD.[_007] AS NVARCHAR(255))) AS [Linked_Student_Count],
+    CASE WHEN COUNT(DISTINCT CAST(STUD.[_007] AS NVARCHAR(255))) >= 1 THEN 'PASS' ELSE 'FAIL' END AS [Validation_Result],
+    CASE
+        WHEN COUNT(DISTINCT CAST(STUD.[_007] AS NVARCHAR(255))) >= 1
+            THEN 'CESM qualification has at least one linked student record.'
+        ELSE 'CESM qualification has no linked student record in [{studTable}].'
+    END AS [Validation_Reason]
+INTO #Rule13_Validation
+FROM #Rule13_CESM_Extracted_Population P
+LEFT JOIN [{studTable}] STUD ON CAST(STUD.[{studIdCol}] AS NVARCHAR(255)) = CAST(P.[Qualification_Code] AS NVARCHAR(255))
+GROUP BY
+    P.[Extract_Number], P.[Qualification_Code], P.[Major_Field_CESM],
+    P.[Qualification_Name_Designator], P.[Qualification_Approval_Status],
+    P.[Qualification_Type_Descriptor], P.[Legacy_Indicator], P.[NQF_Exit_Level], P.[Minimum_Total_Credits];";
+                await prepCmd.ExecuteNonQueryAsync();
+            }
+
+            // Step 2: Query rows from #Rule13_Validation
             await using var command = conn.CreateConfiguredCommand();
             command.CommandTimeout = SqlCommandTimeoutSeconds;
-            command.CommandText = $@"
-WITH CesmPopulation AS (
-    SELECT DISTINCT
-        CAST(CESM.[_001] AS nvarchar(255)) AS Qualification_Code_001,
-        CAST(ISNULL(CESM.[_006], '') AS nvarchar(255)) AS Major_Field_CESM_006
-    FROM [{cesmTable}] CESM
-    WHERE CESM.[_001] IS NOT NULL
-      AND LTRIM(RTRIM(ISNULL(CESM.[_006], ''))) NOT IN ('', 'ZZZZZZ')
-),
-QualificationLinks AS (
-    SELECT
-        P.Qualification_Code_001,
-        P.Major_Field_CESM_006,
-        MAX(CAST(ISNULL(QUAL.[_003], '') AS nvarchar(255))) AS Qualification_Description_003,
-        MIN(CAST(STUD.[_001] AS nvarchar(255))) AS First_Stud_001,
-        COUNT(DISTINCT CAST(STUD.[_001] AS nvarchar(255))) AS Student_Count
-    FROM CesmPopulation P
-    LEFT JOIN [{qualTable}] QUAL
-        ON CAST(QUAL.[_001] AS nvarchar(255)) = P.Qualification_Code_001
-    LEFT JOIN [{studTable}] STUD
-        ON CAST(STUD.[_001] AS nvarchar(255)) = CAST(QUAL.[_001] AS nvarchar(255))
-    GROUP BY
-        P.Qualification_Code_001,
-        P.Major_Field_CESM_006
-)
-SELECT
-    Qualification_Code_001,
-    Major_Field_CESM_006,
-    Qualification_Description_003,
-    First_Stud_001,
-    Student_Count
-FROM QualificationLinks
-ORDER BY Qualification_Code_001;";
+            command.CommandText = "SELECT * FROM #Rule13_Validation ORDER BY [Extract_Number];";
 
             var reviewRows = new List<Rule13ReviewRowViewModel>();
             await using var reader = await command.ExecuteReaderAsync();
@@ -657,41 +948,101 @@ ORDER BY Qualification_Code_001;";
             while (await reader.ReadAsync())
             {
                 validationNumber++;
-                var qualificationCode = ReadString(reader, 0);
-                var majorField = ReadString(reader, 1);
-                var qualificationDescription = ReadString(reader, 2);
-                var firstStud001 = ReadString(reader, 3);
-                var studentCount = reader.IsDBNull(4) ? 0 : Convert.ToInt32(reader.GetValue(4));
-                var step2Status = studentCount >= 1 ? "PASS" : "FAIL";
+                string ReadCol(string col) { var o = reader.GetOrdinal(col); return reader.IsDBNull(o) ? "" : Convert.ToString(reader.GetValue(o), CultureInfo.InvariantCulture) ?? ""; }
+                int ReadIntCol(string col) { var o = reader.GetOrdinal(col); return reader.IsDBNull(o) ? 0 : Convert.ToInt32(reader.GetValue(o)); }
 
+                var qualificationCode   = ReadCol("Qualification_Code");
+                var majorField          = ReadCol("Major_Field_CESM");
+                var qualDesc            = ReadCol("Qualification_Name_Designator");
+                var approvalStatus      = ReadCol("Qualification_Approval_Status");
+                var qualType            = ReadCol("Qualification_Type_Descriptor");
+                var legacyIndicator     = ReadCol("Legacy_Indicator");
+                var nqfExitLevel        = ReadCol("NQF_Exit_Level");
+                var minCredits          = ReadCol("Minimum_Total_Credits");
+                var studentCount        = ReadIntCol("Linked_Student_Count");
+                var validationResult    = ReadCol("Validation_Result");
+                var validationReason    = ReadCol("Validation_Reason");
+
+                var studLinkResult = studentCount >= 1 ? "PASS" : "FAIL";
                 reviewRows.Add(new Rule13ReviewRowViewModel
                 {
-                    ValidationNumber = validationNumber,
-                    PartCode = ScopeCode,
-                    PartTitle = ScopeTitle,
-                    PartDescription = ScopeDescription,
-                    StudentNumber007 = qualificationCode,
-                    QualificationCode001 = qualificationCode,
-                    QualificationDescription003 = qualificationDescription,
-                    FoundationFlag106 = "PASS",
-                    BridgeQualificationCode001 = qualificationCode,
-                    CourseCode030 = majorField,
-                    CrseCourseCode030 = majorField,
-                    FoundationCourse091 = firstStud001,
-                    StudentType = studentCount.ToString(),
-                    NotebookStatus = step2Status == "PASS" ? "VALID" : "INVALID",
-                    ValidationResult = step2Status,
-                    ValidationExplanation = step2Status == "PASS"
-                        ? $"Passed: CESM qualification links to {studentCount} STUD record(s) through dbo_QUAL._001 = dbo_STUD._001. First linked STUD._001 is '{firstStud001}'."
-                        : "Failed: qualifying CESM row did not link to any STUD record through dbo_QUAL._001 = dbo_STUD._001."
+                    ValidationNumber        = validationNumber,
+                    PartCode                = ScopeCode,
+                    PartTitle               = ScopeTitle,
+                    PartDescription         = ScopeDescription,
+                    StudentNumber007        = qualificationCode,
+                    QualificationCode001    = qualificationCode,
+                    QualificationDescription003 = qualDesc,
+                    QualificationType005    = qualType,
+                    FoundationFlag106       = approvalStatus,
+                    BridgeQualificationCode001 = legacyIndicator,
+                    CourseCode030           = majorField,
+                    CrseCourseCode030       = nqfExitLevel,
+                    FoundationCourse091     = minCredits,
+                    StudentType             = studentCount.ToString(),
+                    StudLinkCount           = studentCount,
+                    StudLinkResult          = studLinkResult,
+                    NotebookStatus          = validationResult == "PASS" ? "VALID" : "INVALID",
+                    ValidationResult        = validationResult,
+                    ValidationExplanation   = validationReason
                 });
+            }
+
+            await reader.CloseAsync();
+
+            // Step 3: Load PQM data and apply in-memory matching if PQM table is configured
+            List<PqmRow> pqmRows = new();
+            if (hasPqm)
+            {
+                var pqmSql = string.IsNullOrWhiteSpace(pqmCode2Col)
+                    ? $"SELECT [{pqmNameCol}], [{pqmCode1Col}], NULL FROM [{pqmTable}]"
+                    : $"SELECT [{pqmNameCol}], [{pqmCode1Col}], [{pqmCode2Col}] FROM [{pqmTable}]";
+                await using var pqmCmd = conn.CreateConfiguredCommand();
+                pqmCmd.CommandTimeout = SqlCommandTimeoutSeconds;
+                pqmCmd.CommandText = pqmSql;
+                await using var pqmReader = await pqmCmd.ExecuteReaderAsync();
+                while (await pqmReader.ReadAsync())
+                {
+                    pqmRows.Add(new PqmRow(
+                        pqmReader.IsDBNull(1) ? null : pqmReader.GetValue(1)?.ToString(),
+                        pqmReader.IsDBNull(2) ? null : pqmReader.GetValue(2)?.ToString(),
+                        pqmReader.IsDBNull(0) ? null : pqmReader.GetValue(0)?.ToString()));
+                }
+            }
+
+            if (hasPqm && pqmRows.Count > 0)
+            {
+                foreach (var row in reviewRows)
+                {
+                    ApplyPqmMatch(row, row.CourseCode030, row.QualificationDescription003, pqmRows);
+                    // STUD linkage overrides PQM: no linked student = FAIL regardless of PQM
+                    if (row.StudLinkResult == "FAIL")
+                    {
+                        row.ValidationResult = "FAIL";
+                        row.ValidationExplanation = string.IsNullOrWhiteSpace(row.PqmExceptionReason)
+                            ? $"FAIL — No linked STUD record (Linked_Student_Count = 0). PQM result: {row.PqmResult}."
+                            : $"FAIL — No linked STUD record (Linked_Student_Count = 0). PQM: {row.PqmResult}. {row.PqmExceptionReason}";
+                    }
+                }
+            }
+            else
+            {
+                // No PQM — STUD linkage result is the sole validation result
+                foreach (var row in reviewRows)
+                {
+                    if (row.StudLinkResult == "FAIL")
+                    {
+                        row.ValidationResult = "FAIL";
+                    }
+                }
             }
 
             reviewRows = NormalizeReviewRows(reviewRows);
 
             var totalValidated = reviewRows.Count;
             var passCount = reviewRows.Count(x => string.Equals(x.ValidationResult, "PASS", StringComparison.OrdinalIgnoreCase));
-            var failCount = totalValidated - passCount;
+            var failCount = reviewRows.Count(x => string.Equals(x.ValidationResult, "FAIL", StringComparison.OrdinalIgnoreCase));
+            var reviewCount = reviewRows.Count(x => x.PqmNeedsReview);
             var validCesmCount = totalValidated;
             var partSummaries = new List<Rule13PartSummaryItemViewModel>
             {
@@ -710,6 +1061,10 @@ ORDER BY Qualification_Code_001;";
                 ? reviewRows
                 : reviewRows.Take(BrowserPreviewRowLimit).ToList();
             var isPreviewOnly = !includeAllReviewRows && totalValidated > displayedRows.Count;
+            var overallStatusRuleText = hasPqm
+                ? "Overall PASS requires every qualifying CESM qualification to have a matching PQM row (CESM code and qualification name) and link to at least one STUD row."
+                : "Overall PASS requires every qualifying CESM qualification to link to at least one STUD row.";
+            var runStatus = failCount == 0 ? (reviewCount > 0 ? "PASS WITH REVIEW" : "PASS") : "FAIL";
 
             return new Rule13ValidationSummary
             {
@@ -721,8 +1076,9 @@ ORDER BY Qualification_Code_001;";
                 PreviewLimit = isPreviewOnly ? BrowserPreviewRowLimit : 0,
                 PassCount = passCount,
                 FailCount = failCount,
+                ReviewCount = reviewCount,
                 ExceptionRate = totalValidated == 0 ? 0m : Math.Round(failCount * 100m / totalValidated, 2),
-                Status = failCount == 0 ? "PASS" : "FAIL",
+                Status = runStatus,
                 Timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
                 Database = request.Database,
                 StudTable = request.StudTable,
@@ -733,18 +1089,30 @@ ORDER BY Qualification_Code_001;";
                 PgTypes = new List<string>(),
                 GoverningPartCodes = [ScopeCode],
                 GoverningPartCodesText = "100% population",
-                OverallStatusRuleText = "Overall PASS requires every qualifying CESM qualification to link to at least one STUD row.",
-                TableLinkageText = $"{request.StudTable} -> {request.QualTable} on _001, then {request.QualTable} -> {request.CregTable} on _001.",
+                OverallStatusRuleText = overallStatusRuleText,
+                TableLinkageText = $"{request.StudTable}.{cesmIdCol} → {request.QualTable}.{qualIdCol} → {request.CregTable}.{studIdCol}",
                 ProcedureSteps = new List<string>
                 {
-                    $"Return the full {request.StudTable} population where _006 <> 'ZZZZZZ'.",
-                    $"Match qualifying CESM rows to {request.QualTable} on _001.",
-                    $"Verify student linkage by matching {request.QualTable}._001 to {request.CregTable}._001.",
-                    "Classify each qualifying CESM qualification as PASS when at least one STUD row exists; otherwise FAIL."
+                    $"Step 1: Extract 100% of {request.StudTable} where {cesmCodeCol} <> 'ZZZZZZ'.",
+                    $"Step 2: Match {request.StudTable}.{cesmIdCol} to {request.QualTable}.{qualIdCol}.",
+                    $"Step 3: Match {request.QualTable}.{qualIdCol} to {request.CregTable}.{studIdCol}.",
+                    "Step 4: PASS when the qualifying CESM qualification links to at least one STUD row.",
+                    hasPqm
+                        ? $"Step 5 (PQM): CESM.{cesmCodeCol} 4-digit prefix matches PQM.{pqmCode1Col} or PQM.{pqmCode2Col}, AND QUAL.{qualNameCol} (case-insensitive) matches PQM.{pqmNameCol} — both on the same PQM row."
+                        : "Overall PASS: every qualifying CESM qualification must link to at least one STUD row."
                 },
                 ClientId = request.ClientId,
                 PartSummaries = partSummaries,
                 ReviewRows = displayedRows,
+                PqmTable = request.PqmTable ?? "",
+                CesmIdCol = cesmIdCol,
+                CesmCodeCol = cesmCodeCol,
+                QualIdCol = qualIdCol,
+                QualNameCol = qualNameCol,
+                StudIdCol = studIdCol,
+                PqmNameCol = pqmNameCol,
+                PqmCode1Col = pqmCode1Col,
+                PqmCode2Col = pqmCode2Col,
                 Warning = includeAllReviewRows
                     ? "Rule 13 completed with the full CESM qualification population."
                     : "Counts reflect the full CESM qualification population. Browser review rows are limited for performance."
@@ -1872,17 +2240,27 @@ LEFT JOIN [{crseTable}] CRSE ON BRIDGE.[_030] = CRSE.[_030]";
                 var expanded = await AnalyseAsync(
                     new Rule13ValidationRequest
                     {
-                        ClientId = summary.ClientId,
-                        RunId = summary.SavedRunId,
-                        Server = server,
-                        Database = summary.Database,
-                        Driver = "ODBC Driver 17 for SQL Server",
-                        StudTable = summary.StudTable,
-                        QualTable = summary.QualTable,
-                        CregTable = summary.CregTable,
-                        CrseTable = summary.CrseTable,
-                        PgTypesText = summary.PgTypesText,
-                        GoverningPartCodes = summary.GoverningPartCodes?.ToList() ?? new List<string>()
+                        ClientId          = summary.ClientId,
+                        RunId             = summary.SavedRunId,
+                        Server            = server,
+                        Database          = summary.Database,
+                        Driver            = "ODBC Driver 17 for SQL Server",
+                        StudTable         = summary.StudTable,
+                        QualTable         = summary.QualTable,
+                        CregTable         = summary.CregTable,
+                        CrseTable         = summary.CrseTable,
+                        PgTypesText       = summary.PgTypesText,
+                        GoverningPartCodes = summary.GoverningPartCodes?.ToList() ?? new List<string>(),
+                        // Preserve column mappings and PQM config from the saved run
+                        CesmIdCol         = string.IsNullOrWhiteSpace(summary.CesmIdCol)  ? "_001" : summary.CesmIdCol,
+                        CesmCodeCol       = string.IsNullOrWhiteSpace(summary.CesmCodeCol) ? "_006" : summary.CesmCodeCol,
+                        QualIdCol         = string.IsNullOrWhiteSpace(summary.QualIdCol)   ? "_001" : summary.QualIdCol,
+                        QualNameCol       = string.IsNullOrWhiteSpace(summary.QualNameCol)  ? "_003" : summary.QualNameCol,
+                        StudIdCol         = string.IsNullOrWhiteSpace(summary.StudIdCol)   ? "_001" : summary.StudIdCol,
+                        PqmTable          = summary.PqmTable  ?? "",
+                        PqmNameCol        = string.IsNullOrWhiteSpace(summary.PqmNameCol)  ? "Authorised_Qualification_Name" : summary.PqmNameCol,
+                        PqmCode1Col       = string.IsNullOrWhiteSpace(summary.PqmCode1Col) ? "CESM_Code"  : summary.PqmCode1Col,
+                        PqmCode2Col       = string.IsNullOrWhiteSpace(summary.PqmCode2Col) ? "CESM_Code2" : summary.PqmCode2Col,
                     },
                     includeAllReviewRows: true);
 
@@ -1916,6 +2294,7 @@ LEFT JOIN [{crseTable}] CRSE ON BRIDGE.[_030] = CRSE.[_030]";
                 PreviewLimit = BrowserPreviewRowLimit,
                 PassCount = summary.PassCount,
                 FailCount = summary.FailCount,
+                ReviewCount = summary.ReviewCount,
                 ExceptionRate = summary.ExceptionRate,
                 Status = summary.Status,
                 Timestamp = summary.Timestamp,
@@ -1945,7 +2324,17 @@ LEFT JOIN [{crseTable}] CRSE ON BRIDGE.[_030] = CRSE.[_030]";
                     .ToList(),
                 ReviewRows = previewRows,
                 Warning = summary.Warning,
-                Error = summary.Error
+                Error = summary.Error,
+                // Preserve PQM and column config so ExpandSavedSummaryIfNeededAsync can re-apply them
+                CesmIdCol   = summary.CesmIdCol,
+                CesmCodeCol = summary.CesmCodeCol,
+                QualIdCol   = summary.QualIdCol,
+                QualNameCol = summary.QualNameCol,
+                StudIdCol   = summary.StudIdCol,
+                PqmTable    = summary.PqmTable,
+                PqmNameCol  = summary.PqmNameCol,
+                PqmCode1Col = summary.PqmCode1Col,
+                PqmCode2Col = summary.PqmCode2Col,
             };
         }
 
@@ -2027,9 +2416,12 @@ LEFT JOIN [{crseTable}] CRSE ON BRIDGE.[_030] = CRSE.[_030]";
             for (var i = 0; i < normalizedRows.Count; i++)
             {
                 normalizedRows[i].ValidationNumber = i + 1;
-                var isPass = IsRule13RowPass(normalizedRows[i]) ||
+                var hasPqmFail = !string.IsNullOrEmpty(normalizedRows[i].PqmResult) &&
+                    string.Equals(normalizedRows[i].PqmResult, "FAIL", StringComparison.OrdinalIgnoreCase);
+                var isPass = !hasPqmFail && (
+                    IsRule13RowPass(normalizedRows[i]) ||
                     string.Equals(normalizedRows[i].ValidationResult, "PASS", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(normalizedRows[i].NotebookStatus, "VALID", StringComparison.OrdinalIgnoreCase);
+                    string.Equals(normalizedRows[i].NotebookStatus, "VALID", StringComparison.OrdinalIgnoreCase));
                 normalizedRows[i].NotebookStatus = isPass ? "VALID" : "INVALID";
                 normalizedRows[i].ValidationResult = isPass ? "PASS" : "FAIL";
                 normalizedRows[i].ValidationExplanation = string.IsNullOrWhiteSpace(normalizedRows[i].ValidationExplanation)

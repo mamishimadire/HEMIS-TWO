@@ -10,6 +10,7 @@ namespace HemisAudit.ViewModels
         public string? AutoQualTable { get; set; }
         public string? AutoCregTable { get; set; }
         public string? AutoCrseTable { get; set; }
+        public string? AutoPqmTable { get; set; }
         public string? Error { get; set; }
     }
 
@@ -24,6 +25,20 @@ namespace HemisAudit.ViewModels
         public string CrseTable { get; set; } = "dbo_STUD";
         public string PgTypesText { get; set; } = "";
         public List<string> GoverningPartCodes { get; set; } = ["ALL"];
+        public string CesmLinkCol { get; set; } = "_001";
+        public string QualLinkCol { get; set; } = "_001";
+        public string StudLinkCol { get; set; } = "_001";
+        public string CesmFilterCol { get; set; } = "_006";
+        public string CesmFilterVal { get; set; } = "ZZZZZZ";
+        public string PqmTable { get; set; } = "";
+        public string CesmIdCol { get; set; } = "_001";
+        public string CesmCodeCol { get; set; } = "_006";
+        public string QualIdCol { get; set; } = "_001";
+        public string QualNameCol { get; set; } = "_003";
+        public string StudIdCol { get; set; } = "_001";
+        public string PqmNameCol { get; set; } = "Authorised_Qualification_Name";
+        public string PqmCode1Col { get; set; } = "CESM_Code";
+        public string PqmCode2Col { get; set; } = "CESM_Code2";
     }
 
     public class Rule13VerifyResult
@@ -47,6 +62,15 @@ namespace HemisAudit.ViewModels
         public string CrseTable { get; set; } = "dbo_STUD";
         public string PgTypesText { get; set; } = "";
         public List<string> GoverningPartCodes { get; set; } = ["ALL"];
+        public string PqmTable { get; set; } = "";
+        public string CesmIdCol { get; set; } = "_001";
+        public string CesmCodeCol { get; set; } = "_006";
+        public string QualIdCol { get; set; } = "_001";
+        public string QualNameCol { get; set; } = "_003";
+        public string StudIdCol { get; set; } = "_001";
+        public string PqmNameCol { get; set; } = "Authorised_Qualification_Name";
+        public string PqmCode1Col { get; set; } = "CESM_Code";
+        public string PqmCode2Col { get; set; } = "CESM_Code2";
     }
 
     public class Rule13PartSummaryItemViewModel
@@ -78,9 +102,18 @@ namespace HemisAudit.ViewModels
         public string CrseCourseCode030 { get; set; } = "";
         public string FoundationCourse091 { get; set; } = "";
         public string StudentType { get; set; } = "";
+        public int StudLinkCount { get; set; }
+        public string StudLinkResult { get; set; } = "";
         public string NotebookStatus { get; set; } = "";
         public string ValidationResult { get; set; } = "";
         public string ValidationExplanation { get; set; } = "";
+        public string PqmCode { get; set; } = "";
+        public string PqmName { get; set; } = "";
+        public bool PqmCodeMatch { get; set; }
+        public bool PqmNameMatch { get; set; }
+        public bool PqmNeedsReview { get; set; }
+        public string PqmResult { get; set; } = "";
+        public string PqmExceptionReason { get; set; } = "";
     }
 
     public class Rule13ValidationSummary
@@ -93,6 +126,7 @@ namespace HemisAudit.ViewModels
         public int PreviewLimit { get; set; }
         public int PassCount { get; set; }
         public int FailCount { get; set; }
+        public int ReviewCount { get; set; }
         public decimal ExceptionRate { get; set; }
         public string Status { get; set; } = "";
         public string Timestamp { get; set; } = "";
@@ -105,7 +139,7 @@ namespace HemisAudit.ViewModels
         public List<string> PgTypes { get; set; } = new();
         public List<string> GoverningPartCodes { get; set; } = ["ALL"];
         public string GoverningPartCodesText { get; set; } = "100% population";
-        public string OverallStatusRuleText { get; set; } = "Overall PASS requires every qualifying CESM qualification to link to at least one STUD row.";
+        public string OverallStatusRuleText { get; set; } = "";
         public string TableLinkageText { get; set; } = "";
         public List<string> ProcedureSteps { get; set; } = new();
         public int ClientId { get; set; }
@@ -114,6 +148,15 @@ namespace HemisAudit.ViewModels
         public List<Rule13ReviewRowViewModel> ReviewRows { get; set; } = new();
         public string? Warning { get; set; }
         public string? Error { get; set; }
+        public string PqmTable { get; set; } = "";
+        public string CesmIdCol { get; set; } = "_001";
+        public string CesmCodeCol { get; set; } = "_006";
+        public string QualIdCol { get; set; } = "_001";
+        public string QualNameCol { get; set; } = "_003";
+        public string StudIdCol { get; set; } = "_001";
+        public string PqmNameCol { get; set; } = "Authorised_Qualification_Name";
+        public string PqmCode1Col { get; set; } = "CESM_Code";
+        public string PqmCode2Col { get; set; } = "CESM_Code2";
     }
 
     public class Rule13RunReviewViewModel
@@ -159,6 +202,15 @@ namespace HemisAudit.ViewModels
         public DateTime? LastEditedAt { get; set; }
         public bool IsWorkspaceSaved { get; set; }
         public Rule13ValidationSummary? Summary { get; set; }
+        public string PqmTable { get; set; } = "";
+        public string CesmIdCol { get; set; } = "_001";
+        public string CesmCodeCol { get; set; } = "_006";
+        public string QualIdCol { get; set; } = "_001";
+        public string QualNameCol { get; set; } = "_003";
+        public string StudIdCol { get; set; } = "_001";
+        public string PqmNameCol { get; set; } = "Authorised_Qualification_Name";
+        public string PqmCode1Col { get; set; } = "CESM_Code";
+        public string PqmCode2Col { get; set; } = "CESM_Code2";
     }
 
     public class Rule13WorkspaceSaveResult

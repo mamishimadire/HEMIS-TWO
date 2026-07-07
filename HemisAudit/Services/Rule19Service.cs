@@ -65,7 +65,9 @@ namespace HemisAudit.Services
                     Tables = tables,
                     AutoStudTable = FindFirst(tables, ["dbo_STUD", "STUD"], ["stud"]),
                     AutoQualTable = FindFirst(tables, ["dbo_QUAL", "QUAL"], ["qual"]),
-                    AutoPqmTable = FindFirst(tables, ["PQM"], ["pqm"])
+                    AutoPqmTable = FindFirst(tables, ["PQM"], ["pqm"]),
+                    AutoCredTable = FindFirst(tables, ["dbo_CRED", "CRED"], ["cred"]),
+                    AutoCrseTable = FindFirst(tables, ["dbo_CRSE", "CRSE"], ["crse"])
                 };
             }
             catch (Exception ex)
@@ -173,6 +175,8 @@ ORDER BY COUNT(*) DESC, FilterValue ASC;";
                     Success = true,
                     StudRecordCount = summary.StudRecordCount,
                     QualRecordCount = summary.QualRecordCount,
+                    CredRecordCount = summary.CredRecordCount,
+                    CrseRecordCount = summary.CrseRecordCount,
                     EligiblePopulationCount = summary.MatchingCount,
                     PreviewRows = CreateBrowserPreview(summary).MatchingRows
                 };
@@ -289,6 +293,11 @@ ORDER BY vr.RunTimestamp DESC, vr.RunID DESC;";
                 workspace.PqmTable = deserializedSummary.PqmTable;
                 workspace.PqmQualNameColumn = deserializedSummary.PqmQualNameColumn;
                 workspace.PqmQualTypeColumn = deserializedSummary.PqmQualTypeColumn;
+                workspace.CredTable = deserializedSummary.CredTable;
+                workspace.CredJoinCol = deserializedSummary.CredJoinCol;
+                workspace.CredCourseCol = deserializedSummary.CredCourseCol;
+                workspace.CrseTable = deserializedSummary.CrseTable;
+                workspace.CrseCourseCol = deserializedSummary.CrseCourseCol;
             }
 
             await reader.CloseAsync();
@@ -603,24 +612,77 @@ END";
             var safePqmTable = hasPqm ? Sanitise(request.PqmTable) : "";
             var safePqmName = hasPqm ? Sanitise(request.PqmQualNameColumn) : "";
             var safePqmType = hasPqm ? Sanitise(request.PqmQualTypeColumn) : "";
+            var hasCredCrse = !string.IsNullOrWhiteSpace(request.CredTable) && !string.IsNullOrWhiteSpace(request.CrseTable);
+            var safeCredTable = hasCredCrse ? Sanitise(request.CredTable) : "";
+            var safeCredJoinCol = hasCredCrse ? Sanitise(string.IsNullOrWhiteSpace(request.CredJoinCol) ? "_001" : request.CredJoinCol) : "_001";
+            var safeCredCourseCol = hasCredCrse ? Sanitise(string.IsNullOrWhiteSpace(request.CredCourseCol) ? "_030" : request.CredCourseCol) : "_030";
+            var safeCrseTable = hasCredCrse ? Sanitise(request.CrseTable) : "";
+            var safeCrseCourseCol = hasCredCrse ? Sanitise(string.IsNullOrWhiteSpace(request.CrseCourseCol) ? "_030" : request.CrseCourseCol) : "_030";
+
+            var credCrseJoinSql = hasCredCrse
+                ? $@"
+INNER JOIN [{safeCredTable}] CRED ON STUD.[{safeQualCodeColumn}] = CRED.[{safeCredJoinCol}]
+INNER JOIN [{safeCrseTable}] CRSE ON CRED.[{safeCredCourseCol}] = CRSE.[{safeCrseCourseCol}]"
+                : "";
+
+            var pqmJoinSql = hasPqm
+                ? $@"
+LEFT JOIN [{safePqmTable}] PQM
+    ON UPPER(LTRIM(RTRIM(CAST(QUAL.[{safeQualNameColumn}] AS nvarchar(500))))) = UPPER(LTRIM(RTRIM(CAST(PQM.[{safePqmName}] AS nvarchar(500)))))
+    AND UPPER(LTRIM(RTRIM(CAST(QUAL.[{safeQualTypeColumn}] AS nvarchar(255))))) = UPPER(LTRIM(RTRIM(CAST(PQM.[{safePqmType}] AS nvarchar(255)))))"
+                : "";
+
+            var credCrseSelectSql = hasCredCrse
+                ? $@"
+    ISNULL(CAST(CRED.[{safeCredJoinCol}] AS nvarchar(255)), '') AS CRED_Qualification_Code,
+    ISNULL(CAST(CRED.[{safeCredCourseCol}] AS nvarchar(255)), '') AS CRED_Course_Code,
+    ISNULL(CAST(CRSE.[{safeCrseCourseCol}] AS nvarchar(255)), '') AS CRSE_Course_Code,
+    ISNULL(CAST(CRSE.[_058] AS nvarchar(500)), '') AS Course_Name,
+    ISNULL(CAST(CRSE.[_091] AS nvarchar(255)), '') AS Foundation_Course_Indicator,"
+                : "";
+
+            var pqmSelectSql = hasPqm
+                ? $@"
+    ISNULL(CAST(PQM.[{safePqmName}] AS nvarchar(500)), '') AS PQM_Qualification_Name,
+    ISNULL(CAST(PQM.[{safePqmType}] AS nvarchar(255)), '') AS PQM_Qualification_Type,"
+                : "";
+
+            var credCrseLinkCheckSql = hasCredCrse
+                ? $@"
+    CASE WHEN ISNULL(CAST(STUD.[{safeQualCodeColumn}] AS nvarchar(255)),'') = ISNULL(CAST(CRED.[{safeCredJoinCol}] AS nvarchar(255)),'') THEN 'MATCH' ELSE 'NO MATCH' END AS STUD_CRED_Link_Check,
+    CASE WHEN ISNULL(CAST(CRED.[{safeCredCourseCol}] AS nvarchar(255)),'') = ISNULL(CAST(CRSE.[{safeCrseCourseCol}] AS nvarchar(255)),'') THEN 'MATCH' ELSE 'NO MATCH' END AS CRED_CRSE_Link_Check,"
+                : "";
+
+            var pqmValidationSql = hasPqm
+                ? $"CASE WHEN PQM.[{safePqmName}] IS NOT NULL AND LTRIM(RTRIM(CAST(PQM.[{safePqmName}] AS nvarchar(500)))) <> '' THEN 'PASS' ELSE 'FAIL' END AS PQM_Validation_Result"
+                : "'PASS' AS PQM_Validation_Result";
+
+            var countJoin = hasCredCrse
+                ? $@"
+INNER JOIN [{safeCredTable}] CRED ON STUD.[{safeQualCodeColumn}] = CRED.[{safeCredJoinCol}]
+INNER JOIN [{safeCrseTable}] CRSE ON CRED.[{safeCredCourseCol}] = CRSE.[{safeCrseCourseCol}]"
+                : "";
 
             var sql = $@"-- ============================================================================
 -- HEMIS RULE 19: MASTERS AND PhD STUDENT POPULATION VALIDATION
 -- ============================================================================
 -- Linkage: [{safeStudTable}].[{safeQualCodeColumn}] = [{safeQualTable}].[{safeQualCodeColumn}]
+{(hasCredCrse ? $"-- CRED  : [{safeStudTable}].[{safeQualCodeColumn}] = [{safeCredTable}].[{safeCredJoinCol}]" : "")}
+{(hasCredCrse ? $"-- CRSE  : [{safeCredTable}].[{safeCredCourseCol}] = [{safeCrseTable}].[{safeCrseCourseCol}]" : "")}
 -- Filter : [{safeStudTable}].[{safeFulfilledColumn}] = '{fulfilledValue}'
 -- Types  : [{safeQualTable}].[{safeQualTypeColumn}] IN ({mdTypeSql})
--- Logic  : 100% of the filtered linked population is returned
+-- Logic  : 100% population testing — returns all filtered rows with link checks and PQM validation
 -- ============================================================================
 
 -- STEP 1: POPULATION COUNTS
 SELECT
     (SELECT COUNT(*) FROM [{safeStudTable}]) AS Stud_Record_Count,
-    (SELECT COUNT(*) FROM [{safeQualTable}]) AS Qual_Record_Count,
+    (SELECT COUNT(*) FROM [{safeQualTable}]) AS Qual_Record_Count,{(hasCredCrse ? $@"
+    (SELECT COUNT(*) FROM [{safeCredTable}]) AS Cred_Record_Count,
+    (SELECT COUNT(*) FROM [{safeCrseTable}]) AS Crse_Record_Count," : "")}
     (SELECT COUNT(*)
      FROM [{safeStudTable}] STUD
-     INNER JOIN [{safeQualTable}] QUAL
-         ON STUD.[{safeQualCodeColumn}] = QUAL.[{safeQualCodeColumn}]
+     INNER JOIN [{safeQualTable}] QUAL ON STUD.[{safeQualCodeColumn}] = QUAL.[{safeQualCodeColumn}]{countJoin}
      WHERE ISNULL(CAST(STUD.[{safeFulfilledColumn}] AS nvarchar(255)), '') = '{fulfilledValue}'
        AND ISNULL(CAST(QUAL.[{safeQualTypeColumn}] AS nvarchar(255)), '') IN ({mdTypeSql})
     ) AS Eligible_Population_Count;
@@ -630,41 +692,43 @@ SELECT
     ISNULL(CAST(QUAL.[{safeQualTypeColumn}] AS nvarchar(255)), '') AS Qualification_Type,
     COUNT(*) AS Record_Count
 FROM [{safeStudTable}] STUD
-INNER JOIN [{safeQualTable}] QUAL
-    ON STUD.[{safeQualCodeColumn}] = QUAL.[{safeQualCodeColumn}]
+INNER JOIN [{safeQualTable}] QUAL ON STUD.[{safeQualCodeColumn}] = QUAL.[{safeQualCodeColumn}]{countJoin}
 WHERE ISNULL(CAST(STUD.[{safeFulfilledColumn}] AS nvarchar(255)), '') = '{fulfilledValue}'
   AND ISNULL(CAST(QUAL.[{safeQualTypeColumn}] AS nvarchar(255)), '') IN ({mdTypeSql})
 GROUP BY QUAL.[{safeQualTypeColumn}]
 ORDER BY Record_Count DESC, Qualification_Type ASC;
 
--- STEP 3: RETURN THE FULL RULE 19 POPULATION
+-- STEP 3: FULL RULE 19 POPULATION WITH LINK CHECKS AND PQM VALIDATION
 SELECT
     'Control_1' AS Control_Type,
     'Masters/PhD Students' AS Control_Description,
     ROW_NUMBER() OVER (ORDER BY STUD.[{safeQualCodeColumn}] ASC) AS Sample_Number,
-    ISNULL(CAST(STUD.[{safeQualCodeColumn}] AS nvarchar(255)), '') AS STUD_Qual_Code_001,
-    ISNULL(CAST(QUAL.[{safeQualCodeColumn}] AS nvarchar(255)), '') AS QUAL_Qual_Code_001,
-    ISNULL(CAST(STUD.[{safeFulfilledColumn}] AS nvarchar(255)), '') AS STUD_Fulfilled_025,
-    ISNULL(CAST(QUAL.[{safeQualTypeColumn}] AS nvarchar(255)), '') AS QUAL_Type_005,
-    ISNULL(CAST(QUAL.[{safeQualNameColumn}] AS nvarchar(500)), '') AS QUAL_Name_003,
-    CASE
-        WHEN ISNULL(CAST(STUD.[{safeQualCodeColumn}] AS nvarchar(255)), '') = ISNULL(CAST(QUAL.[{safeQualCodeColumn}] AS nvarchar(255)), '')
-        THEN 'MATCH'
-        ELSE 'NO MATCH'
-    END AS STUD_QUAL_Link,
-    {(hasPqm
-        ? $@"CASE
-        WHEN EXISTS (
-            SELECT 1 FROM [{safePqmTable}] PQM
-            WHERE UPPER(LTRIM(RTRIM(CAST(PQM.[{safePqmName}] AS nvarchar(500))))) = UPPER(LTRIM(RTRIM(CAST(QUAL.[{safeQualNameColumn}] AS nvarchar(500)))))
-              AND UPPER(LTRIM(RTRIM(CAST(PQM.[{safePqmType}] AS nvarchar(255))))) = UPPER(LTRIM(RTRIM(CAST(QUAL.[{safeQualTypeColumn}] AS nvarchar(255)))))
-        ) THEN 'PASS'
-        ELSE 'FAIL'
-    END AS Validation_Result"
-        : "'PASS' AS Validation_Result")}
+    ISNULL(CAST(STUD.[{safeQualCodeColumn}] AS nvarchar(255)), '') AS Student_Qualification_Code,
+    ISNULL(CAST(STUD.[_007] AS nvarchar(255)), '') AS Student_Number,
+    ISNULL(CAST(STUD.[_008] AS nvarchar(255)), '') AS South_African_ID_Number,
+    ISNULL(CAST(STUD.[_010] AS nvarchar(255)), '') AS Entrance_Category,
+    ISNULL(CAST(STUD.[_011] AS nvarchar(255)), '') AS Date_Of_Birth,
+    ISNULL(CAST(STUD.[_012] AS nvarchar(255)), '') AS Gender,
+    ISNULL(CAST(STUD.[_013] AS nvarchar(255)), '') AS Race,
+    ISNULL(CAST(STUD.[_014] AS nvarchar(255)), '') AS Nationality,
+    ISNULL(CAST(STUD.[_019] AS nvarchar(255)), '') AS NSFAS_Status,
+    ISNULL(CAST(STUD.[_021] AS nvarchar(255)), '') AS Previous_Years_Activity,
+    ISNULL(CAST(STUD.[_024] AS nvarchar(255)), '') AS Attendance_Mode,
+    ISNULL(CAST(STUD.[{safeFulfilledColumn}] AS nvarchar(255)), '') AS Qualification_Fulfilled_Indicator,
+    ISNULL(CAST(STUD.[_066] AS nvarchar(500)), '') AS Student_Last_Name,
+    ISNULL(CAST(STUD.[_067] AS nvarchar(500)), '') AS Student_First_Name,
+    ISNULL(CAST(STUD.[_068] AS nvarchar(500)), '') AS Student_Middle_Name,
+    ISNULL(CAST(STUD.[_073] AS nvarchar(255)), '') AS Percentage_Research_Curriculum,
+    ISNULL(CAST(QUAL.[{safeQualCodeColumn}] AS nvarchar(255)), '') AS QUAL_Qualification_Code,
+    ISNULL(CAST(QUAL.[{safeQualNameColumn}] AS nvarchar(500)), '') AS Qualification_Name,
+    ISNULL(CAST(QUAL.[{safeQualTypeColumn}] AS nvarchar(255)), '') AS Qualification_Type,{credCrseSelectSql}{pqmSelectSql}
+    CASE WHEN ISNULL(CAST(STUD.[{safeQualCodeColumn}] AS nvarchar(255)),'') = ISNULL(CAST(QUAL.[{safeQualCodeColumn}] AS nvarchar(255)),'') THEN 'MATCH' ELSE 'NO MATCH' END AS STUD_QUAL_Link_Check,{credCrseLinkCheckSql}
+    CASE WHEN ISNULL(CAST(STUD.[{safeFulfilledColumn}] AS nvarchar(255)),'') = '{fulfilledValue}'
+         AND ISNULL(CAST(QUAL.[{safeQualTypeColumn}] AS nvarchar(255)),'') IN ({mdTypeSql})
+         THEN 'PASS' ELSE 'FAIL' END AS Rule19_Filter_Check,
+    {pqmValidationSql}
 FROM [{safeStudTable}] STUD
-INNER JOIN [{safeQualTable}] QUAL
-    ON STUD.[{safeQualCodeColumn}] = QUAL.[{safeQualCodeColumn}]
+INNER JOIN [{safeQualTable}] QUAL ON STUD.[{safeQualCodeColumn}] = QUAL.[{safeQualCodeColumn}]{credCrseJoinSql}{pqmJoinSql}
 WHERE ISNULL(CAST(STUD.[{safeFulfilledColumn}] AS nvarchar(255)), '') = '{fulfilledValue}'
   AND ISNULL(CAST(QUAL.[{safeQualTypeColumn}] AS nvarchar(255)), '') IN ({mdTypeSql})
 ORDER BY STUD.[{safeQualCodeColumn}] ASC;";
@@ -684,43 +748,35 @@ ORDER BY STUD.[{safeQualCodeColumn}] ASC;";
             var safeFulfilledColumn = Sanitise(request.FulfilledColumn);
             var safeQualTypeColumn = Sanitise(request.QualTypeColumn);
             var mdTypes = ParseMdTypes(request.MdTypesText);
-            var configuredMdTypes = mdTypes
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList();
+            var configuredMdTypes = mdTypes.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
 
-            // Load PQM for name+type matching
-            var pqm = new List<(string? Name, string? Type)>();
-            if (!string.IsNullOrWhiteSpace(request.PqmTable) &&
-                !string.IsNullOrWhiteSpace(request.PqmQualNameColumn) &&
-                !string.IsNullOrWhiteSpace(request.PqmQualTypeColumn))
-            {
-                var pt  = Sanitise(request.PqmTable);
-                var pn  = Sanitise(request.PqmQualNameColumn);
-                var pht = Sanitise(request.PqmQualTypeColumn);
-                await using var pqmCmd = conn.CreateConfiguredCommand();
-                pqmCmd.CommandText = $"SELECT [{pn}], [{pht}] FROM [{pt}]";
-                await using var pqmR = await pqmCmd.ExecuteReaderAsync();
-                while (await pqmR.ReadAsync())
-                    pqm.Add((pqmR.IsDBNull(0) ? null : pqmR.GetValue(0)?.ToString(),
-                             pqmR.IsDBNull(1) ? null : pqmR.GetValue(1)?.ToString()));
-            }
+            var hasCredCrse = !string.IsNullOrWhiteSpace(request.CredTable) &&
+                              !string.IsNullOrWhiteSpace(request.CrseTable);
+            var safeCredTable = hasCredCrse ? Sanitise(request.CredTable) : "";
+            var safeCredJoinCol = hasCredCrse ? Sanitise(string.IsNullOrWhiteSpace(request.CredJoinCol) ? "_001" : request.CredJoinCol) : "_001";
+            var safeCredCourseCol = hasCredCrse ? Sanitise(string.IsNullOrWhiteSpace(request.CredCourseCol) ? "_030" : request.CredCourseCol) : "_030";
+            var safeCrseTable = hasCredCrse ? Sanitise(request.CrseTable) : "";
+            var safeCrseCourseCol = hasCredCrse ? Sanitise(string.IsNullOrWhiteSpace(request.CrseCourseCol) ? "_030" : request.CrseCourseCol) : "_030";
 
             var studRecordCount = await CountAsync(conn, $"SELECT COUNT(*) FROM [{safeStudTable}];");
             var qualRecordCount = await CountAsync(conn, $"SELECT COUNT(*) FROM [{safeQualTable}];");
+            var credRecordCount = hasCredCrse ? await CountAsync(conn, $"SELECT COUNT(*) FROM [{safeCredTable}];") : 0;
+            var crseRecordCount = hasCredCrse ? await CountAsync(conn, $"SELECT COUNT(*) FROM [{safeCrseTable}];") : 0;
 
             await using var countCommand = conn.CreateConfiguredCommand();
             var filterPredicate = BuildEligiblePredicate(
-                countCommand,
-                safeQualCodeColumn,
-                safeFulfilledColumn,
-                safeQualTypeColumn,
-                request.FulfilledValue,
-                configuredMdTypes);
+                countCommand, safeQualCodeColumn, safeFulfilledColumn, safeQualTypeColumn,
+                request.FulfilledValue, configuredMdTypes);
+
+            var credCrseJoin = hasCredCrse
+                ? $@"
+INNER JOIN [{safeCredTable}] CRED ON STUD.[{safeQualCodeColumn}] = CRED.[{safeCredJoinCol}]
+INNER JOIN [{safeCrseTable}] CRSE ON CRED.[{safeCredCourseCol}] = CRSE.[{safeCrseCourseCol}]"
+                : "";
             countCommand.CommandText = $@"
 SELECT COUNT(*)
 FROM [{safeStudTable}] STUD
-INNER JOIN [{safeQualTable}] QUAL
-    ON STUD.[{safeQualCodeColumn}] = QUAL.[{safeQualCodeColumn}]
+INNER JOIN [{safeQualTable}] QUAL ON STUD.[{safeQualCodeColumn}] = QUAL.[{safeQualCodeColumn}]{credCrseJoin}
 WHERE {filterPredicate};";
             var eligibleCount = Convert.ToInt32(await countCommand.ExecuteScalarAsync());
 
@@ -728,19 +784,14 @@ WHERE {filterPredicate};";
             await using (var breakdownCommand = conn.CreateConfiguredCommand())
             {
                 var breakdownPredicate = BuildEligiblePredicate(
-                    breakdownCommand,
-                    safeQualCodeColumn,
-                    safeFulfilledColumn,
-                    safeQualTypeColumn,
-                    request.FulfilledValue,
-                    configuredMdTypes);
+                    breakdownCommand, safeQualCodeColumn, safeFulfilledColumn, safeQualTypeColumn,
+                    request.FulfilledValue, configuredMdTypes);
                 breakdownCommand.CommandText = $@"
 SELECT
     ISNULL(CAST(QUAL.[{safeQualTypeColumn}] AS nvarchar(255)), '') AS QualificationType,
     COUNT(*) AS RecordCount
 FROM [{safeStudTable}] STUD
-INNER JOIN [{safeQualTable}] QUAL
-    ON STUD.[{safeQualCodeColumn}] = QUAL.[{safeQualCodeColumn}]
+INNER JOIN [{safeQualTable}] QUAL ON STUD.[{safeQualCodeColumn}] = QUAL.[{safeQualCodeColumn}]{credCrseJoin}
 WHERE {breakdownPredicate}
 GROUP BY QUAL.[{safeQualTypeColumn}]
 ORDER BY COUNT(*) DESC, QualificationType ASC;";
@@ -756,35 +807,35 @@ ORDER BY COUNT(*) DESC, QualificationType ASC;";
                 }
             }
 
-            var safeQualNameColumn = Sanitise(string.IsNullOrWhiteSpace(request.QualNameColumn) ? "_003" : request.QualNameColumn);
             var rows = eligibleCount > 0
-                ? await LoadPopulationRowsAsync(
-                    conn,
-                    safeStudTable,
-                    safeQualTable,
-                    safeQualCodeColumn,
-                    safeFulfilledColumn,
-                    safeQualTypeColumn,
-                    safeQualNameColumn,
-                    request.FulfilledValue,
-                    configuredMdTypes,
-                    pqm)
+                ? await LoadPopulationRowsAsync(conn, request, configuredMdTypes,
+                    safeStudTable, safeQualTable, safeQualCodeColumn, safeFulfilledColumn, safeQualTypeColumn,
+                    hasCredCrse, safeCredTable, safeCredJoinCol, safeCredCourseCol, safeCrseTable, safeCrseCourseCol)
                 : new List<Rule19ValidationRowRecord>();
 
-            var passCount = pqm.Count > 0 ? rows.Count(r => r.ValidationResult == "PASS") : eligibleCount;
-            var failCount = pqm.Count > 0 ? rows.Count(r => r.ValidationResult == "FAIL") : 0;
-            var status = pqm.Count > 0
+            var hasPqm = !string.IsNullOrWhiteSpace(request.PqmTable) &&
+                         !string.IsNullOrWhiteSpace(request.PqmQualNameColumn) &&
+                         !string.IsNullOrWhiteSpace(request.PqmQualTypeColumn);
+            var passCount = hasPqm ? rows.Count(r => r.ValidationResult == "PASS") : eligibleCount;
+            var failCount = hasPqm ? rows.Count(r => r.ValidationResult == "FAIL") : 0;
+            var status = hasPqm
                 ? (passCount == eligibleCount ? "PASS" : (eligibleCount > 0 ? "FAIL" : "NO MATCHING DATA"))
                 : (eligibleCount > 0 ? "COMPLETE" : "NO MATCHING DATA");
-            var exceptionRate = pqm.Count > 0
+            var exceptionRate = hasPqm
                 ? (eligibleCount > 0 ? Math.Round((decimal)failCount / eligibleCount * 100, 2) : 0m)
-                : (eligibleCount > 0 ? 100m : 0m);
+                : 0m;
+
+            var linkageText = hasCredCrse
+                ? $"{request.StudTable}.{request.QualCodeColumn} -> {request.QualTable}.{request.QualCodeColumn} | {request.StudTable}.{request.QualCodeColumn} -> {request.CredTable}.{request.CredJoinCol} | {request.CredTable}.{request.CredCourseCol} -> {request.CrseTable}.{request.CrseCourseCol}"
+                : $"{request.StudTable}.{request.QualCodeColumn} -> {request.QualTable}.{request.QualCodeColumn}";
 
             return new Rule19ValidationSummary
             {
                 Success = true,
                 StudRecordCount = studRecordCount,
                 QualRecordCount = qualRecordCount,
+                CredRecordCount = credRecordCount,
+                CrseRecordCount = crseRecordCount,
                 TotalValidated = eligibleCount,
                 MatchingCount = eligibleCount,
                 DisplayedCount = rows.Count,
@@ -806,7 +857,12 @@ ORDER BY COUNT(*) DESC, QualificationType ASC;";
                 PqmTable = request.PqmTable,
                 PqmQualNameColumn = request.PqmQualNameColumn,
                 PqmQualTypeColumn = request.PqmQualTypeColumn,
-                TableLinkageText = $"{request.StudTable}.{request.QualCodeColumn} -> {request.QualTable}.{request.QualCodeColumn}",
+                CredTable = request.CredTable,
+                CredJoinCol = request.CredJoinCol,
+                CredCourseCol = request.CredCourseCol,
+                CrseTable = request.CrseTable,
+                CrseCourseCol = request.CrseCourseCol,
+                TableLinkageText = linkageText,
                 ProcedureSteps = BuildProcedureSteps(request),
                 ShowAllRecords = true,
                 ClientId = request.ClientId,
@@ -855,9 +911,8 @@ SELECT CAST(SCOPE_IDENTITY() AS int);";
             command.Parameters.AddWithValue("@QualTable", request.QualTable);
             command.Parameters.AddWithValue("@QualCodeColumn", request.QualCodeColumn);
             command.Parameters.AddWithValue("@FulfilledColumn", request.FulfilledColumn);
-            var persistedSummary = CreateBrowserPreview(summary);
             command.Parameters.AddWithValue("@ExceptionsJSON", ValidationPayloadCodec.Encode("[]"));
-            command.Parameters.AddWithValue("@ResultsJSON", ValidationPayloadCodec.Encode(JsonConvert.SerializeObject(persistedSummary)));
+            command.Parameters.AddWithValue("@ResultsJSON", ValidationPayloadCodec.Encode(JsonConvert.SerializeObject(summary)));
             command.Parameters.AddWithValue("@RunByUserName", (object?)(userName ?? userEmail) ?? DBNull.Value);
             command.Parameters.AddWithValue("@PreviousHash", (object?)previousHash ?? DBNull.Value);
             var runId = Convert.ToInt32(await command.ExecuteScalarAsync());
@@ -891,20 +946,34 @@ WHERE RunID = @RunID;";
                 PqmTable = request.PqmTable,
                 PqmQualNameColumn = request.PqmQualNameColumn,
                 PqmQualTypeColumn = request.PqmQualTypeColumn,
+                CredTable = request.CredTable,
+                CredJoinCol = request.CredJoinCol,
+                CredCourseCol = request.CredCourseCol,
+                CrseTable = request.CrseTable,
+                CrseCourseCol = request.CrseCourseCol,
                 ShowAllRecords = true
             };
 
-        private static List<string> BuildProcedureSteps(Rule19ValidationRequest request) =>
-        [
-            $"Load 100% of {request.StudTable} and {request.QualTable}.",
-            $"Link {request.StudTable}.{request.QualCodeColumn} to {request.QualTable}.{request.QualCodeColumn}.",
-            $"Keep rows where {request.StudTable}.{request.FulfilledColumn} = '{request.FulfilledValue}'.",
-            $"Keep rows where {request.QualTable}.{request.QualTypeColumn} is in the configured Masters/Doctoral list.",
-            "Return the full linked population as PASS rows for review and export.",
-            string.IsNullOrWhiteSpace(request.PqmTable)
-                ? "No PQM table configured — all qualifying population rows are PASS."
-                : $"Match QUAL.{request.QualNameColumn} → PQM.{request.PqmQualNameColumn} AND QUAL.{request.QualTypeColumn} → PQM.{request.PqmQualTypeColumn} (PASS if both match on same PQM row)."
-        ];
+        private static List<string> BuildProcedureSteps(Rule19ValidationRequest request)
+        {
+            var steps = new List<string>
+            {
+                $"Load 100% of {request.StudTable} and {request.QualTable}.",
+                $"Link {request.StudTable}.{request.QualCodeColumn} to {request.QualTable}.{request.QualCodeColumn}."
+            };
+            if (!string.IsNullOrWhiteSpace(request.CredTable) && !string.IsNullOrWhiteSpace(request.CrseTable))
+            {
+                steps.Add($"Link {request.StudTable}.{request.QualCodeColumn} to {request.CredTable}.{request.CredJoinCol}.");
+                steps.Add($"Link {request.CredTable}.{request.CredCourseCol} to {request.CrseTable}.{request.CrseCourseCol}.");
+            }
+            steps.Add($"Keep rows where {request.StudTable}.{request.FulfilledColumn} = '{request.FulfilledValue}'.");
+            steps.Add($"Keep rows where {request.QualTable}.{request.QualTypeColumn} is in the configured Masters/Doctoral list.");
+            steps.Add("Return the full linked population with link checks and filter checks.");
+            steps.Add(string.IsNullOrWhiteSpace(request.PqmTable)
+                ? "No PQM table configured — PQM_Validation_Result defaults to PASS."
+                : $"LEFT JOIN PQM: QUAL.{request.QualNameColumn} = PQM.{request.PqmQualNameColumn} AND QUAL.{request.QualTypeColumn} = PQM.{request.PqmQualTypeColumn} (PASS if matched).");
+            return steps;
+        }
 
         private static List<string> ParseMdTypes(string? text)
         {
@@ -947,43 +1016,94 @@ WHERE RunID = @RunID;";
 
         private async Task<List<Rule19ValidationRowRecord>> LoadPopulationRowsAsync(
             SqlConnection conn,
-            string safeStudTable,
-            string safeQualTable,
-            string safeQualCodeColumn,
-            string safeFulfilledColumn,
-            string safeQualTypeColumn,
-            string safeQualNameColumn,
-            string fulfilledValue,
+            Rule19ValidationRequest request,
             IReadOnlyList<string> configuredMdTypes,
-            IReadOnlyList<(string? Name, string? Type)> pqm)
+            string safeStudTable, string safeQualTable, string safeQualCodeColumn,
+            string safeFulfilledColumn, string safeQualTypeColumn,
+            bool hasCredCrse,
+            string safeCredTable, string safeCredJoinCol, string safeCredCourseCol,
+            string safeCrseTable, string safeCrseCourseCol)
         {
+            var safeQualNameColumn = Sanitise(string.IsNullOrWhiteSpace(request.QualNameColumn) ? "_003" : request.QualNameColumn);
+            var hasPqm = !string.IsNullOrWhiteSpace(request.PqmTable) &&
+                         !string.IsNullOrWhiteSpace(request.PqmQualNameColumn) &&
+                         !string.IsNullOrWhiteSpace(request.PqmQualTypeColumn);
+            var safePqmTable = hasPqm ? Sanitise(request.PqmTable) : "";
+            var safePqmNameCol = hasPqm ? Sanitise(request.PqmQualNameColumn) : "";
+            var safePqmTypeCol = hasPqm ? Sanitise(request.PqmQualTypeColumn) : "";
+
             await using var dataCommand = conn.CreateConfiguredCommand();
             var dataPredicate = BuildEligiblePredicate(
-                dataCommand,
-                safeQualCodeColumn,
-                safeFulfilledColumn,
-                safeQualTypeColumn,
-                fulfilledValue,
-                configuredMdTypes);
+                dataCommand, safeQualCodeColumn, safeFulfilledColumn, safeQualTypeColumn,
+                request.FulfilledValue, configuredMdTypes);
+
+            var credCrseJoinSql = hasCredCrse
+                ? $@"
+INNER JOIN [{safeCredTable}] CRED ON STUD.[{safeQualCodeColumn}] = CRED.[{safeCredJoinCol}]
+INNER JOIN [{safeCrseTable}] CRSE ON CRED.[{safeCredCourseCol}] = CRSE.[{safeCrseCourseCol}]"
+                : "";
+
+            var pqmJoinSql = hasPqm
+                ? $@"
+LEFT JOIN [{safePqmTable}] PQM
+    ON UPPER(LTRIM(RTRIM(CAST(QUAL.[{safeQualNameColumn}] AS nvarchar(500))))) = UPPER(LTRIM(RTRIM(CAST(PQM.[{safePqmNameCol}] AS nvarchar(500)))))
+    AND UPPER(LTRIM(RTRIM(CAST(QUAL.[{safeQualTypeColumn}] AS nvarchar(255))))) = UPPER(LTRIM(RTRIM(CAST(PQM.[{safePqmTypeCol}] AS nvarchar(255)))))"
+                : "";
+
+            var credCrseSelectSql = hasCredCrse
+                ? $@"
+    ISNULL(CAST(CRED.[{safeCredJoinCol}] AS nvarchar(255)), '') AS CRED_Qualification_Code,
+    ISNULL(CAST(CRED.[{safeCredCourseCol}] AS nvarchar(255)), '') AS CRED_Course_Code,
+    ISNULL(CAST(CRSE.[{safeCrseCourseCol}] AS nvarchar(255)), '') AS CRSE_Course_Code,
+    ISNULL(CAST(CRSE.[_058] AS nvarchar(500)), '') AS Course_Name,
+    ISNULL(CAST(CRSE.[_091] AS nvarchar(255)), '') AS Foundation_Course_Indicator,"
+                : "";
+
+            var pqmSelectSql = hasPqm
+                ? $@"
+    ISNULL(CAST(PQM.[{safePqmNameCol}] AS nvarchar(500)), '') AS PQM_Qualification_Name,
+    ISNULL(CAST(PQM.[{safePqmTypeCol}] AS nvarchar(255)), '') AS PQM_Qualification_Type,"
+                : "";
+
+            var credCrseLinkCheckSql = hasCredCrse
+                ? $@"
+    CASE WHEN ISNULL(CAST(STUD.[{safeQualCodeColumn}] AS nvarchar(255)),'') = ISNULL(CAST(CRED.[{safeCredJoinCol}] AS nvarchar(255)),'') THEN 'MATCH' ELSE 'NO MATCH' END AS STUD_CRED_Link_Check,
+    CASE WHEN ISNULL(CAST(CRED.[{safeCredCourseCol}] AS nvarchar(255)),'') = ISNULL(CAST(CRSE.[{safeCrseCourseCol}] AS nvarchar(255)),'') THEN 'MATCH' ELSE 'NO MATCH' END AS CRED_CRSE_Link_Check,"
+                : "";
+
+            var pqmValidationSql = hasPqm
+                ? $"CASE WHEN PQM.[{safePqmNameCol}] IS NOT NULL AND LTRIM(RTRIM(CAST(PQM.[{safePqmNameCol}] AS nvarchar(500)))) <> '' THEN 'PASS' ELSE 'FAIL' END AS PQM_Validation_Result"
+                : "'PASS' AS PQM_Validation_Result";
+
             dataCommand.CommandText = $@"
 SELECT
     'Control_1' AS Control_Type,
     'Masters/PhD Students' AS Control_Description,
     ROW_NUMBER() OVER (ORDER BY STUD.[{safeQualCodeColumn}] ASC) AS Sample_Number,
-    ISNULL(CAST(STUD.[{safeQualCodeColumn}] AS nvarchar(255)), '') AS STUD_Qual_Code_001,
-    ISNULL(CAST(QUAL.[{safeQualCodeColumn}] AS nvarchar(255)), '') AS QUAL_Qual_Code_001,
-    ISNULL(CAST(STUD.[{safeFulfilledColumn}] AS nvarchar(255)), '') AS STUD_Fulfilled_025,
-    ISNULL(CAST(QUAL.[{safeQualTypeColumn}] AS nvarchar(255)), '') AS QUAL_Type_005,
-    ISNULL(CAST(QUAL.[{safeQualNameColumn}] AS nvarchar(500)), '') AS QUAL_Name_003,
-    CASE
-        WHEN ISNULL(CAST(STUD.[{safeQualCodeColumn}] AS nvarchar(255)), '') = ISNULL(CAST(QUAL.[{safeQualCodeColumn}] AS nvarchar(255)), '')
-        THEN 'MATCH'
-        ELSE 'NO MATCH'
-    END AS STUD_QUAL_Link,
-    'PASS' AS Validation_Result
+    ISNULL(CAST(STUD.[{safeQualCodeColumn}] AS nvarchar(255)), '') AS Student_Qualification_Code,
+    ISNULL(CAST(STUD.[_007] AS nvarchar(255)), '') AS Student_Number,
+    ISNULL(CAST(STUD.[_008] AS nvarchar(255)), '') AS South_African_ID_Number,
+    ISNULL(CAST(STUD.[_010] AS nvarchar(255)), '') AS Entrance_Category,
+    ISNULL(CAST(STUD.[_011] AS nvarchar(255)), '') AS Date_Of_Birth,
+    ISNULL(CAST(STUD.[_012] AS nvarchar(255)), '') AS Gender,
+    ISNULL(CAST(STUD.[_013] AS nvarchar(255)), '') AS Race,
+    ISNULL(CAST(STUD.[_014] AS nvarchar(255)), '') AS Nationality,
+    ISNULL(CAST(STUD.[_019] AS nvarchar(255)), '') AS NSFAS_Status,
+    ISNULL(CAST(STUD.[_021] AS nvarchar(255)), '') AS Previous_Years_Activity,
+    ISNULL(CAST(STUD.[_024] AS nvarchar(255)), '') AS Attendance_Mode,
+    ISNULL(CAST(STUD.[{safeFulfilledColumn}] AS nvarchar(255)), '') AS Qualification_Fulfilled_Indicator,
+    ISNULL(CAST(STUD.[_066] AS nvarchar(500)), '') AS Student_Last_Name,
+    ISNULL(CAST(STUD.[_067] AS nvarchar(500)), '') AS Student_First_Name,
+    ISNULL(CAST(STUD.[_068] AS nvarchar(500)), '') AS Student_Middle_Name,
+    ISNULL(CAST(STUD.[_073] AS nvarchar(255)), '') AS Percentage_Research_Curriculum,
+    ISNULL(CAST(QUAL.[{safeQualCodeColumn}] AS nvarchar(255)), '') AS QUAL_Qualification_Code,
+    ISNULL(CAST(QUAL.[{safeQualNameColumn}] AS nvarchar(500)), '') AS Qualification_Name,
+    ISNULL(CAST(QUAL.[{safeQualTypeColumn}] AS nvarchar(255)), '') AS Qualification_Type,{credCrseSelectSql}{pqmSelectSql}
+    CASE WHEN ISNULL(CAST(STUD.[{safeQualCodeColumn}] AS nvarchar(255)),'') = ISNULL(CAST(QUAL.[{safeQualCodeColumn}] AS nvarchar(255)),'') THEN 'MATCH' ELSE 'NO MATCH' END AS STUD_QUAL_Link_Check,{credCrseLinkCheckSql}
+    CASE WHEN ISNULL(CAST(STUD.[{safeFulfilledColumn}] AS nvarchar(255)),'') = @FulfilledValue AND ({BuildMdTypeInlinePredicate(configuredMdTypes, safeQualTypeColumn)}) THEN 'PASS' ELSE 'FAIL' END AS Rule19_Filter_Check,
+    {pqmValidationSql}
 FROM [{safeStudTable}] STUD
-INNER JOIN [{safeQualTable}] QUAL
-    ON STUD.[{safeQualCodeColumn}] = QUAL.[{safeQualCodeColumn}]
+INNER JOIN [{safeQualTable}] QUAL ON STUD.[{safeQualCodeColumn}] = QUAL.[{safeQualCodeColumn}]{credCrseJoinSql}{pqmJoinSql}
 WHERE {dataPredicate}
 ORDER BY STUD.[{safeQualCodeColumn}] ASC;";
 
@@ -1001,50 +1121,15 @@ ORDER BY STUD.[{safeQualCodeColumn}] ASC;";
                         : Convert.ToString(reader.GetValue(i), CultureInfo.InvariantCulture);
                 }
 
-                displayValues.TryGetValue("STUD_Qual_Code_001", out var qualCodeValue);
-                displayValues.TryGetValue("STUD_Fulfilled_025", out var fulfilledColumnValue);
-                displayValues.TryGetValue("QUAL_Type_005", out var qualTypeValue);
-                displayValues.TryGetValue("Validation_Result", out var validationResult);
+                displayValues.TryGetValue("Student_Qualification_Code", out var qualCodeValue);
+                displayValues.TryGetValue("Qualification_Fulfilled_Indicator", out var fulfilledColumnValue);
+                displayValues.TryGetValue("Qualification_Type", out var qualTypeValue);
+                displayValues.TryGetValue("PQM_Validation_Result", out var validationResult);
 
-                // PQM matching
-                string? pqmName = null;
-                string? pqmType = null;
-                bool pqmNameMatch = false;
-                bool pqmTypeMatch = false;
-                string pqmResult = "PASS";
-
-                if (pqm.Count > 0)
-                {
-                    displayValues.TryGetValue("QUAL_Name_003", out var qualName003);
-                    var nameNorm = (qualName003 ?? "").Trim().ToUpperInvariant();
-                    var typeNorm = (qualTypeValue ?? "").Trim().ToUpperInvariant();
-
-                    var tripleMatch = pqm.FirstOrDefault(p =>
-                        string.Equals((p.Name ?? "").Trim().ToUpperInvariant(), nameNorm, StringComparison.Ordinal) &&
-                        string.Equals((p.Type ?? "").Trim().ToUpperInvariant(), typeNorm, StringComparison.Ordinal));
-
-                    if (tripleMatch != default)
-                    {
-                        pqmName = tripleMatch.Name?.Trim();
-                        pqmType = tripleMatch.Type?.Trim();
-                        pqmNameMatch = true;
-                        pqmTypeMatch = true;
-                        pqmResult = "PASS";
-                    }
-                    else
-                    {
-                        var nameOnlyMatch = pqm.FirstOrDefault(p =>
-                            string.Equals((p.Name ?? "").Trim().ToUpperInvariant(), nameNorm, StringComparison.Ordinal));
-                        if (nameOnlyMatch != default)
-                        {
-                            pqmName = nameOnlyMatch.Name?.Trim();
-                            pqmType = nameOnlyMatch.Type?.Trim();
-                            pqmNameMatch = true;
-                            pqmTypeMatch = false;
-                        }
-                        pqmResult = "FAIL";
-                    }
-                }
+                var pqmName = displayValues.TryGetValue("PQM_Qualification_Name", out var pn) ? pn : null;
+                var pqmType = displayValues.TryGetValue("PQM_Qualification_Type", out var pt) ? pt : null;
+                var pqmNameMatch = !string.IsNullOrWhiteSpace(pqmName);
+                var pqmTypeMatch = !string.IsNullOrWhiteSpace(pqmType);
 
                 rows.Add(new Rule19ValidationRowRecord
                 {
@@ -1052,9 +1137,9 @@ ORDER BY STUD.[{safeQualCodeColumn}] ASC;";
                     QualCodeValue = qualCodeValue ?? "",
                     FulfilledValue = fulfilledColumnValue ?? "",
                     QualTypeValue = qualTypeValue ?? "",
-                    ValidationResult = pqm.Count > 0 ? pqmResult : (validationResult ?? "PASS"),
-                    PqmQualName = pqmName,
-                    PqmQualType = pqmType,
+                    ValidationResult = validationResult ?? "PASS",
+                    PqmQualName = pqmNameMatch ? pqmName : null,
+                    PqmQualType = pqmTypeMatch ? pqmType : null,
                     PqmNameMatch = pqmNameMatch,
                     PqmTypeMatch = pqmTypeMatch,
                     DisplayValues = displayValues
@@ -1062,6 +1147,14 @@ ORDER BY STUD.[{safeQualCodeColumn}] ASC;";
             }
 
             return rows;
+        }
+
+        private static string BuildMdTypeInlinePredicate(IReadOnlyList<string> mdTypes, string safeQualTypeColumn)
+        {
+            if (mdTypes.Count == 0)
+                return "1=0";
+            var parts = mdTypes.Select(t => $"ISNULL(CAST(QUAL.[{safeQualTypeColumn}] AS nvarchar(255)),'') = '{t.Replace("'", "''")}'");
+            return string.Join(" OR ", parts);
         }
 
         private static Rule19ValidationSummary CreateBrowserPreview(Rule19ValidationSummary summary)
@@ -1104,6 +1197,13 @@ ORDER BY STUD.[{safeQualCodeColumn}] ASC;";
                 PqmTable = summary.PqmTable,
                 PqmQualNameColumn = summary.PqmQualNameColumn,
                 PqmQualTypeColumn = summary.PqmQualTypeColumn,
+                CredTable = summary.CredTable,
+                CredJoinCol = summary.CredJoinCol,
+                CredCourseCol = summary.CredCourseCol,
+                CrseTable = summary.CrseTable,
+                CrseCourseCol = summary.CrseCourseCol,
+                CredRecordCount = summary.CredRecordCount,
+                CrseRecordCount = summary.CrseRecordCount,
                 Breakdown = summary.Breakdown
                     .Select(item => new Rule19BreakdownItemViewModel
                     {
@@ -1180,7 +1280,16 @@ ORDER BY STUD.[{safeQualCodeColumn}] ASC;";
                     FulfilledColumn = summary.FulfilledColumn,
                     FulfilledValue = summary.FulfilledValue,
                     QualTypeColumn = summary.QualTypeColumn,
-                    MdTypesText = summary.MdTypesText
+                    MdTypesText = summary.MdTypesText,
+                    QualNameColumn = summary.QualNameColumn,
+                    PqmTable = summary.PqmTable,
+                    PqmQualNameColumn = summary.PqmQualNameColumn,
+                    PqmQualTypeColumn = summary.PqmQualTypeColumn,
+                    CredTable = summary.CredTable,
+                    CredJoinCol = summary.CredJoinCol,
+                    CredCourseCol = summary.CredCourseCol,
+                    CrseTable = summary.CrseTable,
+                    CrseCourseCol = summary.CrseCourseCol
                 });
 
                 expanded.Timestamp = string.IsNullOrWhiteSpace(summary.Timestamp) ? expanded.Timestamp : summary.Timestamp;

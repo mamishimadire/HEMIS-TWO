@@ -200,11 +200,15 @@ namespace HemisAudit.Services
                 await using var connection = new SqlConnection(BuildConnectionString(request.Server, request.Database, request.Driver));
                 await connection.OpenAsync();
 
+                var clientCount = request.UseClientCensusTable
+                    ? await ExecuteCountAsync(connection, $"SELECT COUNT_BIG(*) FROM [{Sanitise(clientTable)}];")
+                    : 0;
+
                 return new Rule65VerifyResult
                 {
                     Success = true,
                     CancellationCount = await ExecuteCountAsync(connection, $"SELECT COUNT_BIG(*) FROM [{Sanitise(cancellationTable)}];"),
-                    ClientCount = await ExecuteCountAsync(connection, $"SELECT COUNT_BIG(*) FROM [{Sanitise(clientTable)}];")
+                    ClientCount = clientCount
                 };
             }
             catch (Exception ex)
@@ -255,7 +259,7 @@ namespace HemisAudit.Services
 
         private async Task<Rule65ValidationSummary> AnalyseAsync(Rule65ValidationRequest request, Rule65ColumnMapping mapping)
         {
-            var sql = BuildValidationSql(request.CancellationTable, request.ClientTable, mapping);
+            var sql = BuildValidationSql(request.CancellationTable, request.ClientTable, mapping, request.UseClientCensusTable);
 
             await using var connection = new SqlConnection(BuildConnectionString(request.Server, request.Database, request.Driver));
             await connection.OpenAsync();
@@ -308,6 +312,7 @@ namespace HemisAudit.Services
                 Database = request.Database,
                 CancellationTable = request.CancellationTable,
                 ClientTable = request.ClientTable,
+                UseClientCensusTable = request.UseClientCensusTable,
                 ColumnMapping = mapping,
                 ClientId = request.ClientId,
                 TotalCount = totalCount,
@@ -325,14 +330,9 @@ namespace HemisAudit.Services
             return summary;
         }
 
-        private static string BuildValidationSql(string cancellationTable, string clientTable, Rule65ColumnMapping mapping)
+        private static string BuildValidationSql(string cancellationTable, string clientTable, Rule65ColumnMapping mapping, bool useClientCensus = true)
         {
-            return $@"
-SET NOCOUNT ON;
-
-IF OBJECT_ID('tempdb..#R65CurrentCensus') IS NOT NULL DROP TABLE #R65CurrentCensus;
-IF OBJECT_ID('tempdb..#R65Population')    IS NOT NULL DROP TABLE #R65Population;
-
+            var censusTempSetup = useClientCensus ? $@"
 SELECT DISTINCT
     TRY_CONVERT(date, [{mapping.CurrentCensusCol}]) AS CurrentCensusDate
 INTO #R65CurrentCensus
@@ -340,7 +340,16 @@ FROM [{Sanitise(clientTable)}] WITH (NOLOCK)
 WHERE TRY_CONVERT(date, [{mapping.CurrentCensusCol}]) IS NOT NULL;
 
 CREATE CLUSTERED INDEX IX_R65CurrentCensus ON #R65CurrentCensus(CurrentCensusDate);
+" : @"
+SELECT CAST(NULL AS date) AS CurrentCensusDate INTO #R65CurrentCensus WHERE 1 = 0;
+";
 
+            return $@"
+SET NOCOUNT ON;
+
+IF OBJECT_ID('tempdb..#R65CurrentCensus') IS NOT NULL DROP TABLE #R65CurrentCensus;
+IF OBJECT_ID('tempdb..#R65Population')    IS NOT NULL DROP TABLE #R65Population;
+{censusTempSetup}
 SELECT DISTINCT
     LTRIM(RTRIM(ISNULL(CONVERT(nvarchar(255), [{mapping.StudentNoCol}]), ''))) AS StudentNo,
     LTRIM(RTRIM(ISNULL(CONVERT(nvarchar(255), [{mapping.QualificationCol}]), ''))) AS Qualification,
@@ -433,7 +442,7 @@ ORDER BY
 --           : FAIL when CANCEL matches CURRENT_CENSUS in CENSUS_LIST_CLIENT
 --           : PASS when neither comparison matches
 -- ============================================================
-{BuildValidationSql(cancellationTable, clientTable, mapping)}";
+{BuildValidationSql(cancellationTable, clientTable, mapping, request.UseClientCensusTable)}";
         }
 
         private async Task<int> SaveValidationRunAsync(Rule65ValidationRequest request, Rule65ValidationSummary summary, string? userEmail, string? userName)
@@ -554,6 +563,7 @@ ORDER BY vr.RunTimestamp DESC, vr.RunID DESC;";
                 workspace.CurrentStatus = summary.Status;
                 workspace.CancellationTable = summary.CancellationTable;
                 workspace.ClientTable = summary.ClientTable;
+                workspace.UseClientCensusTable = summary.UseClientCensusTable;
                 workspace.ColumnMapping = summary.ColumnMapping;
             }
 
@@ -627,6 +637,7 @@ WHERE vr.RunID = @RunID AND vr.RuleNumber = 65;";
                 Database = summary.Database,
                 CancellationTable = summary.CancellationTable,
                 ClientTable = summary.ClientTable,
+                UseClientCensusTable = summary.UseClientCensusTable,
                 ColumnMapping = summary.ColumnMapping
             });
 

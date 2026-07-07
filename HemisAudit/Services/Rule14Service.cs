@@ -82,7 +82,7 @@ namespace HemisAudit.Services
             try
             {
                 ValidateRequest(request);
-                await EnsureColumnsExistAsync(request.Server, request.Database, request.Driver, request.StudTable, request.BridgeTable, request.CrseTable);
+                await EnsureColumnsExistAsync(request.Server, request.Database, request.Driver, request.StudTable, request.BridgeTable, request.CrseTable, request.CrseApprovedCol ?? "_031", request.CrseLinkCol ?? "_030", request.CregLinkCol ?? "_030");
 
                 var connStr = BuildConnectionString(request.Server, request.Database, request.Driver);
                 await using var conn = new SqlConnection(connStr);
@@ -95,7 +95,7 @@ namespace HemisAudit.Services
                 var bridgeCount = await CountAsync(conn, $"SELECT COUNT(*) FROM [{bridgeTable}];");
 
                 await using var command = conn.CreateConfiguredCommand();
-                command.CommandText = BuildPopulationCountSql(studTable, bridgeTable);
+                command.CommandText = BuildVerifyCountSql(studTable, bridgeTable);
                 await using var reader = await command.ExecuteReaderAsync();
 
                 var result = new Rule14VerifyResult
@@ -133,17 +133,15 @@ namespace HemisAudit.Services
             try
             {
                 ValidateRequest(request);
-                await EnsureColumnsExistAsync(request.Server, request.Database, request.Driver, request.StudTable, request.BridgeTable, request.CrseTable);
+                await EnsureColumnsExistAsync(request.Server, request.Database, request.Driver, request.StudTable, request.BridgeTable, request.CrseTable, request.CrseApprovedCol ?? "_031", request.CrseLinkCol ?? "_030", request.CregLinkCol ?? "_030");
 
-                var browserSummary = await AnalyseAsync(request, includeAllReviewRows: false);
+                // Run once with all rows — used for both save and browser preview
+                var browserSummary = await AnalyseAsync(request, includeAllReviewRows: true);
                 if (browserSummary.Success && request.ClientId > 0)
                 {
                     try
                     {
                         var summaryToPersist = CloneSummary(browserSummary);
-                        if (summaryToPersist.IsPreviewOnly || summaryToPersist.ReviewRows.Count < summaryToPersist.TotalValidated)
-                            summaryToPersist = await AnalyseAsync(request, includeAllReviewRows: true);
-
                         summaryToPersist.SavedRunId = null;
                         browserSummary.SavedRunId = await SaveValidationRunAsync(
                             CloneValidationRequest(request),
@@ -278,6 +276,10 @@ ORDER BY vr.RunTimestamp DESC, vr.RunID DESC;";
                 StudTable = studTable,
                 BridgeTable = bridgeTable,
                 CrseTable = crseTable,
+                CrseApprovedCol = deserializedSummary?.CrseApprovedCol ?? "_031",
+                CrseApprovedVal = deserializedSummary?.CrseApprovedVal ?? "A",
+                CrseLinkCol = deserializedSummary?.CrseLinkCol ?? "_030",
+                CregLinkCol = deserializedSummary?.CregLinkCol ?? "_030",
                 CurrentStatus = currentStatus,
                 LastEditedByUserName = lastEditedByUserName,
                 LastEditedAt = lastEditedAt,
@@ -629,54 +631,91 @@ END";
 
             var crseTable = Sanitise(request.StudTable);
             var cregTable = Sanitise(request.BridgeTable);
+            var aCol = Sanitise(request.CrseApprovedCol ?? "_031");
+            var aVal = request.CrseApprovedVal ?? "A";
+            var lCol = Sanitise(request.CrseLinkCol ?? "_030");
+            var rCol = Sanitise(request.CregLinkCol ?? "_030");
 
-            var sql = $@"-- HEMIS RULE 14: COURSE REGISTRATION VALIDATION
--- Linkage: [{crseTable}] -> [{cregTable}]
--- Rule: test 100% of approved courses where CRSE._031 = 'A'
--- PASS when a matching registration exists on CREG._030 = CRSE._030
+            var sql = $@"-- ============================================================================
+-- HEMIS RULE 14: COURSE REGISTRATION VALIDATION - 100% POPULATION
+-- ============================================================================
+-- Rule:
+--   Select 100% of approved courses where [{crseTable}].[{aCol}] = '{aVal}'
+--   Match CRSE.[{lCol}] to CREG.[{rCol}]
+--   PASS = approved course exists in [{cregTable}]
+--   FAIL = approved course does not exist in [{cregTable}]
+-- ============================================================================
 
-WITH ApprovedCourses AS
-(
-    SELECT DISTINCT
-        CAST(CRSE.[_030] AS nvarchar(255)) AS CRSE__030,
-        CAST(CRSE.[_031] AS nvarchar(255)) AS CRSE__031
-    FROM [{crseTable}] CRSE
-    WHERE ISNULL(CAST(CRSE.[_031] AS nvarchar(255)), '') = 'A'
-      AND CRSE.[_030] IS NOT NULL
-),
-RegisteredApprovedCourses AS
-(
-    SELECT Approved.*
-    FROM ApprovedCourses Approved
-    WHERE EXISTS
-    (
-        SELECT 1
-        FROM [{cregTable}] CREG
-        WHERE CAST(CREG.[_030] AS nvarchar(255)) = Approved.CRSE__030
-    )
-)
+IF OBJECT_ID('tempdb..#ApprovedCourses') IS NOT NULL DROP TABLE #ApprovedCourses;
+IF OBJECT_ID('tempdb..#Rule14_Result')   IS NOT NULL DROP TABLE #Rule14_Result;
+
+-- Step 1: Extract 100% approved course population
+SELECT DISTINCT
+    CAST(CRSE.[{lCol}]  AS NVARCHAR(255)) AS [Course_Code],
+    CAST(CRSE.[_065]    AS NVARCHAR(255)) AS [Filler1],
+    CAST(CRSE.[{aCol}]  AS NVARCHAR(255)) AS [Course_Approval_Status],
+    CAST(CRSE.[_033]    AS NVARCHAR(255)) AS [Course_CESM],
+    CAST(CRSE.[_034]    AS NVARCHAR(255)) AS [Course_Level_Code],
+    CAST(CRSE.[_059]    AS NVARCHAR(255)) AS [Contact_Only_Availability],
+    CAST(CRSE.[_060]    AS NVARCHAR(255)) AS [Distance_Only_Availability],
+    CAST(CRSE.[_061]    AS NVARCHAR(255)) AS [Mixed_Mode_Availability],
+    CAST(CRSE.[_062]    AS NVARCHAR(255)) AS [Experiential_Training_Indicator],
+    CAST(CRSE.[_058]    AS NVARCHAR(500)) AS [Course_Name],
+    CAST(CRSE.[_091]    AS NVARCHAR(255)) AS [Foundation_Course],
+    CAST(CRSE.[_092]    AS NVARCHAR(255)) AS [NQF_Level],
+    CAST(CRSE.[_093]    AS NVARCHAR(255)) AS [NQF_Credit]
+INTO #ApprovedCourses
+FROM [{crseTable}] CRSE
+WHERE UPPER(LTRIM(RTRIM(CAST(CRSE.[{aCol}] AS NVARCHAR(50))))) = '{aVal}'
+  AND CRSE.[{lCol}] IS NOT NULL;
+
+-- Step 2: Cross-match approved courses to course registration
 SELECT
-    'Control_1' AS Control_Type,
-    'CONTROL 1: CRSE._031 = ''A'' and CREG._030 = CRSE._030' AS Control_Label,
-    Approved.CRSE__030,
-    Approved.CRSE__031,
+    ROW_NUMBER() OVER (ORDER BY A.[Course_Code]) AS [Sample_Number],
+    'Control_1'                                   AS [Control_Type],
+    'CONTROL 1: CRSE.[{aCol}] = {aVal} and CREG.[{rCol}] = CRSE.[{lCol}]' AS [Control_Label],
+    A.[Course_Code],
+    A.[Course_Name],
+    A.[Course_Approval_Status],
+    A.[Course_CESM],
+    A.[Course_Level_Code],
+    A.[Contact_Only_Availability],
+    A.[Distance_Only_Availability],
+    A.[Mixed_Mode_Availability],
+    A.[Experiential_Training_Indicator],
+    A.[Foundation_Course],
+    A.[NQF_Level],
+    A.[NQF_Credit],
+    CREG.[{rCol}] AS [CREG_Course_Code],
     CASE
-        WHEN EXISTS
-        (
-            SELECT 1
-            FROM [{cregTable}] CREG
-            WHERE CAST(CREG.[_030] AS nvarchar(255)) = Approved.CRSE__030
-        )
-        THEN 'PASS'
+        WHEN CREG.[{rCol}] IS NOT NULL THEN 'PASS'
         ELSE 'FAIL'
-    END AS Validation_Result
-FROM ApprovedCourses Approved
-ORDER BY Approved.CRSE__030;
+    END AS [Validation_Result],
+    CASE
+        WHEN CREG.[{rCol}] IS NOT NULL
+            THEN 'Approved course found in [{cregTable}].'
+        ELSE 'Approved course not found in [{cregTable}].'
+    END AS [Validation_Reason]
+INTO #Rule14_Result
+FROM #ApprovedCourses A
+LEFT JOIN [{cregTable}] CREG
+    ON UPPER(LTRIM(RTRIM(CAST(A.[Course_Code] AS NVARCHAR(255)))))
+     = UPPER(LTRIM(RTRIM(CAST(CREG.[{rCol}] AS NVARCHAR(255)))));
 
+-- Step 3: Full extracted population result
+SELECT * FROM #Rule14_Result ORDER BY [Course_Code];
+
+-- Step 4: Summary
 SELECT
-    (SELECT COUNT(*) FROM ApprovedCourses) AS Approved_Courses,
-    (SELECT COUNT(*) FROM RegisteredApprovedCourses) AS Registered_Courses,
-    (SELECT COUNT(*) FROM ApprovedCourses) - (SELECT COUNT(*) FROM RegisteredApprovedCourses) AS Missing_Registrations;";
+    COUNT(*)                                                                                  AS [Total_Approved_Courses],
+    SUM(CASE WHEN [Validation_Result] = 'PASS' THEN 1 ELSE 0 END)                           AS [PASS_Count],
+    SUM(CASE WHEN [Validation_Result] = 'FAIL' THEN 1 ELSE 0 END)                           AS [FAIL_Count],
+    CAST(SUM(CASE WHEN [Validation_Result] = 'FAIL' THEN 1 ELSE 0 END) * 100.0
+         / NULLIF(COUNT(*), 0) AS DECIMAL(5,2))                                               AS [Exception_Rate_Pct]
+FROM #Rule14_Result;
+
+DROP TABLE #ApprovedCourses;
+DROP TABLE #Rule14_Result;";
 
             return Task.FromResult(sql.Trim());
         }
@@ -689,12 +728,23 @@ SELECT
 
             var crseTable = Sanitise(request.StudTable);
             var cregTable = Sanitise(request.BridgeTable);
+            var crseApprovedCol = Sanitise(string.IsNullOrWhiteSpace(request.CrseApprovedCol) ? "_031" : request.CrseApprovedCol);
+            var crseApprovedVal = request.CrseApprovedVal ?? "A";
+            var crseLinkCol = Sanitise(string.IsNullOrWhiteSpace(request.CrseLinkCol) ? "_030" : request.CrseLinkCol);
+            var cregLinkCol = Sanitise(string.IsNullOrWhiteSpace(request.CregLinkCol) ? "_030" : request.CregLinkCol);
 
             var crseCount = await CountAsync(conn, $"SELECT COUNT(*) FROM [{crseTable}];");
             var cregCount = await CountAsync(conn, $"SELECT COUNT(*) FROM [{cregTable}];");
 
+            // Build temp tables (#Rule14_ApprovedCourses, #Rule14_Result) on this connection
+            await using (var prepCommand = conn.CreateConfiguredCommand())
+            {
+                prepCommand.CommandText = BuildRule14PrepSql(crseTable, cregTable, crseApprovedCol, crseApprovedVal, crseLinkCol, cregLinkCol);
+                await prepCommand.ExecuteNonQueryAsync();
+            }
+
             await using var countCommand = conn.CreateConfiguredCommand();
-            countCommand.CommandText = BuildPopulationCountSql(crseTable, cregTable);
+            countCommand.CommandText = BuildPopulationCountSql();
             await using var countReader = await countCommand.ExecuteReaderAsync();
 
             var approvedCourseCount = 0;
@@ -709,10 +759,10 @@ SELECT
 
             await countReader.CloseAsync();
 
-            var reviewRows = await LoadControlRowsAsync(conn, crseTable, cregTable, includeAllReviewRows ? null : BrowserPreviewRowLimit);
+            var reviewRows = await LoadControlRowsAsync(conn, crseTable, cregTable, includeAllReviewRows ? null : BrowserPreviewRowLimit, crseApprovedCol, crseApprovedVal, crseLinkCol, cregLinkCol);
             reviewRows = NormalizeReviewRows(reviewRows);
 
-            var controlSummaries = BuildControlSummaries(approvedCourseCount, registeredCourseCount);
+            var controlSummaries = BuildControlSummaries(approvedCourseCount, registeredCourseCount, crseApprovedCol, crseApprovedVal, crseLinkCol, cregLinkCol);
             var totalValidated = controlSummaries.Sum(x => x.TotalCount);
             var passCount = controlSummaries.Sum(x => x.PassCount);
             var failCount = controlSummaries.Sum(x => x.FailCount);
@@ -742,6 +792,10 @@ SELECT
                 StudTable = request.StudTable,
                 BridgeTable = request.BridgeTable,
                 CrseTable = request.CrseTable,
+                CrseApprovedCol = crseApprovedCol,
+                CrseApprovedVal = crseApprovedVal,
+                CrseLinkCol = crseLinkCol,
+                CregLinkCol = cregLinkCol,
                 TableLinkageText = $"{request.StudTable} -> {request.BridgeTable}",
                 RuleModeText = "100% population testing of approved courses",
                 ProcedureSteps = BuildProcedureSteps(request.StudTable, request.BridgeTable),
@@ -820,18 +874,26 @@ WHERE RunID = @RunID;";
             return runId;
         }
 
-        private static string BuildPopulationCountSql(string crseTable, string cregTable) => $@"
-{BuildRule14SourceCtes(crseTable, cregTable)}
+        private static string BuildVerifyCountSql(string crseTable, string cregTable) => $@"
 SELECT
-    COUNT(1) AS ApprovedCourseCount,
-    SUM(CASE WHEN CREG__030 IS NOT NULL THEN 1 ELSE 0 END) AS RegisteredCourseCount,
-    SUM(CASE WHEN CREG__030 IS NULL THEN 1 ELSE 0 END) AS MissingRegistrationCount
-FROM ApprovedCourseResults;";
+    (SELECT COUNT(DISTINCT [{crseTable}].[_030]) FROM [{crseTable}]) AS ApprovedQualificationCount,
+    (SELECT COUNT(1) FROM [{cregTable}])                             AS ApprovedCredentialCount,
+    (SELECT COUNT(1) FROM [{cregTable}])                             AS RegisteredCredentialCount;";
 
-        private async Task<List<Rule14ValidationRowRecord>> LoadControlRowsAsync(SqlConnection connection, string crseTable, string cregTable, int? maxRows)
+        private static string BuildPopulationCountSql() => @"
+SELECT
+    COUNT(1)                                                              AS ApprovedCourseCount,
+    SUM(CASE WHEN [Validation_Result] = 'PASS' THEN 1 ELSE 0 END)        AS RegisteredCourseCount,
+    SUM(CASE WHEN [Validation_Result] = 'FAIL' THEN 1 ELSE 0 END)        AS MissingRegistrationCount
+FROM #Rule14_Result;";
+
+        private async Task<List<Rule14ValidationRowRecord>> LoadControlRowsAsync(
+            SqlConnection connection, string crseTable, string cregTable, int? maxRows,
+            string crseApprovedCol = "_031", string crseApprovedVal = "A",
+            string crseLinkCol = "_030", string cregLinkCol = "_030")
         {
             await using var command = connection.CreateConfiguredCommand();
-            command.CommandText = BuildAllControlsSql(crseTable, cregTable, maxRows);
+            command.CommandText = BuildAllControlsSql(crseTable, cregTable, maxRows, crseApprovedCol, crseApprovedVal, crseLinkCol, cregLinkCol);
 
             await using var reader = await command.ExecuteReaderAsync();
             var rows = new List<Rule14ValidationRowRecord>();
@@ -851,7 +913,7 @@ FROM ApprovedCourseResults;";
                     ControlType = ReadValue(displayValues, "Control_Type"),
                     ControlLabel = ReadValue(displayValues, "Control_Label"),
                     ValidationResult = ReadValue(displayValues, "Validation_Result"),
-                    ValidationExplanation = ReadValue(displayValues, "Validation_Explanation"),
+                    ValidationExplanation = ReadValue(displayValues, "Validation_Reason"),
                     DisplayValues = displayValues
                 });
 
@@ -861,69 +923,81 @@ FROM ApprovedCourseResults;";
             return rows;
         }
 
-        private static string BuildAllControlsSql(string crseTable, string cregTable, int? maxRows)
+        private static string BuildRule14PrepSql(
+            string crseTable, string cregTable,
+            string crseApprovedCol = "_031", string crseApprovedVal = "A",
+            string crseLinkCol = "_030", string cregLinkCol = "_030") => $@"
+IF OBJECT_ID('tempdb..#ApprovedCourses') IS NOT NULL DROP TABLE #ApprovedCourses;
+IF OBJECT_ID('tempdb..#Rule14_Result')   IS NOT NULL DROP TABLE #Rule14_Result;
+
+SELECT DISTINCT
+    CAST(CRSE.[{crseLinkCol}]    AS NVARCHAR(255)) AS [Course_Code],
+    CAST(CRSE.[_065]             AS NVARCHAR(255)) AS [Filler1],
+    CAST(CRSE.[{crseApprovedCol}] AS NVARCHAR(255)) AS [Course_Approval_Status],
+    CAST(CRSE.[_033]             AS NVARCHAR(255)) AS [Course_CESM],
+    CAST(CRSE.[_034]             AS NVARCHAR(255)) AS [Course_Level_Code],
+    CAST(CRSE.[_059]             AS NVARCHAR(255)) AS [Contact_Only_Availability],
+    CAST(CRSE.[_060]             AS NVARCHAR(255)) AS [Distance_Only_Availability],
+    CAST(CRSE.[_061]             AS NVARCHAR(255)) AS [Mixed_Mode_Availability],
+    CAST(CRSE.[_062]             AS NVARCHAR(255)) AS [Experiential_Training_Indicator],
+    CAST(CRSE.[_058]             AS NVARCHAR(500)) AS [Course_Name],
+    CAST(CRSE.[_091]             AS NVARCHAR(255)) AS [Foundation_Course],
+    CAST(CRSE.[_092]             AS NVARCHAR(255)) AS [NQF_Level],
+    CAST(CRSE.[_093]             AS NVARCHAR(255)) AS [NQF_Credit]
+INTO #ApprovedCourses
+FROM [{crseTable}] CRSE
+WHERE UPPER(LTRIM(RTRIM(CAST(CRSE.[{crseApprovedCol}] AS NVARCHAR(50))))) = '{crseApprovedVal}'
+  AND CRSE.[{crseLinkCol}] IS NOT NULL;
+
+SELECT
+    ROW_NUMBER() OVER (ORDER BY A.[Course_Code]) AS [Sample_Number],
+    'Control_1' AS [Control_Type],
+    'CONTROL 1: CRSE.[{crseApprovedCol}] = {crseApprovedVal} and CREG.[{cregLinkCol}] = CRSE.[{crseLinkCol}]' AS [Control_Label],
+    A.[Course_Code],
+    A.[Course_Name],
+    A.[Course_Approval_Status],
+    A.[Course_CESM],
+    A.[Course_Level_Code],
+    A.[Contact_Only_Availability],
+    A.[Distance_Only_Availability],
+    A.[Mixed_Mode_Availability],
+    A.[Experiential_Training_Indicator],
+    A.[Foundation_Course],
+    A.[NQF_Level],
+    A.[NQF_Credit],
+    CREG.[{cregLinkCol}] AS [CREG_Course_Code],
+    CASE WHEN CREG.[{cregLinkCol}] IS NOT NULL THEN 'PASS' ELSE 'FAIL' END AS [Validation_Result],
+    CASE
+        WHEN CREG.[{cregLinkCol}] IS NOT NULL
+            THEN 'Approved course found in [{cregTable}].'
+        ELSE 'Approved course not found in [{cregTable}].'
+    END AS [Validation_Reason]
+INTO #Rule14_Result
+FROM #ApprovedCourses A
+LEFT JOIN [{cregTable}] CREG
+    ON UPPER(LTRIM(RTRIM(CAST(A.[Course_Code] AS NVARCHAR(255)))))
+     = UPPER(LTRIM(RTRIM(CAST(CREG.[{cregLinkCol}] AS NVARCHAR(255)))));";
+
+        private static string BuildAllControlsSql(
+            string crseTable, string cregTable, int? maxRows,
+            string crseApprovedCol = "_031", string crseApprovedVal = "A",
+            string crseLinkCol = "_030", string cregLinkCol = "_030")
         {
             var topClause = maxRows.HasValue && maxRows.Value > 0 ? $"TOP {maxRows.Value}" : string.Empty;
-
-            return $@"
-{BuildRule14SourceCtes(crseTable, cregTable)}
-SELECT {topClause}
-    1 AS Control_Sort,
-    'Control_1' AS Control_Type,
-    'CONTROL 1: CRSE._031 = ''A'' and a matching registration exists on dbo_CREG' AS Control_Label,
-    CASE
-        WHEN ResultRows.CREG__030 IS NOT NULL THEN 'PASS' ELSE 'FAIL'
-    END AS Validation_Result,
-    CASE
-        WHEN ResultRows.CREG__030 IS NOT NULL
-            THEN 'Matched approved course to at least one student registration.'
-        ELSE 'Approved course has no matching student registration.'
-    END AS Validation_Explanation,
-    ResultRows.CRSE__030,
-    ResultRows.CRSE__031,
-    ResultRows.CREG__030
-FROM ApprovedCourseResults ResultRows
-ORDER BY ResultRows.CRSE__030;";
+            return $"SELECT {topClause} * FROM #Rule14_Result ORDER BY [Course_Code];";
         }
 
-        private static string BuildRule14SourceCtes(string crseTable, string cregTable) => $@"
-WITH ApprovedCourses AS
-(
-    SELECT DISTINCT
-        CONVERT(nvarchar(255), CRSE.[_030]) AS CRSE__030,
-        CONVERT(nvarchar(255), CRSE.[_031]) AS CRSE__031
-    FROM [{crseTable}] CRSE
-    WHERE ISNULL(CONVERT(nvarchar(255), CRSE.[_031]), '') = 'A'
-      AND CRSE.[_030] IS NOT NULL
-),
-RegisteredCourses AS
-(
-    SELECT DISTINCT
-        CONVERT(nvarchar(255), CREG.[_030]) AS CREG__030
-    FROM [{cregTable}] CREG
-    WHERE CREG.[_030] IS NOT NULL
-),
-ApprovedCourseResults AS
-(
-    SELECT
-        Approved.CRSE__030,
-        Approved.CRSE__031,
-        Registered.CREG__030
-    FROM ApprovedCourses Approved
-    LEFT JOIN RegisteredCourses Registered
-        ON Registered.CREG__030 = Approved.CRSE__030
-)";
-
         private static List<Rule14ControlSummaryItemViewModel> BuildControlSummaries(
-            int approvedCourseCount,
-            int registeredCourseCount)
+            int approvedCourseCount, int registeredCourseCount,
+            string crseApprovedCol = "_031", string crseApprovedVal = "A",
+            string crseLinkCol = "_030", string cregLinkCol = "_030")
         {
             return new List<Rule14ControlSummaryItemViewModel>
             {
                 BuildControlSummary(
                     "Control_1",
                     "Control 1",
-                    "CRSE._031 = 'A' AND CREG._030 = CRSE._030",
+                    $"CRSE.{crseApprovedCol}='{crseApprovedVal}' AND CREG.{cregLinkCol}=CRSE.{crseLinkCol}",
                     approvedCourseCount,
                     registeredCourseCount)
             };
@@ -1245,14 +1319,19 @@ ApprovedCourseResults AS
                 "Return the full approved-course population; no sampling is applied."
             };
 
-        private async Task EnsureColumnsExistAsync(string server, string database, string driver, string studTable, string bridgeTable, string crseTable)
+        private async Task EnsureColumnsExistAsync(
+            string server, string database, string driver, string studTable, string bridgeTable, string crseTable,
+            string crseApprovedCol = "_031", string crseLinkCol = "_030", string cregLinkCol = "_030")
         {
             var studColumns = await GetTableColumnsAsync(server, database, driver, studTable);
             var bridgeColumns = await GetTableColumnsAsync(server, database, driver, bridgeTable);
 
-            EnsureHasColumns(studTable, studColumns, "_030", "_031");
-            EnsureHasColumns(bridgeTable, bridgeColumns, "_030");
+            EnsureHasColumns(studTable, studColumns, crseLinkCol, crseApprovedCol);
+            EnsureHasColumns(bridgeTable, bridgeColumns, cregLinkCol);
         }
+
+        public Task<List<string>> GetTableColumnsListAsync(string server, string database, string driver, string tableName)
+            => GetTableColumnsAsync(server, database, driver, tableName);
 
         private async Task<List<string>> GetTableColumnsAsync(string server, string database, string driver, string tableName)
         {
@@ -1649,30 +1728,36 @@ WHERE RunID = @RunID;";
         {
             var values = row.DisplayValues;
             var validationResult = ReadValue(values, "Validation_Result");
-            var isPass = string.Equals(validationResult, "PASS", StringComparison.OrdinalIgnoreCase);
-            var crse030 = FormatRule14ColumnValue(ReadValue(values, "CRSE__030"));
-            var crse031 = FormatRule14ColumnValue(ReadValue(values, "CRSE__031"));
-            var creg030 = FormatRule14ColumnValue(ReadValue(values, "CREG__030"));
+            var isPass       = string.Equals(validationResult, "PASS", StringComparison.OrdinalIgnoreCase);
+            var courseCode   = FormatRule14ColumnValue(ReadValue(values, "Course_Code"));
+            var courseStatus = FormatRule14ColumnValue(ReadValue(values, "Course_Approval_Status"));
+            var cregCode     = FormatRule14ColumnValue(ReadValue(values, "CREG_Course_Code"));
+            var controlLabel = ReadValue(values, "Control_Label");
 
-            const string criteriaText = "CRSE._031 = 'A' AND CREG._030 = CRSE._030";
             var validationExplanation = isPass
-                ? $"Passed because approved course '{crse030}' with status '{crse031}' has at least one matching registration."
-                : $"Failed because approved course '{crse030}' has no matching registration in dbo_CREG.";
-            var qualCriteriaMessage = $"Approved course check passed because CRSE._031='{crse031}'.";
-            var credLinkMessage = $"Course code '{crse030}' was selected from dbo_CRSE for validation.";
+                ? $"CRSE approval: FOUND ('{courseStatus}') | CREG registration: FOUND (matched on '{cregCode}')"
+                : $"CRSE approval: FOUND ('{courseStatus}') | CREG registration: NOT FOUND (no match for course '{courseCode}')";
             var registrationMessage = isPass
-                ? $"Matched registration row CREG._030='{creg030}'."
-                : "No matching dbo_CREG registration row was found for this approved course.";
-            var finalResultMessage = isPass
-                ? "Passed this criteria because at least one student registration exists for the approved course."
-                : "Failed this criteria because no student registration exists for the approved course.";
+                ? $"Matched registration: CREG code='{cregCode}'."
+                : $"No matching CREG registration row found for course code '{courseCode}'.";
 
-            values["FINAL_RULE_TEXT"] = criteriaText;
+            // Keys the Razor view reads directly from DisplayValues
+            values["CRSE__030"] = ReadValue(values, "Course_Code");
+            values["CRSE__031"] = ReadValue(values, "Course_Approval_Status");
+            values["CREG__030"] = ReadValue(values, "CREG_Course_Code");
+            values["CRSE_CRITERIA_MESSAGE"] = isPass
+                ? $"_031 = '{courseStatus}'"
+                : $"_031 = '{courseStatus}'";
+
+            values["FINAL_RULE_TEXT"]        = controlLabel;
+            values["Validation_Reason"]      = ReadValue(values, "Validation_Reason").Length > 0
+                                                   ? ReadValue(values, "Validation_Reason")
+                                                   : validationExplanation;
             values["Validation_Explanation"] = validationExplanation;
-            values["CRSE_CRITERIA_MESSAGE"] = qualCriteriaMessage;
-            values["CRSE_SELECTION_MESSAGE"] = credLinkMessage;
-            values["CREG_LINK_MESSAGE"] = registrationMessage;
-            values["FINAL_RESULT_MESSAGE"] = finalResultMessage;
+            values["CREG_LINK_MESSAGE"]      = registrationMessage;
+            values["FINAL_RESULT_MESSAGE"]   = isPass
+                ? "Passed: approved course found in CREG."
+                : "Failed: approved course not found in CREG.";
             row.ValidationExplanation = validationExplanation;
         }
 

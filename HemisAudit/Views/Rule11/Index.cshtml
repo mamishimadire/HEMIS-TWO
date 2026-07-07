@@ -177,7 +177,65 @@
                         <select id="pqmCodeColSelect"><option value="">Select column (CESM_Code)</option></select>
                     </div>
                 </div>
+                <div style="margin-top:20px;border-top:1px solid #e0e0e0;padding-top:16px">
+                    <div style="font-weight:700;font-size:13px;margin-bottom:8px;color:#1a237e">QC &nbsp; QUAL Column Mapping &mdash; Additional Controls</div>
+                    <div class="info-box info-box--warn" style="margin-bottom:12px">
+                        Map the QUAL table columns used in controls C3&ndash;C6. Defaults match the standard HEMIS QUAL structure.
+                    </div>
+                    <div class="form-grid">
+                        <div class="field-group">
+                            <label>MIN TIME TOTAL COLUMN <small>(DEFAULT: _053, COMPARED TO PQM TOTAL2)</small> <span class="auto-tag" id="qualMtAutoTag" style="display:none">auto-selected</span></label>
+                            <select id="qualMtColSelect"><option value="_053">_053</option></select>
+                        </div>
+                        <div class="field-group">
+                            <label>MIN TIME WIL COLUMN <small>(DEFAULT: _054, COMPARED TO PQM WIL_EL2)</small> <span class="auto-tag" id="qualWilAutoTag" style="display:none">auto-selected</span></label>
+                            <select id="qualWilColSelect"><option value="_054">_054</option></select>
+                        </div>
+                        <div class="field-group">
+                            <label>HEQF/HEQSF INDICATOR COLUMN <small>(DEFAULT: _084, EXPECTED Y OR N)</small> <span class="auto-tag" id="qualHeqfAutoTag" style="display:none">auto-selected</span></label>
+                            <select id="qualHeqfColSelect"><option value="_084">_084</option></select>
+                        </div>
+                        <div class="field-group">
+                            <label>TOTAL SUBSIDY COLUMN <small>(DEFAULT: _090, COMPARED TO PQM TOTAL2)</small> <span class="auto-tag" id="qualSubAutoTag" style="display:none">auto-selected</span></label>
+                            <select id="qualSubColSelect"><option value="_090">_090</option></select>
+                        </div>
+                    </div>
+                </div>
+
+                <div style="margin-top:20px;border-top:1px solid #e0e0e0;padding-top:16px">
+                    <div style="font-weight:700;font-size:13px;margin-bottom:8px;color:#1a237e">PC &nbsp; PQM Column Mapping &mdash; Additional Controls</div>
+                    <div class="info-box info-box--dark" style="margin-bottom:12px">
+                        Map the PQM register columns used in controls C3&ndash;C6. Default field pairs:
+                        <code>QUAL._053 = PQM.Total2</code>, <code>QUAL._054 = PQM.WIL_EL2</code>,
+                        <code>QUAL._084 = derived from PQM.CHE_HEQC_Accreditation_Approval_Ref_Nr</code>, <code>QUAL._090 = PQM.Total2</code>.
+                    </div>
+                    <div class="form-grid">
+                        <div class="field-group">
+                            <label>CESM CODE 2 COLUMN <small>(E.G. CESM_CODE1)</small> <span class="auto-tag" id="pqmCode1AutoTag" style="display:none">auto-selected</span></label>
+                            <select id="pqmCesmCode1ColSelect"><option value="CESM_CODE1">CESM_CODE1</option></select>
+                        </div>
+                        <div class="field-group">
+                            <label>MIN TIME TOTAL COLUMN <small>(COMPARED TO QUAL _053, E.G. TOTAL2)</small> <span class="auto-tag" id="pqmMtAutoTag" style="display:none">auto-selected</span></label>
+                            <select id="pqmMtColSelect"><option value="Total2">Total2</option></select>
+                        </div>
+                        <div class="field-group">
+                            <label>WIL COLUMN <small>(COMPARED TO QUAL _054, E.G. WIL_EL2)</small> <span class="auto-tag" id="pqmWilAutoTag" style="display:none">auto-selected</span></label>
+                            <select id="pqmWilColSelect"><option value="WIL_EL2">WIL_EL2</option></select>
+                        </div>
+                        <div class="field-group">
+                            <label>ACCREDITATION REFERENCE COLUMN <small>(USED TO DETERMINE EXPECTED HEQF INDICATOR)</small> <span class="auto-tag" id="pqmAccAutoTag" style="display:none">auto-selected</span></label>
+                            <select id="pqmAccColSelect"><option value="CHE_HEQC_Accreditation_Approval_Ref_Nr">CHE_HEQC_Accreditation_Approval_Ref_Nr</option></select>
+                        </div>
+                        <div class="field-group">
+                            <label>TOTAL SUBSIDY COLUMN <small>(COMPARED TO QUAL _090, E.G. TOTAL2)</small> <span class="auto-tag" id="pqmSubAutoTag" style="display:none">auto-selected</span></label>
+                            <select id="pqmSubColSelect"><option value="Total2">Total2</option></select>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="info-box info-box--blue" style="margin-top:16px">
+                    <strong>Population Classification:</strong> Rule 11 validates all QUAL rows where the approval status matches the configured value. The HEQF type list below marks rows as Postgraduate; all other approved rows are labelled Undergraduate. Update these values here if the source values change.
+                </div>
                     <strong>Population Classification:</strong> Rule 11 validates all QUAL rows where the approval status matches the configured value. The HEQF type list below marks rows as Postgraduate; all other approved rows are labelled Undergraduate. Update these values here if the source values change.
                 </div>
                 <div class="form-grid" style="margin-top:12px">
@@ -193,6 +251,19 @@
                             Only QUAL rows where <code id="qualApprovalFilterPreview">_004</code> = <strong id="qualApprovalFilterValuePreview">A</strong> are validated; <code>_005</code> is used to label rows as Postgraduate or Undergraduate.
                         </small>
                     </div>
+
+                    <div style="margin-top:20px;border-top:1px solid #e0e0e0;padding-top:16px;grid-column:1 / -1">
+                        <div style="font-weight:700;font-size:13px;margin-bottom:8px;color:#1a237e">PG &nbsp; Population Split</div>
+                        <div class="info-box info-box--blue" style="margin-bottom:12px">
+                            <strong>M Prefix Population Split:</strong> When checked, qualification codes matching <code>M_____</code> (e.g. <code>M12345</code>) are tagged as <strong>Postgraduate</strong>. They remain included in the validation population.<br>
+                            <strong>Postgraduate Type Codes:</strong> Comma-separated <code>_005</code> values that classify a qualification as postgraduate. Any approved row not matching these rules is labelled <strong>Undergraduate</strong>.
+                        </div>
+                        <label class="checkbox-label" style="margin-bottom:12px">
+                            <input type="checkbox" id="useMPrefixSplitCheck" onchange="state.useMPrefixPopulationSplit=this.checked;markWorkspaceDirty();" />
+                            Treat qualification codes matching <code>M_____</code> as postgraduate
+                        </label>
+                    </div>
+
                     <div class="field-group" style="grid-column:1 / -1">
                         <label for="qualTypeCodesTextInput">QUAL — Postgraduate Type Codes</label>
                         <textarea id="qualTypeCodesTextInput" rows="3"
@@ -201,6 +272,20 @@
                         <small style="display:block;margin-top:4px;color:#555">
                             Rows whose <code>_005</code> value appears here are labelled Postgraduate; all other approved rows are labelled Undergraduate.
                         </small>
+                    </div>
+
+                    <div style="margin-top:20px;border-top:1px solid #e0e0e0;padding-top:16px;grid-column:1 / -1">
+                        <div style="font-weight:700;font-size:13px;margin-bottom:8px;color:#1a237e">HQ &nbsp; HEQF/HEQSF Indicator Codes (5.1.5)</div>
+                        <div class="info-box info-box--blue" style="margin-bottom:12px">
+                            <strong>Control 5.1.5:</strong> If <code>CHE_HEQC_Accreditation_Approval_Ref_Nr</code> contains any of these codes, QUAL column <code>_084</code> is expected to be <strong>Y</strong>; otherwise <strong>N</strong>. Enter codes as comma-separated values. You can update this list when new codes are issued.
+                        </div>
+                        <div class="field-group">
+                            <label>HEQF/HEQSF INDICATOR CODES <small>(COMMA-SEPARATED, CASE-INSENSITIVE SUBSTRING MATCH)</small></label>
+                            <input type="text" id="heqfIndicatorCodesInput" value="H/,HEQF,HEQSF"
+                                   placeholder="e.g. H/,HEQF,HEQSF"
+                                   oninput="state.heqfIndicatorCodesCsv=this.value.trim()||'H/,HEQF,HEQSF';markWorkspaceDirty();" />
+                            <small style="display:block;margin-top:4px;color:#555">Example: if the accreditation ref is <code>H/H16/E084CAN01</code>, it contains "H/" &rarr; expected _084 = Y</small>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -311,6 +396,17 @@ const state = {
     qualApprovalFilterValue: defaultQualApprovalFilterValue,
     qualTypeCodesText: defaultQualTypeCodesText,
     pqmNameCol: '', pqmHeqfTypeCol: '', pqmCodeCol: '',
+    pqmCesmCode1Col: 'CESM_CODE1',
+    pqmMinTimeTotalCol: 'Total2',
+    pqmWilCol: 'WIL_EL2',
+    pqmAccreditationCol: 'CHE_HEQC_Accreditation_Approval_Ref_Nr',
+    pqmTotalSubsidyCol: 'Total2',
+    qualMinTimeTotalCol: '_053',
+    qualMinTimeWilCol: '_054',
+    qualHeqfCol: '_084',
+    qualTotalSubsidyCol: '_090',
+    heqfIndicatorCodesCsv: 'H/,HEQF,HEQSF',
+    useMPrefixPopulationSplit: false,
     clientId: parseInt(document.getElementById('clientIdSelect')?.value || '0') || 0,
     currentRunId: null, validationResult: null,
     validationView: { filter: 'ALL', page: 1, pageSize: uiPreviewRowLimit },
@@ -472,6 +568,17 @@ function resetWorkspaceState(clearClient = false) {
     state.qualApprovalFilterValue = defaultQualApprovalFilterValue;
     state.qualTypeCodesText = defaultQualTypeCodesText;
     state.pqmNameCol = ''; state.pqmHeqfTypeCol = ''; state.pqmCodeCol = '';
+    state.pqmCesmCode1Col = 'CESM_CODE1';
+    state.pqmMinTimeTotalCol = 'Total2';
+    state.pqmWilCol = 'WIL_EL2';
+    state.pqmAccreditationCol = 'CHE_HEQC_Accreditation_Approval_Ref_Nr';
+    state.pqmTotalSubsidyCol = 'Total2';
+    state.qualMinTimeTotalCol = '_053';
+    state.qualMinTimeWilCol = '_054';
+    state.qualHeqfCol = '_084';
+    state.qualTotalSubsidyCol = '_090';
+    state.heqfIndicatorCodesCsv = 'H/,HEQF,HEQSF';
+    state.useMPrefixPopulationSplit = false;
     state.currentRunId = null; state.validationResult = null;
     state.validationView = { filter: 'ALL', page: 1, pageSize: uiPreviewRowLimit };
     state.currentUserEngagementRole = ''; state.currentStatus = '';
@@ -501,9 +608,19 @@ function resetWorkspaceState(clearClient = false) {
     ['qualAutoTag','cesmAutoTag','pqmAutoTag',
      'qualIdAutoTag','qualNameAutoTag','qualApprovalAutoTag','qualHeqfTypeAutoTag',
      'cesmIdAutoTag','cesmCodeAutoTag',
-     'pqmNameAutoTag','pqmHeqfTypeAutoTag','pqmCodeAutoTag'].forEach(id => {
+     'pqmNameAutoTag','pqmHeqfTypeAutoTag','pqmCodeAutoTag',
+     'pqmCode1AutoTag','pqmMtAutoTag','pqmWilAutoTag','pqmAccAutoTag','pqmSubAutoTag',
+     'qualMtAutoTag','qualWilAutoTag','qualHeqfAutoTag','qualSubAutoTag'].forEach(id => {
         const el = document.getElementById(id);
         if (el) el.style.display = 'none';
+    });
+    const useMPrefixCheck = document.getElementById('useMPrefixSplitCheck');
+    if (useMPrefixCheck) useMPrefixCheck.checked = false;
+    const heqfCodesInput = document.getElementById('heqfIndicatorCodesInput');
+    if (heqfCodesInput) heqfCodesInput.value = 'H/,HEQF,HEQSF';
+    ['pqmCesmCode1ColSelect','pqmMtColSelect','pqmWilColSelect','pqmAccColSelect','pqmSubColSelect',
+     'qualMtColSelect','qualWilColSelect','qualHeqfColSelect','qualSubColSelect'].forEach(id => {
+        const el = document.getElementById(id); if (el) el.innerHTML = '<option value=">Select column</option>';
     });
     document.getElementById('connectionStatus').innerHTML = '';
     document.getElementById('tableStatus').innerHTML = '';
@@ -672,6 +789,21 @@ async function hydrateWorkspace(workspace) {
         state.qualTypeCodesText = workspace.qualTypeCodesText || defaultQualTypeCodesText;
         document.getElementById('qualApprovalFilterValueInput').value = state.qualApprovalFilterValue;
         document.getElementById('qualTypeCodesTextInput').value = state.qualTypeCodesText;
+        state.pqmCesmCode1Col      = workspace.pqmCesmCode1Col     || 'CESM_CODE1';
+        state.pqmMinTimeTotalCol   = workspace.pqmMinTimeTotalCol  || 'Total2';
+        state.pqmWilCol            = workspace.pqmWilCol           || 'WIL_EL2';
+        state.pqmAccreditationCol  = workspace.pqmAccreditationCol || 'CHE_HEQC_Accreditation_Approval_Ref_Nr';
+        state.pqmTotalSubsidyCol   = workspace.pqmTotalSubsidyCol  || 'Total2';
+        state.qualMinTimeTotalCol  = workspace.qualMinTimeTotalCol || '_053';
+        state.qualMinTimeWilCol    = workspace.qualMinTimeWilCol   || '_054';
+        state.qualHeqfCol          = workspace.qualHeqfCol         || '_084';
+        state.qualTotalSubsidyCol  = workspace.qualTotalSubsidyCol || '_090';
+        state.heqfIndicatorCodesCsv = workspace.heqfIndicatorCodesCsv || 'H/,HEQF,HEQSF';
+        state.useMPrefixPopulationSplit = !!workspace.useMPrefixPopulationSplit;
+        const useMPrefixCheck = document.getElementById('useMPrefixSplitCheck');
+        if (useMPrefixCheck) useMPrefixCheck.checked = state.useMPrefixPopulationSplit;
+        const heqfCodesInput = document.getElementById('heqfIndicatorCodesInput');
+        if (heqfCodesInput) heqfCodesInput.value = state.heqfIndicatorCodesCsv;
         document.getElementById('qualApprovalFilterValuePreview').textContent = state.qualApprovalFilterValue;
         document.getElementById('qualApprovalFilterPreview').textContent = workspace.qualApprovalCol || '_004';
 
@@ -705,6 +837,15 @@ async function hydrateWorkspace(workspace) {
                     preferredPqmNameCol:     workspace.pqmNameCol || '',
                     preferredPqmHeqfTypeCol: workspace.pqmHeqfTypeCol || '',
                     preferredPqmCodeCol:     workspace.pqmCodeCol || '',
+                    preferredPqmCesmCode1Col: workspace.pqmCesmCode1Col || '',
+                    preferredPqmMtCol:   workspace.pqmMinTimeTotalCol || '',
+                    preferredPqmWilCol:  workspace.pqmWilCol || '',
+                    preferredPqmAccCol:  workspace.pqmAccreditationCol || '',
+                    preferredPqmSubCol:  workspace.pqmTotalSubsidyCol || '',
+                    preferredQualMtCol:  workspace.qualMinTimeTotalCol || '',
+                    preferredQualWilCol: workspace.qualMinTimeWilCol || '',
+                    preferredQualHeqfCol:workspace.qualHeqfCol || '',
+                    preferredQualSubCol: workspace.qualTotalSubsidyCol || '',
                     silent: true
                 });
             }
@@ -781,11 +922,16 @@ async function loadTables(options = {}) {
 
     if (selQual) await loadColumnsForTable('qual', {
         preferredIdCol: options.preferredQualIdCol, preferredNameCol: options.preferredQualNameCol,
-        preferredApprovalCol: options.preferredQualApprovalCol, preferredHeqfTypeCol: options.preferredQualHeqfTypeCol, silent: true });
+        preferredApprovalCol: options.preferredQualApprovalCol, preferredHeqfTypeCol: options.preferredQualHeqfTypeCol,
+        preferredMtCol: options.preferredQualMtCol, preferredWilCol: options.preferredQualWilCol,
+        preferredHeqfCol: options.preferredQualHeqfCol, preferredSubCol: options.preferredQualSubCol, silent: true });
     if (selCesm) await loadColumnsForTable('cesm', {
         preferredIdCol: options.preferredCesmIdCol, preferredCodeCol: options.preferredCesmCodeCol, silent: true });
     if (selPqm)  await loadColumnsForTable('pqm',  {
-        preferredNameCol: options.preferredPqmNameCol, preferredHeqfTypeCol: options.preferredPqmHeqfTypeCol, preferredCodeCol: options.preferredPqmCodeCol, silent: true });
+        preferredNameCol: options.preferredPqmNameCol, preferredHeqfTypeCol: options.preferredPqmHeqfTypeCol, preferredCodeCol: options.preferredPqmCodeCol,
+        preferredCesmCode1Col: options.preferredPqmCesmCode1Col, preferredMtCol: options.preferredPqmMtCol,
+        preferredWilCol: options.preferredPqmWilCol, preferredAccCol: options.preferredPqmAccCol,
+        preferredSubCol: options.preferredPqmSubCol, silent: true });
 
     return result;
 }
@@ -819,13 +965,22 @@ async function loadColumnsForTable(which, options = {}) {
         ? [{ key: 'qual_id',        sel: 'qualIdColSelect',       autoTag: 'qualIdAutoTag',        preferred: options.preferredIdCol       || '' },
            { key: 'qual_name',      sel: 'qualNameColSelect',     autoTag: 'qualNameAutoTag',      preferred: options.preferredNameCol     || '' },
            { key: 'qual_approval',  sel: 'qualApprovalColSelect', autoTag: 'qualApprovalAutoTag',  preferred: options.preferredApprovalCol  || '' },
-           { key: 'qual_heqf_type', sel: 'qualHeqfTypeColSelect', autoTag: 'qualHeqfTypeAutoTag',  preferred: options.preferredHeqfTypeCol  || '' }]
+           { key: 'qual_heqf_type', sel: 'qualHeqfTypeColSelect', autoTag: 'qualHeqfTypeAutoTag',  preferred: options.preferredHeqfTypeCol  || '' },
+           { key: 'qual_min_time_total', sel: 'qualMtColSelect',   autoTag: 'qualMtAutoTag',   preferred: options.preferredMtCol   || '' },
+           { key: 'qual_min_time_wil',   sel: 'qualWilColSelect',  autoTag: 'qualWilAutoTag',  preferred: options.preferredWilCol  || '' },
+           { key: 'qual_heqf',           sel: 'qualHeqfColSelect', autoTag: 'qualHeqfAutoTag', preferred: options.preferredHeqfCol || '' },
+           { key: 'qual_total_subsidy',  sel: 'qualSubColSelect',  autoTag: 'qualSubAutoTag',  preferred: options.preferredSubCol  || '' }]
         : which === 'cesm'
         ? [{ key: 'cesm_id',        sel: 'cesmIdColSelect',       autoTag: 'cesmIdAutoTag',        preferred: options.preferredIdCol   || '' },
            { key: 'cesm_code',      sel: 'cesmCodeColSelect',     autoTag: 'cesmCodeAutoTag',      preferred: options.preferredCodeCol || '' }]
         : [{ key: 'pqm_name',       sel: 'pqmNameColSelect',      autoTag: 'pqmNameAutoTag',       preferred: options.preferredNameCol      || '' },
            { key: 'pqm_heqf_type',  sel: 'pqmHeqfTypeColSelect',  autoTag: 'pqmHeqfTypeAutoTag',   preferred: options.preferredHeqfTypeCol  || '' },
-           { key: 'pqm_code',       sel: 'pqmCodeColSelect',      autoTag: 'pqmCodeAutoTag',       preferred: options.preferredCodeCol      || '' }];
+           { key: 'pqm_code',       sel: 'pqmCodeColSelect',      autoTag: 'pqmCodeAutoTag',       preferred: options.preferredCodeCol      || '' },
+           { key: 'pqm_cesm_code1', sel: 'pqmCesmCode1ColSelect',  autoTag: 'pqmCode1AutoTag',      preferred: options.preferredCesmCode1Col || '' },
+           { key: 'pqm_min_time_total', sel: 'pqmMtColSelect',     autoTag: 'pqmMtAutoTag',         preferred: options.preferredMtCol        || '' },
+           { key: 'pqm_wil',        sel: 'pqmWilColSelect',       autoTag: 'pqmWilAutoTag',        preferred: options.preferredWilCol       || '' },
+           { key: 'pqm_accreditation', sel: 'pqmAccColSelect',    autoTag: 'pqmAccAutoTag',        preferred: options.preferredAccCol       || '' },
+           { key: 'pqm_total_subsidy', sel: 'pqmSubColSelect',    autoTag: 'pqmSubAutoTag',        preferred: options.preferredSubCol       || '' }];
 
     for (const roleInfo of columnRoles) {
         const result = await post('/Rule11/GetColumns', {
@@ -854,6 +1009,15 @@ async function loadColumnsForTable(which, options = {}) {
         if (roleInfo.key === 'pqm_name')        state.pqmNameCol       = sel.value;
         if (roleInfo.key === 'pqm_heqf_type')   state.pqmHeqfTypeCol   = sel.value;
         if (roleInfo.key === 'pqm_code')        state.pqmCodeCol       = sel.value;
+        if (roleInfo.key === 'pqm_cesm_code1')   state.pqmCesmCode1Col    = sel.value;
+        if (roleInfo.key === 'pqm_min_time_total') state.pqmMinTimeTotalCol = sel.value;
+        if (roleInfo.key === 'pqm_wil')          state.pqmWilCol          = sel.value;
+        if (roleInfo.key === 'pqm_accreditation') state.pqmAccreditationCol = sel.value;
+        if (roleInfo.key === 'pqm_total_subsidy') state.pqmTotalSubsidyCol = sel.value;
+        if (roleInfo.key === 'qual_min_time_total') state.qualMinTimeTotalCol = sel.value;
+        if (roleInfo.key === 'qual_min_time_wil')  state.qualMinTimeWilCol  = sel.value;
+        if (roleInfo.key === 'qual_heqf')          state.qualHeqfCol        = sel.value;
+        if (roleInfo.key === 'qual_total_subsidy') state.qualTotalSubsidyCol = sel.value;
     }
 
     document.getElementById('body-columns').style.display = 'block';
@@ -873,6 +1037,17 @@ function syncStateFromSelects() {
     state.pqmNameCol      = document.getElementById('pqmNameColSelect').value;
     state.pqmHeqfTypeCol  = document.getElementById('pqmHeqfTypeColSelect').value;
     state.pqmCodeCol      = document.getElementById('pqmCodeColSelect').value;
+    state.pqmCesmCode1Col      = document.getElementById('pqmCesmCode1ColSelect')?.value || 'CESM_CODE1';
+    state.pqmMinTimeTotalCol   = document.getElementById('pqmMtColSelect')?.value       || 'Total2';
+    state.pqmWilCol            = document.getElementById('pqmWilColSelect')?.value       || 'WIL_EL2';
+    state.pqmAccreditationCol  = document.getElementById('pqmAccColSelect')?.value       || 'CHE_HEQC_Accreditation_Approval_Ref_Nr';
+    state.pqmTotalSubsidyCol   = document.getElementById('pqmSubColSelect')?.value       || 'Total2';
+    state.qualMinTimeTotalCol  = document.getElementById('qualMtColSelect')?.value       || '_053';
+    state.qualMinTimeWilCol    = document.getElementById('qualWilColSelect')?.value      || '_054';
+    state.qualHeqfCol          = document.getElementById('qualHeqfColSelect')?.value     || '_084';
+    state.qualTotalSubsidyCol  = document.getElementById('qualSubColSelect')?.value      || '_090';
+    state.useMPrefixPopulationSplit = document.getElementById('useMPrefixSplitCheck')?.checked || false;
+    state.heqfIndicatorCodesCsv = document.getElementById('heqfIndicatorCodesInput')?.value?.trim() || 'H/,HEQF,HEQSF';
     state.qualApprovalFilterValue = (document.getElementById('qualApprovalFilterValueInput').value || defaultQualApprovalFilterValue).trim().toUpperCase() || defaultQualApprovalFilterValue;
     state.qualTypeCodesText = (document.getElementById('qualTypeCodesTextInput').value || defaultQualTypeCodesText).trim() || defaultQualTypeCodesText;
     document.getElementById('qualApprovalFilterValuePreview').textContent = state.qualApprovalFilterValue;
@@ -1312,7 +1487,18 @@ function buildRequest() {
         qualApprovalFilterValue: state.qualApprovalFilterValue, qualTypeCodesText: state.qualTypeCodesText,
         cesmTable: state.cesmTable, cesmIdCol: state.cesmIdCol, cesmCodeCol: state.cesmCodeCol,
         pqmTable: state.pqmTable, pqmNameCol: state.pqmNameCol,
-        pqmHeqfTypeCol: state.pqmHeqfTypeCol, pqmCodeCol: state.pqmCodeCol
+        pqmHeqfTypeCol: state.pqmHeqfTypeCol, pqmCodeCol: state.pqmCodeCol,
+        pqmCesmCode1Col: state.pqmCesmCode1Col,
+        pqmMinTimeTotalCol: state.pqmMinTimeTotalCol,
+        pqmWilCol: state.pqmWilCol,
+        pqmAccreditationCol: state.pqmAccreditationCol,
+        pqmTotalSubsidyCol: state.pqmTotalSubsidyCol,
+        qualMinTimeTotalCol: state.qualMinTimeTotalCol,
+        qualMinTimeWilCol: state.qualMinTimeWilCol,
+        qualHeqfCol: state.qualHeqfCol,
+        qualTotalSubsidyCol: state.qualTotalSubsidyCol,
+        heqfIndicatorCodesCsv: state.heqfIndicatorCodesCsv,
+        useMPrefixPopulationSplit: state.useMPrefixPopulationSplit
     };
 }
 

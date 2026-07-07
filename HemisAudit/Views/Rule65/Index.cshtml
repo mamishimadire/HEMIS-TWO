@@ -93,6 +93,12 @@
                             <label for="cancellationTable">Cancellation Table</label>
                             <select id="cancellationTable"></select>
                         </div>
+                        <div class="field-group" style="display:flex;align-items:center;gap:8px;padding-top:20px">
+                            <input type="checkbox" id="useClientCensusTable" checked style="width:16px;height:16px;cursor:pointer" />
+                            <label for="useClientCensusTable" style="margin:0;cursor:pointer;font-weight:600">Use Client Census Table</label>
+                        </div>
+                    </div>
+                    <div id="clientCensusTableRow" class="form-grid" style="margin-top:8px">
                         <div class="field-group">
                             <label for="clientTable">Client Census Table</label>
                             <select id="clientTable"></select>
@@ -134,11 +140,13 @@
                         </div>
                     </div>
 
-                    <div style="font-weight:700;font-size:13px;text-transform:uppercase;color:#555;margin:14px 0 8px">Client Census Table</div>
-                    <div class="form-grid">
-                        <div class="field-group">
-                            <label>Current Census</label>
-                            <select id="cm_currentCensusCol"></select>
+                    <div id="colmap-census-section">
+                        <div style="font-weight:700;font-size:13px;text-transform:uppercase;color:#555;margin:14px 0 8px">Client Census Table</div>
+                        <div class="form-grid">
+                            <div class="field-group">
+                                <label>Current Census</label>
+                                <select id="cm_currentCensusCol"></select>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -265,6 +273,9 @@ window.toggleAccordion = function (section) {
         database: document.getElementById('database'),
         cancellationTable: document.getElementById('cancellationTable'),
         clientTable: document.getElementById('clientTable'),
+        useClientCensusTable: document.getElementById('useClientCensusTable'),
+        clientCensusTableRow: document.getElementById('clientCensusTableRow'),
+        colmapCensusSection: document.getElementById('colmap-census-section'),
         connectBtn: document.getElementById('connectBtn'),
         studentNoCol: document.getElementById('cm_studentNoCol'),
         qualificationCol: document.getElementById('cm_qualificationCol'),
@@ -416,6 +427,7 @@ window.toggleAccordion = function (section) {
             driver: els.driver?.value || 'ODBC Driver 17 for SQL Server',
             cancellationTable: els.cancellationTable?.value || '',
             clientTable: els.clientTable?.value || '',
+            useClientCensusTable: els.useClientCensusTable?.checked ?? true,
             columnMapping: {
                 studentNoCol: els.studentNoCol?.value || 'STD_NO',
                 qualificationCol: els.qualificationCol?.value || 'QUAL',
@@ -664,6 +676,10 @@ window.toggleAccordion = function (section) {
                 els.driver.value = workspace.driver ?? workspace.Driver ?? 'ODBC Driver 17 for SQL Server';
                 els.cancellationTable.innerHTML = (workspace.cancellationTable ?? workspace.CancellationTable ?? '') ? `<option value="${escapeHtml(workspace.cancellationTable ?? workspace.CancellationTable ?? '')}">${escapeHtml(workspace.cancellationTable ?? workspace.CancellationTable ?? '')}</option>` : '';
                 els.clientTable.innerHTML = (workspace.clientTable ?? workspace.ClientTable ?? '') ? `<option value="${escapeHtml(workspace.clientTable ?? workspace.ClientTable ?? '')}">${escapeHtml(workspace.clientTable ?? workspace.ClientTable ?? '')}</option>` : '';
+                if (els.useClientCensusTable) {
+                    els.useClientCensusTable.checked = workspace.useClientCensusTable ?? workspace.UseClientCensusTable ?? true;
+                    updateCensusTableVisibility();
+                }
 
                 const mapping = workspace.columnMapping ?? workspace.ColumnMapping ?? {};
                 populateSelect(els.studentNoCol, [mapping.studentNoCol ?? mapping.StudentNoCol ?? 'STD_NO'], mapping.studentNoCol ?? mapping.StudentNoCol ?? 'STD_NO');
@@ -686,10 +702,12 @@ window.toggleAccordion = function (section) {
     async function verifyTables() {
         setBusy(true, 'Verifying tables...');
         try {
-            const result = await postJson(`${apiBase}/VerifyTables`, getRequestPayload());
+            const payload = getRequestPayload();
+            const result = await postJson(`${apiBase}/VerifyTables`, payload);
             const cancellationCount = result.cancellationCount ?? result.CancellationCount ?? 0;
             const clientCount = result.clientCount ?? result.ClientCount ?? 0;
-            setOutput(els.configOutput, `Verified. Cancellation rows: ${cancellationCount}. Client census rows: ${clientCount}.`, 'success');
+            const censusLabel = payload.useClientCensusTable ? `Client census rows: ${clientCount}.` : 'Client census table: not used.';
+            setOutput(els.configOutput, `Verified. Cancellation rows: ${cancellationCount}. ${censusLabel}`, 'success');
         } catch (error) {
             setOutput(els.configOutput, error.message || 'Verification failed.', 'error');
         } finally {
@@ -787,6 +805,15 @@ window.toggleAccordion = function (section) {
             els.workspaceInfo.className = 'alert alert--error';
         }
     }
+
+    function updateCensusTableVisibility() {
+        const use = els.useClientCensusTable?.checked ?? true;
+        if (els.clientCensusTableRow) els.clientCensusTableRow.style.display = use ? '' : 'none';
+        if (els.colmapCensusSection) els.colmapCensusSection.style.display = use ? '' : 'none';
+    }
+
+    els.useClientCensusTable?.addEventListener('change', updateCensusTableVisibility);
+    updateCensusTableVisibility();
 
     els.clientId?.addEventListener('change', async () => {
         state.clientId = Number(els.clientId.value || 0);

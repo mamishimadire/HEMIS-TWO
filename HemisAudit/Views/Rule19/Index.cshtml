@@ -156,12 +156,11 @@
             <div class="accordion-body" id="body-config" style="display:none">
                 <div class="info-box info-box--red">
                     <strong>Rule 19 Logic:</strong><br />
-                    Link <strong>dbo_STUD._001</strong> to <strong>dbo_QUAL._001</strong>, keep rows where
-                    <strong>dbo_STUD._025</strong> matches the selected fulfilled value, and keep only qualification
-                    types in the configured Masters/Doctoral list from <strong>dbo_QUAL._005</strong>.
-                    If PQM is configured: PASS requires <strong>QUAL._003 = PQM.AUTHORISED_QUALIFICATION_NAME</strong> AND <strong>QUAL._005 = PQM.HEQF_QUAL_TYPE</strong> on the same PQM row.
+                    Links <strong>STUD._001 = QUAL._001</strong>, <strong>STUD._001 = CRED.[_001]</strong>, and <strong>CRED.[_030] = CRSE.[_030]</strong>.
+                    Filter: <strong>STUD._025 = 'F'</strong> AND <strong>QUAL._005 IN Masters/Doctoral types</strong>.
+                    Results include link checks (STUD_QUAL, STUD_CRED, CRED_CRSE), Rule19_Filter_Check, and PQM_Validation_Result.
                     <br />
-                    Rule 19 uses <strong>100% population testing only</strong>. No random sample is used in this module.
+                    Rule 19 uses <strong>100% population testing only</strong>. Configure CRED and CRSE tables to enable full linkage validation.
                 </div>
                 <div class="form-grid">
                     <div class="field-group">
@@ -173,24 +172,44 @@
                         <select id="qualTable"></select>
                     </div>
                     <div class="field-group">
-                        <label for="pqmTable">PQM Table <small style="font-weight:normal;color:#888">(optional — enables name &amp; HEQF type matching)</small></label>
+                        <label for="credTable">CRED Table <small style="font-weight:normal;color:#888">(enables CRED/CRSE linkage checks)</small></label>
+                        <select id="credTable"></select>
+                    </div>
+                    <div class="field-group">
+                        <label for="crseTable">CRSE Table <small style="font-weight:normal;color:#888">(required with CRED)</small></label>
+                        <select id="crseTable"></select>
+                    </div>
+                    <div class="field-group">
+                        <label for="pqmTable">PQM Table <small style="font-weight:normal;color:#888">(optional — enables PQM name &amp; HEQF type matching)</small></label>
                         <select id="pqmTable"></select>
                     </div>
                     <div class="field-group">
-                        <label for="qualCodeColumn">Qualification Code Column (_001)</label>
+                        <label for="qualCodeColumn">STUD/QUAL — Qualification Code Column (_001)</label>
                         <select id="qualCodeColumn"></select>
                     </div>
                     <div class="field-group">
-                        <label for="qualNameColumn">Qualification Name Column (_003)</label>
+                        <label for="qualNameColumn">QUAL — Qualification Name Column (_003)</label>
                         <select id="qualNameColumn"></select>
                     </div>
                     <div class="field-group">
-                        <label for="fulfilledColumn">Fulfilled Column (_025)</label>
+                        <label for="fulfilledColumn">STUD — Fulfilled Column (_025)</label>
                         <select id="fulfilledColumn"></select>
                     </div>
                     <div class="field-group">
-                        <label for="qualTypeColumn">Qualification Type Column (_005)</label>
+                        <label for="qualTypeColumn">QUAL — Qualification Type Column (_005)</label>
                         <select id="qualTypeColumn"></select>
+                    </div>
+                    <div class="field-group">
+                        <label for="credJoinCol">CRED — Qualification Code Column (_001) <small style="font-weight:normal;color:#888">joins STUD._001</small></label>
+                        <select id="credJoinCol"></select>
+                    </div>
+                    <div class="field-group">
+                        <label for="credCourseCol">CRED — Course Code Column (_030) <small style="font-weight:normal;color:#888">joins CRSE._030</small></label>
+                        <select id="credCourseCol"></select>
+                    </div>
+                    <div class="field-group">
+                        <label for="crseCourseCol">CRSE — Course Code Column (_030) <small style="font-weight:normal;color:#888">joins CRED._030</small></label>
+                        <select id="crseCourseCol"></select>
                     </div>
                     <div class="field-group">
                         <label for="pqmQualNameColumn">PQM — Qual Name Column <small style="font-weight:normal;color:#888">(AUTHORISED_QUALIFICATION_NAME)</small></label>
@@ -206,7 +225,7 @@
                     </div>
                 </div>
                 <div class="rule19-muted" style="margin-top:8px">
-                    Rule 19 follows the notebook logic and returns the full qualifying population. When PQM is configured, PASS/FAIL is determined by PQM name and HEQF type matching.
+                    Rule 19 returns the full qualifying population with all STUD, QUAL, CRED, and CRSE columns plus link checks and PQM validation. Configure CRED and CRSE tables to enable full linkage checks.
                 </div>
                 <div id="configOutput" class="status-output"></div>
             </div>
@@ -367,6 +386,8 @@
         database: document.getElementById('database'),
         studTable: document.getElementById('studTable'),
         qualTable: document.getElementById('qualTable'),
+        credTable: document.getElementById('credTable'),
+        crseTable: document.getElementById('crseTable'),
         qualCodeColumn: document.getElementById('qualCodeColumn'),
         fulfilledColumn: document.getElementById('fulfilledColumn'),
         fulfilledValue: document.getElementById('fulfilledValue'),
@@ -528,7 +549,12 @@
             showAllRecords: true,
             pqmTable: document.getElementById('pqmTable')?.value || '',
             pqmQualNameColumn: document.getElementById('pqmQualNameColumn')?.value || '',
-            pqmQualTypeColumn: document.getElementById('pqmQualTypeColumn')?.value || ''
+            pqmQualTypeColumn: document.getElementById('pqmQualTypeColumn')?.value || '',
+            credTable: els.credTable?.value || '',
+            credJoinCol: document.getElementById('credJoinCol')?.value || '_001',
+            credCourseCol: document.getElementById('credCourseCol')?.value || '_030',
+            crseTable: els.crseTable?.value || '',
+            crseCourseCol: document.getElementById('crseCourseCol')?.value || '_030'
         };
     }
 
@@ -592,6 +618,16 @@
             ? ((summary.passCount / summary.totalValidated) * 100).toFixed(2)
             : '0.00';
 
+        const credStatCard = summary.credRecordCount > 0 ? `
+                <div class="stat-card">
+                    <div class="stat-card__label">CRED Records</div>
+                    <div class="stat-card__value">${formatNumber(summary.credRecordCount)}</div>
+                </div>` : '';
+        const crseStatCard = summary.crseRecordCount > 0 ? `
+                <div class="stat-card">
+                    <div class="stat-card__label">CRSE Records</div>
+                    <div class="stat-card__value">${formatNumber(summary.crseRecordCount)}</div>
+                </div>` : '';
         els.analysisPane.innerHTML = `
             <div class="rule19-stat-grid" style="margin-bottom:24px">
                 <div class="stat-card">
@@ -601,7 +637,7 @@
                 <div class="stat-card">
                     <div class="stat-card__label">QUAL Records</div>
                     <div class="stat-card__value">${formatNumber(summary.qualRecordCount)}</div>
-                </div>
+                </div>${credStatCard}${crseStatCard}
                 <div class="stat-card">
                     <div class="stat-card__label">Eligible Population</div>
                     <div class="stat-card__value">${formatNumber(summary.totalValidated)}</div>
@@ -903,6 +939,16 @@
         ensureOption(els.qualTypeColumn, workspace.qualTypeColumn || '_005');
         const qualNameEl = document.getElementById('qualNameColumn');
         if (qualNameEl) ensureOption(qualNameEl, workspace.qualNameColumn || '_003');
+        const credTableEl  = document.getElementById('credTable');
+        const crseTableEl  = document.getElementById('crseTable');
+        const credJoinEl   = document.getElementById('credJoinCol');
+        const credCourseEl = document.getElementById('credCourseCol');
+        const crseCourseEl = document.getElementById('crseCourseCol');
+        if (credTableEl)  ensureOption(credTableEl,  workspace.credTable  || '');
+        if (crseTableEl)  ensureOption(crseTableEl,  workspace.crseTable  || '');
+        if (credJoinEl)   ensureOption(credJoinEl,   workspace.credJoinCol  || '_001');
+        if (credCourseEl) ensureOption(credCourseEl, workspace.credCourseCol || '_030');
+        if (crseCourseEl) ensureOption(crseCourseEl, workspace.crseCourseCol || '_030');
         const pqmTableEl = document.getElementById('pqmTable');
         const pqmNameEl  = document.getElementById('pqmQualNameColumn');
         const pqmTypeEl  = document.getElementById('pqmQualTypeColumn');
@@ -994,13 +1040,31 @@
 
         populateSelect(els.studTable, data.tables || [], data.autoStudTable || 'dbo_STUD');
         populateSelect(els.qualTable, data.tables || [], data.autoQualTable || 'dbo_QUAL');
+
+        const optionalPrefix = '<option value="">Select table (optional)</option>';
         const pqmSel = document.getElementById('pqmTable');
         if (pqmSel) {
-            pqmSel.innerHTML = '<option value="">Select table (e.g. PQM) — optional</option>';
+            pqmSel.innerHTML = '<option value="">Select PQM table (optional)</option>';
             (data.tables || []).forEach(t => pqmSel.appendChild(new Option(t, t)));
             if (data.autoPqmTable && (data.tables || []).includes(data.autoPqmTable)) {
                 pqmSel.value = data.autoPqmTable;
                 await loadPqmColumns();
+            }
+        }
+        if (els.credTable) {
+            els.credTable.innerHTML = '<option value="">Select CRED table (optional)</option>';
+            (data.tables || []).forEach(t => els.credTable.appendChild(new Option(t, t)));
+            if (data.autoCredTable && (data.tables || []).includes(data.autoCredTable)) {
+                els.credTable.value = data.autoCredTable;
+                await loadCredColumns();
+            }
+        }
+        if (els.crseTable) {
+            els.crseTable.innerHTML = '<option value="">Select CRSE table (optional)</option>';
+            (data.tables || []).forEach(t => els.crseTable.appendChild(new Option(t, t)));
+            if (data.autoCrseTable && (data.tables || []).includes(data.autoCrseTable)) {
+                els.crseTable.value = data.autoCrseTable;
+                await loadCrseColumns();
             }
         }
         await loadStudColumns();
@@ -1042,6 +1106,30 @@
         const qualNameSel = document.getElementById('qualNameColumn');
         if (qualNameSel) populateSelect(qualNameSel, data.columns || [], preferredQualNameColumn || data.autoQualNameColumn || '_003');
         populateSelect(els.qualTypeColumn, data.columns || [], preferredQualTypeColumn || data.autoQualTypeColumn || '_005');
+    }
+
+    async function loadCredColumns(preferredJoinCol, preferredCourseCol) {
+        if (!els.credTable?.value) return;
+        const data = await postJson(`${apiBasePath}/GetColumns`, {
+            server: els.server.value.trim(), database: els.database.value,
+            driver: els.driver.value, tableName: els.credTable.value
+        });
+        if (!data.success) return;
+        const joinSel = document.getElementById('credJoinCol');
+        const courseSel = document.getElementById('credCourseCol');
+        if (joinSel) populateSelect(joinSel, data.columns || [], preferredJoinCol || '_001');
+        if (courseSel) populateSelect(courseSel, data.columns || [], preferredCourseCol || '_030');
+    }
+
+    async function loadCrseColumns(preferredCourseCol) {
+        if (!els.crseTable?.value) return;
+        const data = await postJson(`${apiBasePath}/GetColumns`, {
+            server: els.server.value.trim(), database: els.database.value,
+            driver: els.driver.value, tableName: els.crseTable.value
+        });
+        if (!data.success) return;
+        const courseSel = document.getElementById('crseCourseCol');
+        if (courseSel) populateSelect(courseSel, data.columns || [], preferredCourseCol || '_030');
     }
 
     async function loadPqmColumns(preferredNameCol, preferredTypeCol) {
@@ -1099,10 +1187,12 @@
                 throw new Error(data.error || 'Verification failed.');
             }
 
+            const credPart = data.credRecordCount > 0 ? ` | CRED: <strong>${formatNumber(data.credRecordCount)}</strong>` : '';
+            const crsePart = data.crseRecordCount > 0 ? ` | CRSE: <strong>${formatNumber(data.crseRecordCount)}</strong>` : '';
             setAlert(
                 els.connectionOutput,
                 'success',
-                `STUD records: <strong>${formatNumber(data.studRecordCount)}</strong> | QUAL records: <strong>${formatNumber(data.qualRecordCount)}</strong> | Eligible population: <strong>${formatNumber(data.eligiblePopulationCount)}</strong>`
+                `STUD: <strong>${formatNumber(data.studRecordCount)}</strong> | QUAL: <strong>${formatNumber(data.qualRecordCount)}</strong>${credPart}${crsePart} | Eligible population: <strong>${formatNumber(data.eligiblePopulationCount)}</strong>`
             );
         } finally {
             hideSpinner();
@@ -1275,6 +1365,17 @@
     els.qualTypeColumn.addEventListener('change', markWorkspaceDirty);
     els.mdTypesText.addEventListener('change', markWorkspaceDirty);
     document.getElementById('qualNameColumn')?.addEventListener('change', markWorkspaceDirty);
+    els.credTable?.addEventListener('change', async () => {
+        await markWorkspaceDirty();
+        await loadCredColumns();
+    });
+    els.crseTable?.addEventListener('change', async () => {
+        await markWorkspaceDirty();
+        await loadCrseColumns();
+    });
+    document.getElementById('credJoinCol')?.addEventListener('change', markWorkspaceDirty);
+    document.getElementById('credCourseCol')?.addEventListener('change', markWorkspaceDirty);
+    document.getElementById('crseCourseCol')?.addEventListener('change', markWorkspaceDirty);
     document.getElementById('pqmTable')?.addEventListener('change', async () => {
         await markWorkspaceDirty();
         await loadPqmColumns();

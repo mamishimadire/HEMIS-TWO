@@ -311,10 +311,11 @@ namespace HemisAudit.Services
             return $@"
 SET NOCOUNT ON;
 
-IF OBJECT_ID('tempdb..#R64CregRef')     IS NOT NULL DROP TABLE #R64CregRef;
-IF OBJECT_ID('tempdb..#R64CregSummary') IS NOT NULL DROP TABLE #R64CregSummary;
-IF OBJECT_ID('tempdb..#R64ProdRef')     IS NOT NULL DROP TABLE #R64ProdRef;
-IF OBJECT_ID('tempdb..#R64StudPop')     IS NOT NULL DROP TABLE #R64StudPop;
+IF OBJECT_ID('tempdb..#R64CregRef')          IS NOT NULL DROP TABLE #R64CregRef;
+IF OBJECT_ID('tempdb..#R64CregSummary')      IS NOT NULL DROP TABLE #R64CregSummary;
+IF OBJECT_ID('tempdb..#R64CregStudentMatch') IS NOT NULL DROP TABLE #R64CregStudentMatch;
+IF OBJECT_ID('tempdb..#R64ProdRef')          IS NOT NULL DROP TABLE #R64ProdRef;
+IF OBJECT_ID('tempdb..#R64StudPop')          IS NOT NULL DROP TABLE #R64StudPop;
 
 -- CREG: distinct (student, compare-value) pairs
 SELECT DISTINCT
@@ -359,25 +360,31 @@ WHERE [{mapping.StudStudentNoCol}] IS NOT NULL
 
 CREATE CLUSTERED INDEX IX_R64StudPop ON #R64StudPop(StudentNo, StudCompareValue);
 
--- Final validation join — all lookups are now index seeks on temp tables
+-- Students where AT LEAST ONE compare value matches between STUD and CREG.
+-- A student with multiple qualifications only needs one match in CREG to fully pass.
+SELECT DISTINCT P.StudentNo
+INTO #R64CregStudentMatch
+FROM #R64StudPop P
+INNER JOIN #R64CregRef CR ON CR.CregStudentNo = P.StudentNo AND CR.CregCompareValue = P.StudCompareValue;
+
+CREATE CLUSTERED INDEX IX_R64CregStudentMatch ON #R64CregStudentMatch(StudentNo);
+
+-- Final validation join — student-level match: if any _001 for this student matches CREG, all their rows PASS
 SELECT
     'STUD' AS SourceTable,
     ISNULL(P.StudentNo, '') AS StudentNo,
     ISNULL(CS.CregStudentNo, '') AS CregStudentNo,
     ISNULL(PR.ProdStudentNo, '') AS ProdStudentNo,
     ISNULL(P.StudCompareValue, '') AS StudCompareValue,
-    CASE
-        WHEN CM.CregStudentNo IS NOT NULL THEN ISNULL(CM.CregCompareValue, '')
-        ELSE ISNULL(CS.CregCompareValue, '')
-    END AS CregCompareValue,
+    ISNULL(CS.CregCompareValue, '') AS CregCompareValue,
     CASE
         WHEN CS.CregStudentNo IS NULL THEN 'NOTE'
-        WHEN CM.CregStudentNo IS NULL THEN 'MISMATCH'
+        WHEN MM.StudentNo IS NULL THEN 'MISMATCH'
         ELSE ''
     END AS ErrorCode,
     CASE
         WHEN CS.CregStudentNo IS NULL THEN 'FAIL'
-        WHEN CM.CregStudentNo IS NULL THEN 'FAIL'
+        WHEN MM.StudentNo IS NULL THEN 'FAIL'
         ELSE 'PASS'
     END AS ValidationResult,
     CASE
@@ -385,16 +392,16 @@ SELECT
             THEN 'FAIL: STUD.{mapping.StudStudentNoCol} student number ''' + P.StudentNo + ''' was not found in CREG.{mapping.CregStudentNoCol}. Note: this student should not appear in production. Confirmation: it was not found in STUD PRODUCTION.{mapping.ProdStudentNoCol}.'
         WHEN CS.CregStudentNo IS NULL
             THEN 'FAIL: STUD.{mapping.StudStudentNoCol} student number ''' + P.StudentNo + ''' was not found in CREG.{mapping.CregStudentNoCol}. Note: this student should not appear in production. Confirmation: it exists in STUD PRODUCTION.{mapping.ProdStudentNoCol} as ''' + PR.ProdStudentNo + '''.'
-        WHEN CM.CregStudentNo IS NULL
-            THEN 'FAIL: STUD.{mapping.StudStudentNoCol} student number ''' + P.StudentNo + ''' exists in CREG.{mapping.CregStudentNoCol}, but STUD.{mapping.StudCompareValueCol} value ''' + CASE WHEN ISNULL(P.StudCompareValue, '') = '' THEN '[BLANK]' ELSE P.StudCompareValue END + ''' does not match CREG.{mapping.CregCompareValueCol} value(s) ''' + CASE WHEN ISNULL(CS.CregCompareValue, '') = '' THEN '[BLANK]' ELSE CS.CregCompareValue END + '''.'
-        ELSE 'PASS: STUD.{mapping.StudStudentNoCol} student number ''' + P.StudentNo + ''' exists in CREG.{mapping.CregStudentNoCol} and STUD.{mapping.StudCompareValueCol} value ''' + CASE WHEN ISNULL(P.StudCompareValue, '') = '' THEN '[BLANK]' ELSE P.StudCompareValue END + ''' matches CREG.{mapping.CregCompareValueCol} value ''' + CASE WHEN ISNULL(CM.CregCompareValue, '') = '' THEN '[BLANK]' ELSE CM.CregCompareValue END + '''.'
+        WHEN MM.StudentNo IS NULL
+            THEN 'FAIL: STUD.{mapping.StudStudentNoCol} student number ''' + P.StudentNo + ''' exists in CREG.{mapping.CregStudentNoCol}, but none of the student''s {mapping.StudCompareValueCol} values match any CREG.{mapping.CregCompareValueCol} value(s). CREG has: ''' + ISNULL(CS.CregCompareValue, '') + '''.'
+        ELSE 'PASS: STUD.{mapping.StudStudentNoCol} student number ''' + P.StudentNo + ''' exists in CREG.{mapping.CregStudentNoCol} with at least one matching {mapping.CregCompareValueCol} value. CREG {mapping.CregCompareValueCol} value(s): ''' + ISNULL(CS.CregCompareValue, '') + '''.'
     END AS ValidationExplanation
 FROM #R64StudPop P
-LEFT JOIN #R64CregSummary CS ON CS.CregStudentNo = P.StudentNo
-LEFT JOIN #R64CregRef      CM ON CM.CregStudentNo = P.StudentNo AND CM.CregCompareValue = P.StudCompareValue
-LEFT JOIN #R64ProdRef      PR ON PR.ProdStudentNo = P.StudentNo
+LEFT JOIN #R64CregSummary      CS ON CS.CregStudentNo = P.StudentNo
+LEFT JOIN #R64CregStudentMatch MM ON MM.StudentNo = P.StudentNo
+LEFT JOIN #R64ProdRef          PR ON PR.ProdStudentNo = P.StudentNo
 ORDER BY
-    CASE WHEN CS.CregStudentNo IS NULL OR CM.CregStudentNo IS NULL THEN 0 ELSE 1 END,
+    CASE WHEN CS.CregStudentNo IS NULL OR MM.StudentNo IS NULL THEN 0 ELSE 1 END,
     P.StudentNo;";
         }
 
@@ -410,9 +417,10 @@ ORDER BY
 -- Join      : STUD.{mapping.StudStudentNoCol} -> CREG.{mapping.CregStudentNoCol}
 -- Compare   : STUD.{mapping.StudCompareValueCol} -> CREG.{mapping.CregCompareValueCol}
 -- Confirm   : STUD.{mapping.StudStudentNoCol} -> STUD PRODUCTION.{mapping.ProdStudentNoCol}
--- Rule      : PASS when the STUD student number exists in CREG and the compare values match
---           : FAIL when the student number is missing from CREG
---           : FAIL when the student number exists in CREG but the compare values differ
+-- Rule      : PASS when the STUD student number exists in CREG and AT LEAST ONE of the student's compare values matches
+--           : PASS even if a specific row's compare value doesn't match, as long as another row for the same student matches
+--           : FAIL when the student number is missing from CREG entirely
+--           : FAIL when the student number exists in CREG but NONE of the student's compare values match any CREG compare values
 -- Fail Note : Student should not appear in production; confirmation uses STUD PRODUCTION
 -- ============================================================
 {BuildValidationSql(studTable, cregTable, prodTable, mapping)}";

@@ -15,13 +15,17 @@
 
 <style>
     .rule16-results-wrap { display:grid; gap:24px; }
-    .rule16-filterbar { display:flex; gap:12px; flex-wrap:wrap; align-items:end; margin-bottom:18px; }
-    .rule16-filterbar label { font-size:12px; font-weight:700; text-transform:uppercase; color:#475569; display:block; margin-bottom:6px; }
     .rule16-preview-note { margin-bottom:16px; }
     .rule16-control-card { background:#fff; padding:0 0 4px 0; }
-    .rule16-control-title { font-weight:800; font-size:15px; margin:0 0 14px 0; }
+    .rule16-control-title { font-weight:800; font-size:15px; margin:0 0 14px 0; color:#1e3a5f; }
     .rule16-mini-meta { color:#64748b; font-size:13px; margin:0 0 14px 0; }
     .rule16-table-wrap { overflow-x:auto; }
+    .rule16-ctrl-tabs { display:flex; gap:0; border-bottom:2px solid #e2e8f0; margin-bottom:20px; }
+    .rule16-ctrl-tab { flex:1; padding:10px 16px; background:none; border:none; border-bottom:3px solid transparent; font-size:13px; font-weight:600; color:#64748b; cursor:pointer; transition:color .15s,border-color .15s; text-align:center; }
+    .rule16-ctrl-tab:hover { color:#1e40af; background:#f8fafc; }
+    .rule16-ctrl-tab.active { color:#1e40af; border-bottom-color:#1e40af; background:#eff6ff; }
+    .rule16-ctrl-badge { display:inline-block; background:#e2e8f0; color:#374151; border-radius:10px; padding:1px 7px; font-size:11px; font-weight:700; margin-left:6px; vertical-align:middle; }
+    .rule16-ctrl-tab.active .rule16-ctrl-badge { background:#bfdbfe; color:#1e40af; }
     .rule16-grid { width:100%; min-width:1140px; border-collapse:collapse; table-layout:fixed; }
     .rule16-grid th, .rule16-grid td { border:2px solid #222; padding:4px 8px; text-align:center; white-space:normal; word-break:break-word; vertical-align:middle; font-family:Consolas, "Courier New", monospace; font-size:12px; }
     .rule16-grid .group-stud { background:#e8c2e8; }
@@ -116,9 +120,9 @@
                 <div class="accordion-body" id="body-config" style="display:none">
                     <div class="info-box info-box--red">
                         <strong>Rule 16 Logic:</strong><br />
-                        <span>Join <strong>dbo_STUD._007</strong> to the bridge table <strong>_007</strong>.</span><br />
-                        <span>Join the bridge table <strong>_030</strong> to <strong>dbo_CRSE._030</strong>.</span><br />
-                        <span>Filter the joined data to students where <strong>dbo_STUD._025='N'</strong>, then split it into the three control populations below.</span><br />
+                        <span>Join <strong>STUD._007</strong> to the bridge table <strong>_007</strong>.</span><br />
+                        <span>Join the bridge table <strong>_030</strong> to <strong>CRSE._030</strong>.</span><br />
+                        <span>Filter the joined data using the configurable Unfulfilled, Foundation, and Distance columns below, then split into three control populations.</span><br />
                         <span>The validation tests 100% of the matching population for each control using the actual values in the source columns.</span>
                     </div>
                     <div class="form-grid">
@@ -135,10 +139,37 @@
                             <select id="crseTable"></select>
                         </div>
                     </div>
-                    <div class="alert alert--info" style="margin-top:16px">
-                        <strong>Control 1:</strong> <code>_025='N' AND _091='Y'</code><br />
-                        <strong>Control 2:</strong> <code>_025='N' AND _091='Y' AND _024='D'</code><br />
-                        <strong>Control 3:</strong> <code>_025='N' AND _091&lt;&gt;'Y' AND _024&lt;&gt;'D'</code>
+                    <div style="font-weight:700;font-size:12px;text-transform:uppercase;color:#555;margin:14px 0 6px">Filter Columns</div>
+                    <div class="form-grid" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr))">
+                        <div class="field-group">
+                            <label for="unfulfilledCol">Unfulfilled Column (STUD)</label>
+                            <select id="unfulfilledCol"><option value="_025">_025</option></select>
+                        </div>
+                        <div class="field-group">
+                            <label for="unfulfilledVal">Unfulfilled Value</label>
+                            <input type="text" id="unfulfilledVal" value="N" style="height:36px;padding:0 8px;border:1px solid #ccc;border-radius:4px;font-size:13px" />
+                        </div>
+                        <div class="field-group">
+                            <label for="foundationCol">Foundation Column (CRSE)</label>
+                            <select id="foundationCol"><option value="_091">_091</option></select>
+                        </div>
+                        <div class="field-group">
+                            <label for="foundationVal">Foundation Value</label>
+                            <input type="text" id="foundationVal" value="Y" style="height:36px;padding:0 8px;border:1px solid #ccc;border-radius:4px;font-size:13px" />
+                        </div>
+                        <div class="field-group">
+                            <label for="distanceCol">Distance Column (STUD)</label>
+                            <select id="distanceCol"><option value="_024">_024</option></select>
+                        </div>
+                        <div class="field-group">
+                            <label for="distanceVal">Distance Value</label>
+                            <input type="text" id="distanceVal" value="D" style="height:36px;padding:0 8px;border:1px solid #ccc;border-radius:4px;font-size:13px" />
+                        </div>
+                    </div>
+                    <div id="filterCriteriaInfo" class="alert alert--info" style="margin-top:12px">
+                        <strong>Control 1:</strong> <span id="c1CriteriaLabel">_025='N' AND _091='Y'</span><br />
+                        <strong>Control 2:</strong> <span id="c2CriteriaLabel">_025='N' AND _091='Y' AND _024='D'</span><br />
+                        <strong>Control 3:</strong> <span id="c3CriteriaLabel">_025='N' AND _091&lt;&gt;'Y' AND _024&lt;&gt;'D'</span>
                     </div>
                     <div id="configOutput" class="status-output"></div>
                 </div>
@@ -280,7 +311,7 @@ window.toggleAccordion = function (section) {
         hasPendingValidation: false,
         currentStatus: '',
         resultFilter: 'ALL',
-        controlFilter: 'ALL',
+        controlFilter: 'Control_1',
         chartInstances: {}
     };
 
@@ -292,6 +323,15 @@ window.toggleAccordion = function (section) {
         studTable: document.getElementById('studTable'),
         cregTable: document.getElementById('cregTable'),
         crseTable: document.getElementById('crseTable'),
+        unfulfilledCol: document.getElementById('unfulfilledCol'),
+        unfulfilledVal: document.getElementById('unfulfilledVal'),
+        foundationCol: document.getElementById('foundationCol'),
+        foundationVal: document.getElementById('foundationVal'),
+        distanceCol: document.getElementById('distanceCol'),
+        distanceVal: document.getElementById('distanceVal'),
+        c1CriteriaLabel: document.getElementById('c1CriteriaLabel'),
+        c2CriteriaLabel: document.getElementById('c2CriteriaLabel'),
+        c3CriteriaLabel: document.getElementById('c3CriteriaLabel'),
         connectionOutput: document.getElementById('connectionOutput'),
         configOutput: document.getElementById('configOutput'),
         analysisPane: document.getElementById('analysisPane'),
@@ -437,8 +477,23 @@ window.toggleAccordion = function (section) {
             studTable: els.studTable?.value || 'dbo_STUD',
             bridgeTable: els.cregTable?.value || defaultBridgeTable,
             cregTable: els.cregTable?.value || defaultBridgeTable,
-            crseTable: els.crseTable?.value || 'dbo_CRSE'
+            crseTable: els.crseTable?.value || 'dbo_CRSE',
+            unfulfilledCol: els.unfulfilledCol?.value || '_025',
+            unfulfilledVal: els.unfulfilledVal?.value || 'N',
+            foundationCol: els.foundationCol?.value || '_091',
+            foundationVal: els.foundationVal?.value || 'Y',
+            distanceCol: els.distanceCol?.value || '_024',
+            distanceVal: els.distanceVal?.value || 'D'
         };
+    }
+
+    function updateCriteriaPreview() {
+        const uc = els.unfulfilledCol?.value || '_025', uv = els.unfulfilledVal?.value || 'N';
+        const fc = els.foundationCol?.value || '_091', fv = els.foundationVal?.value || 'Y';
+        const dc = els.distanceCol?.value || '_024', dv = els.distanceVal?.value || 'D';
+        if (els.c1CriteriaLabel) els.c1CriteriaLabel.textContent = `${uc}='${uv}' AND ${fc}='${fv}'`;
+        if (els.c2CriteriaLabel) els.c2CriteriaLabel.textContent = `${uc}='${uv}' AND ${fc}='${fv}' AND ${dc}='${dv}'`;
+        if (els.c3CriteriaLabel) els.c3CriteriaLabel.textContent = `${uc}='${uv}' AND ${fc}<>'${fv}' AND ${dc}<>'${dv}'`;
     }
 
     function updateWorkspaceButtons() {
@@ -446,7 +501,7 @@ window.toggleAccordion = function (section) {
         const normalizedRole = normalizeRole(role);
         const normalizedSystemRole = normalizeRole(currentSystemRole);
         const hasUnsavedValidation = !!state.summary &&
-            (!!state.hasPendingValidation || (!state.currentRunId && !state.isWorkspaceSaved));
+            (!!state.hasPendingValidation || !state.isWorkspaceSaved);
         const canEdit = !isResultsOnlyRole &&
             (normalizedSystemRole === 'dataanalyst' || normalizedRole === 'dataanalyst' || hasUnsavedValidation);
         const canSign = !state.hasPendingValidation && !!state.currentRunId &&
@@ -692,6 +747,13 @@ window.toggleAccordion = function (section) {
         populateSelect(els.studTable, workspace.studTable ? [workspace.studTable] : [], workspace.studTable);
         populateSelect(els.cregTable, [workspace.bridgeTable || workspace.cregTable || defaultBridgeTable], workspace.bridgeTable || workspace.cregTable || defaultBridgeTable);
         populateSelect(els.crseTable, workspace.crseTable ? [workspace.crseTable] : [], workspace.crseTable);
+        if (els.unfulfilledCol) { populateSelect(els.unfulfilledCol, [workspace.unfulfilledCol || '_025'], workspace.unfulfilledCol || '_025'); }
+        if (els.unfulfilledVal) els.unfulfilledVal.value = workspace.unfulfilledVal || 'N';
+        if (els.foundationCol) { populateSelect(els.foundationCol, [workspace.foundationCol || '_091'], workspace.foundationCol || '_091'); }
+        if (els.foundationVal) els.foundationVal.value = workspace.foundationVal || 'Y';
+        if (els.distanceCol) { populateSelect(els.distanceCol, [workspace.distanceCol || '_024'], workspace.distanceCol || '_024'); }
+        if (els.distanceVal) els.distanceVal.value = workspace.distanceVal || 'D';
+        updateCriteriaPreview();
 
         els.workspaceRunState.textContent = workspace.runId ? `Run #${workspace.runId}` : 'No saved run loaded';
         els.workspaceRunLabel.textContent = workspace.runId ? `Rule 16 Run #${workspace.runId}` : 'No saved run yet';
@@ -779,6 +841,29 @@ window.toggleAccordion = function (section) {
         populateSelect(els.cregTable, data.tables || [], data.autoBridgeTable || data.autoCregTable);
         populateSelect(els.crseTable, data.tables || [], data.autoCrseTable);
         setAlert(els.configOutput, 'success', `Loaded ${data.tables.length} table(s).`);
+        await loadFilterColumns();
+    }
+
+    async function loadFilterColumns() {
+        const baseReq = { server: els.server?.value.trim() || '', database: els.database?.value || '', driver: els.driver?.value || 'ODBC Driver 17 for SQL Server' };
+        const studTbl = els.studTable?.value, crseTbl = els.crseTable?.value;
+        if (!baseReq.server || !baseReq.database || !studTbl || !crseTbl) return;
+        try {
+            const [studRes, crseRes] = await Promise.all([
+                postJson(`${apiBasePath}/GetTableColumns`, { ...baseReq, tableName: studTbl }),
+                postJson(`${apiBasePath}/GetTableColumns`, { ...baseReq, tableName: crseTbl })
+            ]);
+            const curUc = els.unfulfilledCol?.value || '_025', curDc = els.distanceCol?.value || '_024';
+            const curFc = els.foundationCol?.value || '_091';
+            if (studRes.success) {
+                populateSelect(els.unfulfilledCol, studRes.columns, curUc);
+                populateSelect(els.distanceCol, studRes.columns, curDc);
+            }
+            if (crseRes.success) {
+                populateSelect(els.foundationCol, crseRes.columns, curFc);
+            }
+            updateCriteriaPreview();
+        } catch { /* non-fatal */ }
     }
 
     async function verifyTables() {
@@ -985,83 +1070,96 @@ window.toggleAccordion = function (section) {
         return `${resultText} this Criteria: ${criteriaText || ''}`;
     }
 
-    function getStudCriteriaText(controlType) {
+    function getStudCriteriaText(controlType, uc, uv, dc, dv) {
+        uc = uc || '_025'; uv = uv || 'N'; dc = dc || '_024'; dv = dv || 'D';
         switch (controlType) {
-            case 'Control_1':
-                return "_025='N'";
-            case 'Control_2':
-                return "_025='N' AND _024='D'";
-            case 'Control_3':
-                return "_025='N' AND _024<>'D'";
-            default:
-                return '';
+            case 'Control_1': return `${uc}='${uv}'`;
+            case 'Control_2': return `${uc}='${uv}' AND ${dc}='${dv}'`;
+            case 'Control_3': return `${uc}='${uv}' AND ${dc}<>'${dv}'`;
+            default: return '';
         }
     }
 
-    function renderControlSection(summary, controlType, include024) {
+    function renderControlSection(summary, controlType) {
         const controlMeta = (summary.controlSummaries || []).find(item => item.controlType === controlType);
-        const rows = getFilteredRows(summary).filter(row => row.controlType === controlType);
-        if (state.controlFilter !== 'ALL' && state.controlFilter !== controlType) {
-            return '';
+        const allRows = summary?.reviewRows || [];
+        const dv = (summary.distanceVal || 'D').toUpperCase();
+
+        let rows;
+        if (controlType === 'Control_1') {
+            rows = allRows;
+        } else if (controlType === 'Control_2') {
+            rows = allRows.filter(row => String((row.displayValues || {}).Attendance_Mode || '').trim().toUpperCase() === dv);
+        } else {
+            rows = allRows.filter(row => String((row.displayValues || {}).Attendance_Mode || '').trim().toUpperCase() !== dv);
         }
 
         const criteriaText = controlMeta?.criteriaText || '';
-        const studCriteriaText = getStudCriteriaText(controlType);
+        const uc = summary.unfulfilledCol || '_025', uv = summary.unfulfilledVal || 'N';
+        const fc = summary.foundationCol || '_091', fv = summary.foundationVal || 'Y';
+        const dc = summary.distanceCol || '_024';
+        const studTableName   = summary.studTable || 'dbo_STUD';
         const bridgeTableName = summary.bridgeTable || summary.cregTable || defaultBridgeTable;
+        const crseTableName   = summary.crseTable || 'dbo_CRSE';
 
         const rowHtml = rows.map(row => {
-            const rawV = row.displayValues || {}; const v = Object.fromEntries(Object.entries(rawV).map(([k, val]) => [k.toUpperCase(), val]));
-            const resultText = String(row.validationResult || '').toUpperCase() === 'FAIL' ? 'FAIL' : 'PASS';
+            const rawV = row.displayValues || {};
+            const g = k => escapeHtml(rawV[k] || '');
+            const am = String(rawV.Attendance_Mode || '').trim().toUpperCase();
+            const category = am === dv ? 'Distance Learning' : 'Normal Student';
+
             return `
                 <tr>
-                    <td>${escapeHtml(v.STUD__001 || '')}</td>
-                    <td>${escapeHtml(v.STUD__007 || '')}</td>
-                    <td>${escapeHtml(v.STUD__025 || '')}</td>
-                    ${include024 ? `<td>${escapeHtml(v.STUD__024 || '')}</td>` : ''}
-                    <td class="criteria-cell"></td>
-                    <td>${escapeHtml(v.BRIDGE__001 || '')}</td>
-                    <td>${escapeHtml(v.BRIDGE__030 || '')}</td>
-                    <td class="mid-pass-cell"></td>
-                    <td>${escapeHtml(v.CRSE__030 || '')}</td>
-                    <td>${escapeHtml(v.CRSE__091 || '')}</td>
-                    <td class="final-cell ${row.validationResult === 'FAIL' ? 'is-fail' : 'is-pass'}">
-                        <div class="result-text">${escapeHtml(resultText)}</div>
-                    </td>
+                    <td>${g('Student_Number')}</td>
+                    <td>${g('Student_Qualification_Code')}</td>
+                    <td>${g('Qualification_Fulfilled_Indicator')}</td>
+                    <td class="is-pass">${g('Attendance_Mode')}</td>
+                    <td>${g('CREG_Qualification_Code')}</td>
+                    <td>${g('CREG_Student_Number')}</td>
+                    <td>${g('CREG_Course_Code')}</td>
+                    <td>${g('CRSE_Course_Code')}</td>
+                    <td>${g('Foundation_Course_Indicator')}</td>
+                    <td>${g('CRSE_058')}</td>
+                    <td class="final-cell is-pass">${escapeHtml(category)}</td>
                 </tr>`;
         }).join('');
 
+        const controlCriteriaLabel = controlType === 'Control_1'
+            ? `${uc}='${uv}' AND ${fc}='${fv}'`
+            : controlType === 'Control_2'
+                ? `${uc}='${uv}' AND ${fc}='${fv}' AND ${dc}='${dv}'`
+                : `${uc}='${uv}' AND ${fc}='${fv}' AND ${dc}&lt;&gt;'${dv}'`;
+
+        const thead = `
+            <tr>
+                <th colspan="2" class="group-stud">${escapeHtml(studTableName)}</th>
+                <th class="group-stud">${escapeHtml(uc)}='${escapeHtml(uv)}'</th>
+                <th class="criteria-head">${escapeHtml(dc)}</th>
+                <th colspan="3" class="group-bridge">${escapeHtml(bridgeTableName)}</th>
+                <th colspan="2" class="group-crse">${escapeHtml(crseTableName)}</th>
+                <th>${escapeHtml(fc)}='${escapeHtml(fv)}'</th>
+                <th class="group-final">Category</th>
+            </tr>
+            <tr>
+                <th>Student_Number</th><th>Stud_Qual_Code</th><th>Qual_Fulfilled</th>
+                <th>Attendance_Mode</th><th>CREG_Qual</th><th>CREG_Stud</th>
+                <th>CREG_Course</th><th>CRSE_Course</th>
+                <th>Foundation</th><th>CRSE_058</th><th>Category</th>
+            </tr>`;
+
+        const count = controlMeta ? ` — ${formatNumber(controlMeta.totalCount || rows.length)} row(s)` : '';
+
         return `
             <div class="rule16-control-card">
-                <div class="rule16-control-title">${escapeHtml(getControlHeading(controlType, criteriaText))}</div>
-                ${rows.length === 0 ? `<div class="alert alert--info" style="margin:0">No rows match the selected control/result filters in the current browser result set.</div>` : `
-                <div class="rule16-table-wrap">
-                    <table class="rule16-grid">
-                        <thead>
-                            <tr>
-                                <th colspan="${include024 ? 4 : 3}" class="group-stud">dbo_STUD</th>
-                                <th class="criteria-head">Criteria:<br />${escapeHtml(studCriteriaText)}</th>
-                                <th colspan="2" class="group-bridge">${escapeHtml(bridgeTableName)}</th>
-                                <th class="criteria-head"></th>
-                                <th colspan="2" class="group-crse">dbo_CRSE</th>
-                                <th class="group-final">Final results</th>
-                            </tr>
-                            <tr>
-                                <th>_001</th>
-                                <th>_007</th>
-                                <th>_025</th>
-                                ${include024 ? '<th>_024</th>' : ''}
-                                <th></th>
-                                <th>_001</th>
-                                <th>_030</th>
-                                <th></th>
-                                <th>_030</th>
-                                <th>_091</th>
-                                <th class="final-head">pass/fail</th>
-                            </tr>
-                        </thead>
-                        <tbody>${rowHtml}</tbody>
-                    </table>
-                </div>`}
+                <div class="rule16-control-title">${escapeHtml(getControlHeading(controlType, criteriaText))}${count}</div>
+                ${rows.length === 0
+                    ? `<div class="alert alert--info" style="margin:0">No rows in the current browser preview for this control.</div>`
+                    : `<div class="rule16-table-wrap">
+                        <table class="rule16-grid">
+                            <thead>${thead}</thead>
+                            <tbody>${rowHtml}</tbody>
+                        </table>
+                       </div>`}
             </div>`;
     }
 
@@ -1077,49 +1175,35 @@ window.toggleAccordion = function (section) {
         }
 
         const summary = state.summary;
-        const filteredRows = getFilteredRows(summary);
+        const allRows = summary?.reviewRows || [];
+        const _dv     = (summary.distanceVal || 'D').toUpperCase();
+        const c2Rows  = allRows.filter(r => String((r.displayValues || {}).Attendance_Mode || '').trim().toUpperCase() === _dv);
+        const c3Rows  = allRows.filter(r => String((r.displayValues || {}).Attendance_Mode || '').trim().toUpperCase() !== _dv);
+
+        const activeCtrl = state.controlFilter || 'Control_1';
+
         els.resultsPane.innerHTML = `
-            <div class="rule16-filterbar">
-                <div class="field-group" style="margin:0;min-width:180px">
-                    <label for="liveControlFilter">Control Filter</label>
-                    <select id="liveControlFilter">
-                        <option value="ALL">All controls</option>
-                        <option value="Control_1">Control 1</option>
-                        <option value="Control_2">Control 2</option>
-                        <option value="Control_3">Control 3</option>
-                    </select>
-                </div>
-                <div class="field-group" style="margin:0;min-width:180px">
-                    <label for="liveResultFilter">Result Filter</label>
-                    <select id="liveResultFilter">
-                        <option value="PASS">PASS</option>
-                        <option value="FAIL">FAIL</option>
-                        <option value="ALL">All results</option>
-                    </select>
-                </div>
+            ${summary.isPreviewOnly ? `<div class="alert alert--warning" style="margin-bottom:12px">Only the saved browser preview is shown here. Downloads keep the full Rule 16 result set.</div>` : ''}
+            <div class="rule16-ctrl-tabs">
+                <button class="rule16-ctrl-tab ${activeCtrl === 'Control_1' ? 'active' : ''}" data-ctrl="Control_1">
+                    Control 1 — Base Population <span class="rule16-ctrl-badge">${formatNumber(allRows.length)}</span>
+                </button>
+                <button class="rule16-ctrl-tab ${activeCtrl === 'Control_2' ? 'active' : ''}" data-ctrl="Control_2">
+                    Control 2 — Distance Learning <span class="rule16-ctrl-badge">${formatNumber(c2Rows.length)}</span>
+                </button>
+                <button class="rule16-ctrl-tab ${activeCtrl === 'Control_3' ? 'active' : ''}" data-ctrl="Control_3">
+                    Control 3 — Normal Students <span class="rule16-ctrl-badge">${formatNumber(c3Rows.length)}</span>
+                </button>
             </div>
-            <div class="alert alert--info" style="margin-bottom:16px">
-                Showing ${formatNumber(filteredRows.length)} loaded result row(s) in the screenshot layout.
-            </div>
-            <div class="rule16-results-wrap">
-                ${summary.isPreviewOnly ? `<div class="alert alert--warning">Only the saved browser preview is shown here. Downloads keep the saved Rule 16 result set.</div>` : ''}
-                ${renderControlSection(summary, 'Control_1', false)}
-                ${renderControlSection(summary, 'Control_2', true)}
-                ${renderControlSection(summary, 'Control_3', true)}
+            <div class="rule16-results-wrap" id="ctrlPanel">
+                ${renderControlSection(summary, activeCtrl)}
             </div>`;
 
-        const controlFilter = document.getElementById('liveControlFilter');
-        const resultFilter = document.getElementById('liveResultFilter');
-        if (controlFilter) controlFilter.value = state.controlFilter;
-        if (resultFilter) resultFilter.value = state.resultFilter;
-
-        controlFilter?.addEventListener('change', () => {
-            state.controlFilter = controlFilter.value;
-            renderResults(summary);
-        });
-        resultFilter?.addEventListener('change', () => {
-            state.resultFilter = resultFilter.value;
-            renderResults(summary);
+        els.resultsPane.querySelectorAll('.rule16-ctrl-tab').forEach(btn => {
+            btn.addEventListener('click', () => {
+                state.controlFilter = btn.dataset.ctrl;
+                renderResults(true);
+            });
         });
     }
 
@@ -1175,6 +1259,13 @@ window.toggleAccordion = function (section) {
     document.getElementById('downloadCsvBtn')?.addEventListener('click', () => state.summary && downloadBlob(`${apiBasePath}/DownloadCsv`, state.summary, 'Rule16_Student_Population.csv').catch(err => setWorkspaceState(err.message, 'error')));
     document.getElementById('downloadSqlBtn')?.addEventListener('click', () => downloadBlob(`${apiBasePath}/DownloadSql`, getRequest(), 'Rule16_Student_Population.sql').catch(err => setWorkspaceState(err.message, 'error')));
     els.clientId?.addEventListener('change', () => loadWorkspace().catch(err => setWorkspaceState(err.message, 'error')));
+    ['unfulfilledCol','unfulfilledVal','foundationCol','foundationVal','distanceCol','distanceVal'].forEach(id => {
+        els[id]?.addEventListener('change', updateCriteriaPreview);
+        els[id]?.addEventListener('input', updateCriteriaPreview);
+    });
+    els.studTable?.addEventListener('change', () => loadFilterColumns().catch(() => {}));
+    els.crseTable?.addEventListener('change', () => loadFilterColumns().catch(() => {}));
+    updateCriteriaPreview();
 
     renderAnalysis(null);
     renderResults();

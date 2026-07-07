@@ -421,9 +421,7 @@ if (nrow(exceptions) > 0) print(exceptions)
     // ── Rule 21: First-time entering students ─────────────────────────────────
 
     public static string GenerateRule21Script(Rule21ValidationRequest r) =>
-        GenerateCesmQualScript(21, "First Time Entering Students Filtered Validation",
-            r.TableName, "", "", "",
-            "", "ALL");
+        Rule21RScriptGenerator.Generate(r) + RScriptScaffold.BuildAutoExportFooter("Rule21");
 
     // ── Rule 22: PROF staff validation ───────────────────────────────────────
 

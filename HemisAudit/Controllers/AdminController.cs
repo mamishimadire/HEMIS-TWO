@@ -619,16 +619,25 @@ namespace HemisAudit.Controllers
         }
 
         [HttpPost, ValidateAntiForgeryToken]
-        [Authorize(Roles = "Admin,Director,Manager,DataAnalyst")]
+        [Authorize(Roles = "DataAnalyst")]
         public async Task<IActionResult> SaveRuleScope(int clientId, List<int>? selectedRules)
         {
             var user = await _users.GetUserAsync(User);
             if (user == null) return RedirectToAction("Login", "Account");
 
-            var detail = await _systemDb.GetClientDetailAsync(clientId, user, await GetCurrentSystemRoleAsync(user));
+            var currentSystemRole = await GetCurrentSystemRoleAsync(user);
+            var detail = await _systemDb.GetClientDetailAsync(clientId, user, currentSystemRole);
             if (detail?.IsArchived == true)
             {
                 TempData["Error"] = "Archived engagements are read-only.";
+                return RedirectToAction(nameof(ClientDetail), new { id = clientId });
+            }
+
+            // Ensure only the assigned engagement DataAnalyst may change the rule scope
+            var engagementRole = await _systemDb.GetEngagementRoleAsync(clientId, user, currentSystemRole);
+            if (!string.Equals(engagementRole, "DataAnalyst", StringComparison.OrdinalIgnoreCase))
+            {
+                TempData["Error"] = "Only the assigned Data Analyst may change the rule selection for this engagement.";
                 return RedirectToAction(nameof(ClientDetail), new { id = clientId });
             }
 

@@ -57,6 +57,7 @@
         {
             <a href="/Rule64?clientId=@Model.ClientId" class="btn btn-secondary">Open Workspace</a>
         }
+        <button type="button" class="btn btn-primary" id="downloadExcelBtn">Download Excel</button>
         <a asp-controller="Dashboard" asp-action="Index" class="btn btn-secondary">Back to Dashboard</a>
         <a asp-controller="Admin" asp-action="ClientDetail" asp-route-id="@Model.ClientId" asp-fragment="validation-runs-panel" class="btn btn-secondary">Back to Validation Runs</a>
         @if (canManageEngagement)

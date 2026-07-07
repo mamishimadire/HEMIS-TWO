@@ -133,7 +133,7 @@ namespace HemisAudit.Services
             try
             {
                 ValidateRequest(request);
-                await EnsureColumnsExistAsync(request.Server, request.Database, request.Driver, request.StudTable, request.BridgeTable, request.CrseTable);
+                await EnsureColumnsExistAsync(request.Server, request.Database, request.Driver, request.StudTable, request.BridgeTable, request.CrseTable, request.UnfulfilledCol, request.DistanceCol, request.FoundationCol);
 
                 var summary = await AnalyseAsync(request, includeAllReviewRows: false);
                 if (summary.Success && request.ClientId > 0)
@@ -186,7 +186,7 @@ namespace HemisAudit.Services
         public async Task<Rule16ValidationSummary> GetExportSummaryAsync(Rule16ValidationRequest request)
         {
             ValidateRequest(request);
-            await EnsureColumnsExistAsync(request.Server, request.Database, request.Driver, request.StudTable, request.BridgeTable, request.CrseTable);
+            await EnsureColumnsExistAsync(request.Server, request.Database, request.Driver, request.StudTable, request.BridgeTable, request.CrseTable, request.UnfulfilledCol, request.DistanceCol, request.FoundationCol);
             return await AnalyseAsync(request, includeAllReviewRows: true);
         }
 
@@ -262,8 +262,16 @@ ORDER BY vr.RunTimestamp DESC, vr.RunID DESC;";
                 Summary = summary
             };
 
-            if (summary != null)
-                workspace.CurrentStatus = summary.Status;
+            if (deserializedSummary != null)
+            {
+                workspace.CurrentStatus = deserializedSummary.Status;
+                workspace.UnfulfilledCol = string.IsNullOrWhiteSpace(deserializedSummary.UnfulfilledCol) ? "_025" : deserializedSummary.UnfulfilledCol;
+                workspace.UnfulfilledVal = string.IsNullOrWhiteSpace(deserializedSummary.UnfulfilledVal) ? "N" : deserializedSummary.UnfulfilledVal;
+                workspace.FoundationCol = string.IsNullOrWhiteSpace(deserializedSummary.FoundationCol) ? "_091" : deserializedSummary.FoundationCol;
+                workspace.FoundationVal = string.IsNullOrWhiteSpace(deserializedSummary.FoundationVal) ? "Y" : deserializedSummary.FoundationVal;
+                workspace.DistanceCol = string.IsNullOrWhiteSpace(deserializedSummary.DistanceCol) ? "_024" : deserializedSummary.DistanceCol;
+                workspace.DistanceVal = string.IsNullOrWhiteSpace(deserializedSummary.DistanceVal) ? "D" : deserializedSummary.DistanceVal;
+            }
 
             await reader.CloseAsync();
 
@@ -602,58 +610,67 @@ END";
             var studTable = Sanitise(request.StudTable);
             var bridgeTable = Sanitise(request.BridgeTable);
             var crseTable = Sanitise(request.CrseTable);
+            var uc = Sanitise(request.UnfulfilledCol.Length > 0 ? request.UnfulfilledCol : "_025");
+            var uv = request.UnfulfilledVal;
+            var fc = Sanitise(request.FoundationCol.Length > 0 ? request.FoundationCol : "_091");
+            var fv = request.FoundationVal;
+            var dc = Sanitise(request.DistanceCol.Length > 0 ? request.DistanceCol : "_024");
+            var dv = request.DistanceVal;
 
-            var sql = $@"-- CONTROL 1: Unfulfilled + Foundation
-SELECT 
+            var sql = $@"-- CONTROL 1: {uc}='{uv}' AND {fc}='{fv}'
+SELECT
     'Control_1' AS Control_Type,
-    S._007, S._001, S._025, S._024,
-    BRIDGE._030, CRSE._091,
-    CASE 
-        WHEN ISNULL(S._025, '') = 'N' AND ISNULL(CRSE._091, '') = 'Y'
+    S.[_007], S.[_001], S.[{uc}], S.[{dc}],
+    BRIDGE.[_001], BRIDGE.[_007], BRIDGE.[_030],
+    CRSE.[_030], CRSE.[{fc}], CRSE.[_058],
+    CASE
+        WHEN ISNULL(S.[{uc}], '') = '{uv}' AND ISNULL(CRSE.[{fc}], '') = '{fv}'
         THEN 'PASS' ELSE 'FAIL'
     END AS Control_Check
 FROM [{studTable}] S
-INNER JOIN [{bridgeTable}] BRIDGE ON S._007 = BRIDGE._007
-INNER JOIN [{crseTable}] CRSE ON BRIDGE._030 = CRSE._030
-WHERE ISNULL(S._025, '') = 'N' AND ISNULL(CRSE._091, '') = 'Y'
+INNER JOIN [{bridgeTable}] BRIDGE ON S.[_007] = BRIDGE.[_007]
+INNER JOIN [{crseTable}] CRSE ON BRIDGE.[_030] = CRSE.[_030]
+WHERE ISNULL(S.[{uc}], '') = '{uv}' AND ISNULL(CRSE.[{fc}], '') = '{fv}'
 ORDER BY NEWID();
 
--- CONTROL 2: Unfulfilled + Foundation + Distance
-SELECT 
+-- CONTROL 2: {uc}='{uv}' AND {fc}='{fv}' AND {dc}='{dv}'
+SELECT
     'Control_2' AS Control_Type,
-    S._007, S._001, S._025, S._024,
-    BRIDGE._030, CRSE._091,
-    CASE 
-        WHEN ISNULL(S._025, '') = 'N' 
-         AND ISNULL(CRSE._091, '') = 'Y'
-         AND ISNULL(S._024, '') = 'D'
+    S.[_007], S.[_001], S.[{uc}], S.[{dc}],
+    BRIDGE.[_001], BRIDGE.[_007], BRIDGE.[_030],
+    CRSE.[_030], CRSE.[{fc}], CRSE.[_058],
+    CASE
+        WHEN ISNULL(S.[{uc}], '') = '{uv}'
+         AND ISNULL(CRSE.[{fc}], '') = '{fv}'
+         AND ISNULL(S.[{dc}], '') = '{dv}'
         THEN 'PASS' ELSE 'FAIL'
     END AS Control_Check
 FROM [{studTable}] S
-INNER JOIN [{bridgeTable}] BRIDGE ON S._007 = BRIDGE._007
-INNER JOIN [{crseTable}] CRSE ON BRIDGE._030 = CRSE._030
-WHERE ISNULL(S._025, '') = 'N'
-  AND ISNULL(CRSE._091, '') = 'Y'
-  AND ISNULL(S._024, '') = 'D'
+INNER JOIN [{bridgeTable}] BRIDGE ON S.[_007] = BRIDGE.[_007]
+INNER JOIN [{crseTable}] CRSE ON BRIDGE.[_030] = CRSE.[_030]
+WHERE ISNULL(S.[{uc}], '') = '{uv}'
+  AND ISNULL(CRSE.[{fc}], '') = '{fv}'
+  AND ISNULL(S.[{dc}], '') = '{dv}'
 ORDER BY NEWID();
 
--- CONTROL 3: Unfulfilled only
-SELECT 
+-- CONTROL 3: {uc}='{uv}' AND {fc}<>'{fv}' AND {dc}<>'{dv}'
+SELECT
     'Control_3' AS Control_Type,
-    S._007, S._001, S._025, S._024,
-    BRIDGE._030, CRSE._091,
-    CASE 
-        WHEN ISNULL(S._025, '') = 'N' 
-         AND ISNULL(CRSE._091, '') <> 'Y'
-         AND ISNULL(S._024, '') <> 'D'
+    S.[_007], S.[_001], S.[{uc}], S.[{dc}],
+    BRIDGE.[_001], BRIDGE.[_007], BRIDGE.[_030],
+    CRSE.[_030], CRSE.[{fc}], CRSE.[_058],
+    CASE
+        WHEN ISNULL(S.[{uc}], '') = '{uv}'
+         AND ISNULL(CRSE.[{fc}], '') <> '{fv}'
+         AND ISNULL(S.[{dc}], '') <> '{dv}'
         THEN 'PASS' ELSE 'FAIL'
     END AS Control_Check
 FROM [{studTable}] S
-INNER JOIN [{bridgeTable}] BRIDGE ON S._007 = BRIDGE._007
-INNER JOIN [{crseTable}] CRSE ON BRIDGE._030 = CRSE._030
-WHERE ISNULL(S._025, '') = 'N'
-  AND ISNULL(CRSE._091, '') <> 'Y'
-  AND ISNULL(S._024, '') <> 'D'
+INNER JOIN [{bridgeTable}] BRIDGE ON S.[_007] = BRIDGE.[_007]
+INNER JOIN [{crseTable}] CRSE ON BRIDGE.[_030] = CRSE.[_030]
+WHERE ISNULL(S.[{uc}], '') = '{uv}'
+  AND ISNULL(CRSE.[{fc}], '') <> '{fv}'
+  AND ISNULL(S.[{dc}], '') <> '{dv}'
 ORDER BY NEWID();";
 
             return Task.FromResult(sql.Trim());
@@ -668,13 +685,24 @@ ORDER BY NEWID();";
             var studTable = Sanitise(request.StudTable);
             var bridgeTable = Sanitise(request.BridgeTable);
             var crseTable = Sanitise(request.CrseTable);
+            var unfulfilledCol = Sanitise(request.UnfulfilledCol.Length > 0 ? request.UnfulfilledCol : "_025");
+            var unfulfilledVal = request.UnfulfilledVal;
+            var foundationCol = Sanitise(request.FoundationCol.Length > 0 ? request.FoundationCol : "_091");
+            var foundationVal = request.FoundationVal;
+            var distanceCol = Sanitise(request.DistanceCol.Length > 0 ? request.DistanceCol : "_024");
+            var distanceVal = request.DistanceVal;
 
             var studCount = await CountAsync(conn, $"SELECT COUNT(*) FROM [{studTable}];");
             var bridgeCount = await CountAsync(conn, $"SELECT COUNT(*) FROM [{bridgeTable}];");
             var crseCount = await CountAsync(conn, $"SELECT COUNT(*) FROM [{crseTable}];");
 
+            // Build temp tables on this connection (temp tables are session-scoped)
+            await using var prepCommand = conn.CreateConfiguredCommand();
+            prepCommand.CommandText = BuildRule16PrepSql(studTable, bridgeTable, crseTable, unfulfilledCol, unfulfilledVal, foundationCol, foundationVal, distanceCol, distanceVal);
+            await prepCommand.ExecuteNonQueryAsync();
+
             await using var countCommand = conn.CreateConfiguredCommand();
-            countCommand.CommandText = BuildPopulationCountSql(studTable, bridgeTable, crseTable);
+            countCommand.CommandText = BuildRule16CountAfterPrepSql(distanceVal);
             await using var countReader = await countCommand.ExecuteReaderAsync();
 
             var unfulfilledPopulationCount = 0;
@@ -684,20 +712,19 @@ ORDER BY NEWID();";
             if (await countReader.ReadAsync())
             {
                 unfulfilledPopulationCount = GetInt(countReader, 0);
-                control1PassPopulation = GetInt(countReader, 1);
-                control2PassPopulation = GetInt(countReader, 2);
-                control3PassPopulation = GetInt(countReader, 3);
+                control1PassPopulation    = GetInt(countReader, 0);
+                control2PassPopulation    = GetInt(countReader, 1);
+                control3PassPopulation    = GetInt(countReader, 2);
             }
-
             await countReader.CloseAsync();
 
-            var reviewRows = await LoadControlRowsAsync(conn, studTable, bridgeTable, crseTable, includeAllReviewRows ? null : BrowserPreviewRowLimit);
+            var reviewRows = await LoadControlRowsFromTempAsync(conn, includeAllReviewRows ? (int?)null : BrowserPreviewRowLimit, unfulfilledCol, unfulfilledVal, foundationCol, foundationVal, distanceCol, distanceVal);
             reviewRows = NormalizeReviewRows(reviewRows);
 
-            var controlSummaries = BuildControlSummaries(control1PassPopulation, control2PassPopulation, control3PassPopulation);
-            var totalValidated = controlSummaries.Sum(x => x.TotalCount);
-            var passCount = controlSummaries.Sum(x => x.PassCount);
-            var failCount = controlSummaries.Sum(x => x.FailCount);
+            var controlSummaries = BuildControlSummaries(control1PassPopulation, control2PassPopulation, control3PassPopulation, unfulfilledCol, unfulfilledVal, foundationCol, foundationVal, distanceCol, distanceVal);
+            var totalValidated = control1PassPopulation;
+            var passCount = control1PassPopulation;
+            var failCount = 0;
             var isPreviewOnly = !includeAllReviewRows && totalValidated > reviewRows.Count;
 
             return new Rule16ValidationSummary
@@ -721,6 +748,12 @@ ORDER BY NEWID();";
                 StudTable = request.StudTable,
                 BridgeTable = request.BridgeTable,
                 CrseTable = request.CrseTable,
+                UnfulfilledCol = request.UnfulfilledCol,
+                UnfulfilledVal = request.UnfulfilledVal,
+                FoundationCol = request.FoundationCol,
+                FoundationVal = request.FoundationVal,
+                DistanceCol = request.DistanceCol,
+                DistanceVal = request.DistanceVal,
                 TableLinkageText = $"{request.StudTable} -> {request.BridgeTable} -> {request.CrseTable}",
                 RuleModeText = "100% population testing of matching control rows",
                 ProcedureSteps = BuildProcedureSteps(request.StudTable, request.BridgeTable, request.CrseTable),
@@ -797,18 +830,113 @@ WHERE RunID = @RunID;";
             return runId;
         }
 
-        private static string BuildPopulationCountSql(string studTable, string bridgeTable, string crseTable) => $@"
-{BuildRule16SourceCtes(studTable, bridgeTable, crseTable)}
-SELECT
-    (SELECT COUNT(*) FROM UnfulfilledStudents) AS UnfulfilledPopulationCount,
-    (SELECT COUNT(*) FROM Control1PassRows) AS Control1PassPopulation,
-    (SELECT COUNT(*) FROM Control2PassRows) AS Control2PassPopulation,
-    (SELECT COUNT(*) FROM Control3PassRows) AS Control3PassPopulation;";
+        private static string BuildRule16PrepSql(
+            string studTable, string bridgeTable, string crseTable,
+            string unfulfilledCol = "_025", string unfulfilledVal = "N",
+            string foundationCol = "_091", string foundationVal = "Y",
+            string distanceCol = "_024", string distanceVal = "D") => $@"
+SET NOCOUNT ON;
+DROP TABLE IF EXISTS #Rule16_Base;
+DROP TABLE IF EXISTS #Rule16_Results;
 
-        private async Task<List<Rule16ValidationRowRecord>> LoadControlRowsAsync(SqlConnection connection, string studTable, string bridgeTable, string crseTable, int? maxRows)
+SELECT
+    CAST(S.[_007]               AS nvarchar(255)) AS Student_Number,
+    CAST(S.[_001]               AS nvarchar(255)) AS Student_Qualification_Code,
+    CAST(S.[{unfulfilledCol}]   AS nvarchar(255)) AS Qualification_Fulfilled_Indicator,
+    CAST(S.[{distanceCol}]      AS nvarchar(255)) AS Attendance_Mode,
+    CAST(CREG.[_001]            AS nvarchar(255)) AS CREG_Qualification_Code,
+    CAST(CREG.[_007]            AS nvarchar(255)) AS CREG_Student_Number,
+    CAST(CREG.[_030]            AS nvarchar(255)) AS CREG_Course_Code,
+    CAST(CRSE.[_030]            AS nvarchar(255)) AS CRSE_Course_Code,
+    CAST(CRSE.[{foundationCol}] AS nvarchar(255)) AS Foundation_Course_Indicator,
+    CAST(CRSE.[_058]            AS nvarchar(255)) AS CRSE_058
+INTO #Rule16_Base
+FROM [{studTable}] S
+INNER JOIN [{bridgeTable}] CREG ON S.[_007] = CREG.[_007]
+INNER JOIN [{crseTable}]   CRSE ON CREG.[_030] = CRSE.[_030]
+WHERE ISNULL(CAST(S.[{unfulfilledCol}]   AS nvarchar(255)), '') = '{unfulfilledVal}'
+  AND ISNULL(CAST(CRSE.[{foundationCol}] AS nvarchar(255)), '') = '{foundationVal}';
+
+CREATE INDEX IX_Rule16_Base ON #Rule16_Base (Student_Number, Student_Qualification_Code, CREG_Course_Code);
+
+SELECT
+    ROW_NUMBER() OVER (ORDER BY Student_Number, Student_Qualification_Code, CREG_Course_Code) AS Extract_Number,
+    Student_Number,
+    Student_Qualification_Code,
+    Qualification_Fulfilled_Indicator,
+    Attendance_Mode,
+    CREG_Qualification_Code,
+    CREG_Student_Number,
+    CREG_Course_Code,
+    CRSE_Course_Code,
+    Foundation_Course_Indicator,
+    CRSE_058,
+    'PASS' AS Control_Check
+INTO #Rule16_Results
+FROM #Rule16_Base;";
+
+        private static string BuildRule16CountAfterPrepSql(string distanceVal = "D") => $@"
+SELECT
+    COUNT(*)                                                                                       AS TotalPopulation,
+    SUM(CASE WHEN ISNULL(Attendance_Mode,'') = '{distanceVal}'  THEN 1 ELSE 0 END)               AS Control2Pass,
+    SUM(CASE WHEN ISNULL(Attendance_Mode,'') <> '{distanceVal}' THEN 1 ELSE 0 END)               AS Control3Pass
+FROM #Rule16_Results;";
+
+        private static string BuildPopulationCountSql(
+            string studTable, string bridgeTable, string crseTable,
+            string unfulfilledCol = "_025", string unfulfilledVal = "N",
+            string foundationCol = "_091", string foundationVal = "Y",
+            string distanceCol = "_024", string distanceVal = "D") => $@"
+SET NOCOUNT ON;
+DROP TABLE IF EXISTS #Rule16_VerifyBase;
+SELECT
+    CAST(S.[_007] AS nvarchar(10)) AS s7,
+    CASE WHEN ISNULL(CAST(S.[{unfulfilledCol}]   AS nvarchar(10)),'') = '{unfulfilledVal}'
+          AND ISNULL(CAST(CRSE.[{foundationCol}] AS nvarchar(10)),'') = '{foundationVal}' THEN 1 ELSE 0 END AS IsC1,
+    CASE WHEN ISNULL(CAST(S.[{unfulfilledCol}]   AS nvarchar(10)),'') = '{unfulfilledVal}'
+          AND ISNULL(CAST(CRSE.[{foundationCol}] AS nvarchar(10)),'') = '{foundationVal}'
+          AND ISNULL(CAST(S.[{distanceCol}]       AS nvarchar(10)),'') = '{distanceVal}' THEN 1 ELSE 0 END AS IsC2,
+    CASE WHEN ISNULL(CAST(S.[{unfulfilledCol}]   AS nvarchar(10)),'') = '{unfulfilledVal}'
+          AND ISNULL(CAST(CRSE.[{foundationCol}] AS nvarchar(10)),'') = '{foundationVal}'
+          AND ISNULL(CAST(S.[{distanceCol}]       AS nvarchar(10)),'') <> '{distanceVal}' THEN 1 ELSE 0 END AS IsC3
+INTO #Rule16_VerifyBase
+FROM [{studTable}] S
+INNER JOIN [{bridgeTable}] CREG ON S.[_007] = CREG.[_007]
+INNER JOIN [{crseTable}]   CRSE ON CREG.[_030] = CRSE.[_030];
+SELECT
+    SUM(IsC1) AS UnfulfilledPopulationCount,
+    SUM(IsC1) AS Control1PassPopulation,
+    SUM(IsC2) AS Control2PassPopulation,
+    SUM(IsC3) AS Control3PassPopulation
+FROM #Rule16_VerifyBase;
+DROP TABLE IF EXISTS #Rule16_VerifyBase;";
+
+        private async Task<List<Rule16ValidationRowRecord>> LoadControlRowsFromTempAsync(
+            SqlConnection connection, int? maxRows,
+            string unfulfilledCol = "_025", string unfulfilledVal = "N",
+            string foundationCol = "_091", string foundationVal = "Y",
+            string distanceCol = "_024", string distanceVal = "D")
         {
+            var topClause = maxRows.HasValue && maxRows.Value > 0 ? $"TOP {maxRows.Value}" : "";
             await using var command = connection.CreateConfiguredCommand();
-            command.CommandText = BuildAllControlsSql(studTable, bridgeTable, crseTable, maxRows);
+            command.CommandText = $@"
+SELECT {topClause}
+    Extract_Number,
+    'Control_1'              AS Control_Type,
+    'PASS'                   AS Validation_Result,
+    Student_Number,
+    Student_Qualification_Code,
+    Qualification_Fulfilled_Indicator,
+    Attendance_Mode,
+    CREG_Qualification_Code,
+    CREG_Student_Number,
+    CREG_Course_Code,
+    CRSE_Course_Code,
+    Foundation_Course_Indicator,
+    CRSE_058,
+    Control_Check
+FROM #Rule16_Results
+ORDER BY Extract_Number;";
 
             await using var reader = await command.ExecuteReaderAsync();
             var rows = new List<Rule16ValidationRowRecord>();
@@ -825,194 +953,33 @@ SELECT
                 rows.Add(new Rule16ValidationRowRecord
                 {
                     ValidationNumber = rows.Count + 1,
-                    ControlType = ReadValue(displayValues, "Control_Type"),
-                    ControlLabel = ReadValue(displayValues, "Control_Label"),
+                    ControlType      = ReadValue(displayValues, "Control_Type"),
+                    ControlLabel     = ReadValue(displayValues, "Control_Label"),
                     ValidationResult = ReadValue(displayValues, "Validation_Result"),
-                    ValidationExplanation = ReadValue(displayValues, "Validation_Explanation"),
-                    DisplayValues = displayValues
+                    ValidationExplanation = "",
+                    DisplayValues    = displayValues
                 });
 
-                EnrichRule16DisplayValues(rows[^1]);
+                EnrichRule16DisplayValues(rows[^1], unfulfilledCol, unfulfilledVal, foundationCol, foundationVal, distanceCol, distanceVal);
             }
 
             return rows;
         }
 
-        private static string BuildAllControlsSql(string studTable, string bridgeTable, string crseTable, int? maxRows)
-        {
-            var perControlLimit = maxRows.HasValue && maxRows.Value > 0
-                ? Math.Max(maxRows.Value / 3, 1)
-                : 0;
-
-            return $@"
-WITH ControlResults AS
-(
-    SELECT
-        1 AS Control_Sort,
-        'Control_1' AS Control_Type,
-        'CONTROL 1: _025=''N'' AND _091=''Y''' AS Control_Label,
-        CASE
-            WHEN ISNULL(CAST(S.[_025] AS nvarchar(255)), '') = 'N'
-             AND ISNULL(CAST(CRSE.[_091] AS nvarchar(255)), '') = 'Y'
-            THEN 'PASS' ELSE 'FAIL'
-        END AS Validation_Result,
-        'Matched Rule 16 Control 1.' AS Validation_Explanation,
-        CAST(S.[_001] AS nvarchar(255)) AS STUD__001,
-        CAST(S.[_007] AS nvarchar(255)) AS STUD__007,
-        CAST(S.[_025] AS nvarchar(255)) AS STUD__025,
-        CAST(S.[_024] AS nvarchar(255)) AS STUD__024,
-        CAST(BRIDGE.[_001] AS nvarchar(255)) AS BRIDGE__001,
-        CAST(BRIDGE.[_030] AS nvarchar(255)) AS BRIDGE__030,
-        CAST(CRSE.[_030] AS nvarchar(255)) AS CRSE__030,
-        CAST(CRSE.[_091] AS nvarchar(255)) AS CRSE__091
-    FROM [{studTable}] S
-    INNER JOIN [{bridgeTable}] BRIDGE ON S.[_007] = BRIDGE.[_007]
-    INNER JOIN [{crseTable}] CRSE ON BRIDGE.[_030] = CRSE.[_030]
-    WHERE ISNULL(CAST(S.[_025] AS nvarchar(255)), '') = 'N'
-      AND ISNULL(CAST(CRSE.[_091] AS nvarchar(255)), '') = 'Y'
-
-    UNION ALL
-
-    SELECT
-        2 AS Control_Sort,
-        'Control_2' AS Control_Type,
-        'CONTROL 2: _025=''N'' AND _091=''Y'' AND _024=''D''' AS Control_Label,
-        CASE
-            WHEN ISNULL(CAST(S.[_025] AS nvarchar(255)), '') = 'N'
-             AND ISNULL(CAST(CRSE.[_091] AS nvarchar(255)), '') = 'Y'
-             AND ISNULL(CAST(S.[_024] AS nvarchar(255)), '') = 'D'
-            THEN 'PASS' ELSE 'FAIL'
-        END AS Validation_Result,
-        'Matched Rule 16 Control 2.' AS Validation_Explanation,
-        CAST(S.[_001] AS nvarchar(255)) AS STUD__001,
-        CAST(S.[_007] AS nvarchar(255)) AS STUD__007,
-        CAST(S.[_025] AS nvarchar(255)) AS STUD__025,
-        CAST(S.[_024] AS nvarchar(255)) AS STUD__024,
-        CAST(BRIDGE.[_001] AS nvarchar(255)) AS BRIDGE__001,
-        CAST(BRIDGE.[_030] AS nvarchar(255)) AS BRIDGE__030,
-        CAST(CRSE.[_030] AS nvarchar(255)) AS CRSE__030,
-        CAST(CRSE.[_091] AS nvarchar(255)) AS CRSE__091
-    FROM [{studTable}] S
-    INNER JOIN [{bridgeTable}] BRIDGE ON S.[_007] = BRIDGE.[_007]
-    INNER JOIN [{crseTable}] CRSE ON BRIDGE.[_030] = CRSE.[_030]
-    WHERE ISNULL(CAST(S.[_025] AS nvarchar(255)), '') = 'N'
-      AND ISNULL(CAST(CRSE.[_091] AS nvarchar(255)), '') = 'Y'
-      AND ISNULL(CAST(S.[_024] AS nvarchar(255)), '') = 'D'
-
-    UNION ALL
-
-    SELECT
-        3 AS Control_Sort,
-        'Control_3' AS Control_Type,
-        'CONTROL 3: _025=''N'' AND _091<>''Y'' AND _024<>''D''' AS Control_Label,
-        CASE
-            WHEN ISNULL(CAST(S.[_025] AS nvarchar(255)), '') = 'N'
-             AND ISNULL(CAST(CRSE.[_091] AS nvarchar(255)), '') <> 'Y'
-             AND ISNULL(CAST(S.[_024] AS nvarchar(255)), '') <> 'D'
-            THEN 'PASS' ELSE 'FAIL'
-        END AS Validation_Result,
-        'Matched Rule 16 Control 3.' AS Validation_Explanation,
-        CAST(S.[_001] AS nvarchar(255)) AS STUD__001,
-        CAST(S.[_007] AS nvarchar(255)) AS STUD__007,
-        CAST(S.[_025] AS nvarchar(255)) AS STUD__025,
-        CAST(S.[_024] AS nvarchar(255)) AS STUD__024,
-        CAST(BRIDGE.[_001] AS nvarchar(255)) AS BRIDGE__001,
-        CAST(BRIDGE.[_030] AS nvarchar(255)) AS BRIDGE__030,
-        CAST(CRSE.[_030] AS nvarchar(255)) AS CRSE__030,
-        CAST(CRSE.[_091] AS nvarchar(255)) AS CRSE__091
-    FROM [{studTable}] S
-    INNER JOIN [{bridgeTable}] BRIDGE ON S.[_007] = BRIDGE.[_007]
-    INNER JOIN [{crseTable}] CRSE ON BRIDGE.[_030] = CRSE.[_030]
-    WHERE ISNULL(CAST(S.[_025] AS nvarchar(255)), '') = 'N'
-      AND ISNULL(CAST(CRSE.[_091] AS nvarchar(255)), '') <> 'Y'
-      AND ISNULL(CAST(S.[_024] AS nvarchar(255)), '') <> 'D'
-)
-SELECT *
-FROM
-(
-    SELECT
-        ControlResults.*,
-        ROW_NUMBER() OVER
-        (
-            PARTITION BY Control_Type
-            ORDER BY STUD__007, BRIDGE__030, CRSE__030, STUD__001
-        ) AS Preview_Row_Num
-    FROM ControlResults
-) Results
-WHERE {(
-                perControlLimit > 0
-                    ? $"Preview_Row_Num <= {perControlLimit}"
-                    : "1 = 1"
-            )}
-ORDER BY Control_Sort, Preview_Row_Num;";
-        }
-
-        private static string BuildRule16SourceCtes(string studTable, string bridgeTable, string crseTable) => $@"
-WITH BaseRows AS
-(
-    SELECT
-        CAST(S.[_001] AS nvarchar(255)) AS Stud_001,
-        CAST(S.[_007] AS nvarchar(255)) AS Stud_007,
-        CAST(S.[_025] AS nvarchar(255)) AS Stud_025,
-        CAST(S.[_024] AS nvarchar(255)) AS Stud_024,
-        CAST(BRIDGE.[_001] AS nvarchar(255)) AS Bridge_001,
-        CAST(BRIDGE.[_030] AS nvarchar(255)) AS Bridge_030,
-        CAST(CRSE.[_030] AS nvarchar(255)) AS Crse_030,
-        CAST(CRSE.[_091] AS nvarchar(255)) AS Crse_091,
-        CASE WHEN ISNULL(CAST(S.[_025] AS nvarchar(255)), '') = 'N' THEN 1 ELSE 0 END AS IsUnfulfilledStudent,
-        CASE WHEN ISNULL(CAST(S.[_024] AS nvarchar(255)), '') = 'D' THEN 1 ELSE 0 END AS IsDistanceStudent,
-        CASE WHEN ISNULL(CAST(CRSE.[_091] AS nvarchar(255)), '') = 'Y' THEN 1 ELSE 0 END AS IsFoundationCourse
-    FROM [{studTable}] S
-    INNER JOIN [{bridgeTable}] BRIDGE ON S.[_007] = BRIDGE.[_007]
-    INNER JOIN [{crseTable}] CRSE ON BRIDGE.[_030] = CRSE.[_030]
-),
-UnfulfilledStudents AS
-(
-    SELECT DISTINCT
-        Stud_001,
-        Stud_007,
-        Stud_025,
-        Stud_024
-    FROM BaseRows
-    WHERE IsUnfulfilledStudent = 1
-),
-Control1PassRows AS
-(
-    SELECT
-        B.*
-    FROM BaseRows B
-    WHERE B.IsUnfulfilledStudent = 1
-      AND B.IsFoundationCourse = 1
-),
-Control2PassRows AS
-(
-    SELECT
-        B.*
-    FROM BaseRows B
-    WHERE B.IsUnfulfilledStudent = 1
-      AND B.IsFoundationCourse = 1
-      AND B.IsDistanceStudent = 1
-),
-Control3PassRows AS
-(
-    SELECT
-        B.*
-    FROM BaseRows B
-    WHERE B.IsUnfulfilledStudent = 1
-      AND B.IsFoundationCourse = 0
-      AND B.IsDistanceStudent = 0
-)";
 
         private static List<Rule16ControlSummaryItemViewModel> BuildControlSummaries(
             int control1PassPopulation,
             int control2PassPopulation,
-            int control3PassPopulation)
+            int control3PassPopulation,
+            string unfulfilledCol = "_025", string unfulfilledVal = "N",
+            string foundationCol = "_091", string foundationVal = "Y",
+            string distanceCol = "_024", string distanceVal = "D")
         {
             return new List<Rule16ControlSummaryItemViewModel>
             {
-                BuildControlSummary("Control_1", "Control 1", "_025='N' AND _091='Y'", control1PassPopulation),
-                BuildControlSummary("Control_2", "Control 2", "_025='N' AND _091='Y' AND _024='D'", control2PassPopulation),
-                BuildControlSummary("Control_3", "Control 3", "_025='N' AND _091<>'Y' AND _024<>'D'", control3PassPopulation)
+                BuildControlSummary("Control_1", "Control 1", $"{unfulfilledCol}='{unfulfilledVal}' AND {foundationCol}='{foundationVal}'", control1PassPopulation),
+                BuildControlSummary("Control_2", "Control 2", $"{unfulfilledCol}='{unfulfilledVal}' AND {foundationCol}='{foundationVal}' AND {distanceCol}='{distanceVal}'", control2PassPopulation),
+                BuildControlSummary("Control_3", "Control 3", $"{unfulfilledCol}='{unfulfilledVal}' AND {foundationCol}='{foundationVal}' AND {distanceCol}<>'{distanceVal}'", control3PassPopulation)
             };
         }
 
@@ -1170,11 +1137,8 @@ Control3PassRows AS
 
         private static Rule16ValidationSummary CreateBrowserPreview(Rule16ValidationSummary summary)
         {
-            var perControlLimit = Math.Max(BrowserPreviewRowLimit / 3, 1);
             var previewRows = summary.ReviewRows
-                .GroupBy(row => row.ControlType, StringComparer.OrdinalIgnoreCase)
-                .OrderBy(group => GetControlSort(group.Key))
-                .SelectMany(group => group.OrderBy(row => row.ValidationNumber).Take(perControlLimit))
+                .OrderBy(row => row.ValidationNumber)
                 .Take(BrowserPreviewRowLimit)
                 .ToList();
 
@@ -1252,16 +1216,23 @@ Control3PassRows AS
                 "Return the full matching control result set for Control 1, Control 2, and Control 3."
             };
 
-        private async Task EnsureColumnsExistAsync(string server, string database, string driver, string studTable, string bridgeTable, string crseTable)
+        private async Task EnsureColumnsExistAsync(
+            string server, string database, string driver,
+            string studTable, string bridgeTable, string crseTable,
+            string unfulfilledCol = "_025", string distanceCol = "_024",
+            string foundationCol = "_091")
         {
             var studColumns = await GetTableColumnsAsync(server, database, driver, studTable);
             var bridgeColumns = await GetTableColumnsAsync(server, database, driver, bridgeTable);
             var crseColumns = await GetTableColumnsAsync(server, database, driver, crseTable);
 
-            EnsureHasColumns(studTable, studColumns, "_001", "_007", "_025", "_024");
+            EnsureHasColumns(studTable, studColumns, "_001", "_007", unfulfilledCol, distanceCol);
             EnsureHasColumns(bridgeTable, bridgeColumns, "_001", "_007", "_030");
-            EnsureHasColumns(crseTable, crseColumns, "_030", "_091");
+            EnsureHasColumns(crseTable, crseColumns, "_030", foundationCol);
         }
+
+        public Task<List<string>> GetTableColumnsListAsync(string server, string database, string driver, string tableName)
+            => GetTableColumnsAsync(server, database, driver, tableName);
 
         private async Task<List<string>> GetTableColumnsAsync(string server, string database, string driver, string tableName)
         {
@@ -1646,119 +1617,32 @@ ORDER BY RunTimestamp DESC, RunID DESC;";
             string.Equals(role, "Manager", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(role, "Director", StringComparison.OrdinalIgnoreCase);
 
-        private static void EnrichRule16DisplayValues(Rule16ValidationRowRecord row)
+        private static void EnrichRule16DisplayValues(
+            Rule16ValidationRowRecord row,
+            string unfulfilledCol = "_025", string unfulfilledVal = "N",
+            string foundationCol = "_091", string foundationVal = "Y",
+            string distanceCol = "_024", string distanceVal = "D")
         {
             var values = row.DisplayValues;
-            var controlType = ReadValue(values, "Control_Type");
-            var validationResult = ReadValue(values, "Validation_Result");
-            var stud024 = ReadValue(values, "STUD__024");
-            var crse091 = ReadValue(values, "CRSE__091");
+            var attendanceMode    = FormatRule16ColumnValue(ReadValue(values, "Attendance_Mode"));
+            var foundationDisplay = FormatRule16ColumnValue(ReadValue(values, "Foundation_Course_Indicator"));
+            var studentNum        = FormatRule16ColumnValue(ReadValue(values, "Student_Number"));
+            var qualCode          = FormatRule16ColumnValue(ReadValue(values, "Student_Qualification_Code"));
+            var courseCode        = FormatRule16ColumnValue(ReadValue(values, "CREG_Course_Code"));
+            var isDistance        = string.Equals(attendanceMode.Trim(), distanceVal, StringComparison.OrdinalIgnoreCase);
+            var category          = isDistance ? "Distance Learning" : "Normal Student";
 
-            var isPass = string.Equals(validationResult, "PASS", StringComparison.OrdinalIgnoreCase);
-            var isDistanceStudent = string.Equals(stud024.Trim(), "D", StringComparison.OrdinalIgnoreCase);
-            var isFoundationCourse = string.Equals(crse091.Trim(), "Y", StringComparison.OrdinalIgnoreCase);
-            var stud024Display = FormatRule16ColumnValue(stud024);
-            var crse091Display = FormatRule16ColumnValue(crse091);
+            var criteriaText        = $"{unfulfilledCol}='{unfulfilledVal}' AND {foundationCol}='{foundationVal}'";
+            var studCriteriaMessage = $"Passed: {unfulfilledCol}='{unfulfilledVal}' FOUND. Foundation: {foundationCol}='{foundationDisplay}'.";
+            var bridgeLinkMessage   = $"Linked via CREG: Student={studentNum}, QualCode={qualCode}, CourseCode={courseCode}.";
+            var validationExplanation = $"{unfulfilledCol}='{unfulfilledVal}': FOUND | {foundationCol}='{foundationDisplay}': FOUND | {distanceCol}='{attendanceMode}' | Category: {category}";
 
-            string criteriaText;
-            string validationExplanation;
-            string studCriteriaMessage;
-            string bridgeLinkMessage;
-            string finalResultMessage;
-
-            switch (controlType)
-            {
-                case "Control_1":
-                    criteriaText = "_025='N' AND _091='Y'";
-                    validationExplanation = isPass
-                        ? $"Passed because STUD._025='N' and the linked CRSE._091='{crse091Display}'."
-                        : $"Failed because STUD._025='N' but the linked CRSE._091='{crse091Display}' instead of 'Y'.";
-                    studCriteriaMessage = "Passed: dbo_STUD filtering matched because _025='N'.";
-                    bridgeLinkMessage = isPass
-                        ? "Passed: correctly linked through the bridge table to the qualifying CRSE row."
-                        : "Passed bridge linkage, but the linked CRSE row did not satisfy this control.";
-                    finalResultMessage = isPass
-                        ? $"Passed this criteria because CRSE._091='{crse091Display}'."
-                        : $"Failed this criteria because CRSE._091='{crse091Display}' instead of 'Y'.";
-                    break;
-
-                case "Control_2":
-                    criteriaText = "_025='N' AND _091='Y' AND _024='D'";
-                    validationExplanation = isPass
-                        ? $"Passed because STUD._024='{stud024Display}' and the linked CRSE._091='{crse091Display}'."
-                        : $"Failed because STUD._024='{stud024Display}' instead of 'D'.";
-                    studCriteriaMessage = isPass
-                        ? $"Passed: dbo_STUD filtering matched because _025='N' and _024='{stud024Display}'."
-                        : $"Failed: dbo_STUD filtering matched the unfulfilled-student population, but _024='{stud024Display}' instead of 'D'.";
-                    bridgeLinkMessage = isPass
-                        ? "Passed: correctly linked through the bridge table to the qualifying CRSE row."
-                        : "Passed bridge linkage to a foundation CRSE row, but the distance requirement was not met on dbo_STUD.";
-                    finalResultMessage = isPass
-                        ? $"Passed this criteria because _024='{stud024Display}' and CRSE._091='{crse091Display}'."
-                        : $"Failed this criteria because _024='{stud024Display}' instead of 'D'.";
-                    break;
-
-                case "Control_3":
-                    criteriaText = "_025='N' AND _091<>'Y' AND _024<>'D'";
-                    validationExplanation = isPass
-                        ? $"Passed because STUD._024='{stud024Display}' and the linked CRSE._091='{crse091Display}', so both values are outside the excluded set."
-                        : BuildControl3FailureReason(stud024Display, crse091Display, isDistanceStudent, isFoundationCourse);
-                    studCriteriaMessage = isDistanceStudent
-                        ? $"Failed: dbo_STUD filtering matched the unfulfilled-student population, but _024='{stud024Display}' instead of a non-'D' value."
-                        : $"Passed: dbo_STUD filtering matched because _025='N' and _024='{stud024Display}' is not 'D'.";
-                    bridgeLinkMessage = isPass
-                        ? "Passed: correctly linked through the bridge table to the qualifying CRSE row."
-                        : isFoundationCourse
-                            ? "Passed bridge linkage, but the linked CRSE row is still marked as foundation."
-                            : "Passed bridge linkage, but the row failed the non-distance requirement on dbo_STUD.";
-                    finalResultMessage = isPass
-                        ? $"Passed this criteria because _024='{stud024Display}' and CRSE._091='{crse091Display}'."
-                        : BuildControl3FinalResultMessage(stud024Display, crse091Display, isDistanceStudent, isFoundationCourse);
-                    break;
-
-                default:
-                    criteriaText = ReadValue(values, "FINAL_RULE_TEXT");
-                    validationExplanation = row.ValidationExplanation;
-                    studCriteriaMessage = ReadValue(values, "STUD_CRITERIA_MESSAGE");
-                    bridgeLinkMessage = ReadValue(values, "BRIDGE_LINK_MESSAGE");
-                    finalResultMessage = ReadValue(values, "FINAL_RESULT_MESSAGE");
-                    break;
-            }
-
-            values["FINAL_RULE_TEXT"] = criteriaText;
+            values["FINAL_RULE_TEXT"]        = criteriaText;
             values["Validation_Explanation"] = validationExplanation;
-            values["STUD_CRITERIA_MESSAGE"] = studCriteriaMessage;
-            values["BRIDGE_LINK_MESSAGE"] = bridgeLinkMessage;
-            values["FINAL_RESULT_MESSAGE"] = finalResultMessage;
-            row.ValidationExplanation = validationExplanation;
-        }
-
-        private static string BuildControl3FailureReason(string stud024Display, string crse091Display, bool isDistanceStudent, bool isFoundationCourse)
-        {
-            if (isDistanceStudent && isFoundationCourse)
-                return $"Failed because STUD._024='{stud024Display}' and CRSE._091='{crse091Display}', so the row is both distance and foundation.";
-
-            if (isFoundationCourse)
-                return $"Failed because the linked CRSE._091='{crse091Display}', which should not be 'Y' for Control 3.";
-
-            if (isDistanceStudent)
-                return $"Failed because STUD._024='{stud024Display}', which should not be 'D' for Control 3.";
-
-            return $"Failed because the linked values STUD._024='{stud024Display}' and CRSE._091='{crse091Display}' did not satisfy Control 3.";
-        }
-
-        private static string BuildControl3FinalResultMessage(string stud024Display, string crse091Display, bool isDistanceStudent, bool isFoundationCourse)
-        {
-            if (isDistanceStudent && isFoundationCourse)
-                return $"Failed this criteria because _024='{stud024Display}' and _091='{crse091Display}'.";
-
-            if (isFoundationCourse)
-                return $"Failed this criteria because _091='{crse091Display}' instead of a non-'Y' value.";
-
-            if (isDistanceStudent)
-                return $"Failed this criteria because _024='{stud024Display}' instead of a non-'D' value.";
-
-            return $"Failed this criteria because _024='{stud024Display}' and _091='{crse091Display}' did not satisfy Control 3.";
+            values["STUD_CRITERIA_MESSAGE"]  = studCriteriaMessage;
+            values["BRIDGE_LINK_MESSAGE"]    = bridgeLinkMessage;
+            values["Student_Category"]       = category;
+            row.ValidationExplanation        = validationExplanation;
         }
 
         private static string FormatRule16ColumnValue(string? value) =>

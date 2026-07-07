@@ -87,16 +87,19 @@ namespace HemisAudit.Services
                     Success = true,
                     Columns = columns,
                     AutoColumn037 = FindFirst(columns, ["_037"], ["037", "staff"]),
-                    AutoColumn038 = FindFirst(columns, ["_038"], ["038", "year"]),
+                    AutoColumn038 = FindFirst(columns, ["_038"], ["038", "year", "commencement"]),
+                    AutoColumn039 = FindFirst(columns, ["_039"], ["039", "personnel", "category"]),
+                    AutoColumn040 = FindFirst(columns, ["_040"], ["040", "rank"]),
                     AutoColumn011 = FindFirst(columns, ["_011"], ["011", "birth"]),
                     AutoColumn012 = FindFirst(columns, ["_012"], ["012", "gender"]),
                     AutoColumn013 = FindFirst(columns, ["_013"], ["013", "race"]),
+                    AutoColumn014 = FindFirst(columns, ["_014"], ["014", "national"]),
                     AutoColumn041 = FindFirst(columns, ["_041"], ["041", "employment", "permanent", "temporary"]),
-                    AutoColumn039 = FindFirst(columns, ["_039"], ["039", "personnel", "category"]),
-                    AutoColumn040 = FindFirst(columns, ["_040"], ["040", "rank"]),
                     AutoColumn042 = FindFirst(columns, ["_042"], ["042", "part", "full", "status"]),
                     AutoColumn046 = FindFirst(columns, ["_046"], ["046", "qual"]),
-                    AutoColumn048 = FindFirst(columns, ["_048"], ["048", "payroll"])
+                    AutoColumn047 = FindFirst(columns, ["_047"], ["047", "joint", "appoint"]),
+                    AutoColumn048 = FindFirst(columns, ["_048"], ["048", "payroll"]),
+                    AutoColumn094 = FindFirst(columns, ["_094"], ["094", "research", "fellow"])
                 };
             }
             catch (Exception ex)
@@ -253,15 +256,18 @@ ORDER BY vr.RunTimestamp DESC, vr.RunID DESC;";
             {
                 workspace.Column037 = deserializedSummary.Column037;
                 workspace.Column038 = deserializedSummary.Column038;
+                workspace.Column039 = deserializedSummary.Column039;
+                workspace.Column040 = deserializedSummary.Column040;
                 workspace.Column011 = deserializedSummary.Column011;
                 workspace.Column012 = deserializedSummary.Column012;
                 workspace.Column013 = deserializedSummary.Column013;
-                workspace.Column039 = deserializedSummary.Column039;
-                workspace.Column040 = deserializedSummary.Column040;
+                workspace.Column014 = string.IsNullOrWhiteSpace(deserializedSummary.Column014) ? "_014" : deserializedSummary.Column014;
                 workspace.Column041 = deserializedSummary.Column041;
                 workspace.Column042 = deserializedSummary.Column042;
                 workspace.Column046 = deserializedSummary.Column046;
+                workspace.Column047 = string.IsNullOrWhiteSpace(deserializedSummary.Column047) ? "_047" : deserializedSummary.Column047;
                 workspace.Column048 = deserializedSummary.Column048;
+                workspace.Column094 = string.IsNullOrWhiteSpace(deserializedSummary.Column094) ? "_094" : deserializedSummary.Column094;
                 workspace.Control1SampleSize = deserializedSummary.Control1SampleSize;
                 workspace.Control2SampleSize = deserializedSummary.Control2SampleSize;
                 workspace.Control3SampleSize = deserializedSummary.Control3SampleSize;
@@ -559,28 +565,31 @@ END";
             var profTable = Sanitise(request.ProfTable);
             var col037 = Sanitise(request.Column037);
             var col038 = Sanitise(request.Column038);
+            var col039 = Sanitise(request.Column039);
+            var col040 = Sanitise(request.Column040);
             var col011 = Sanitise(request.Column011);
             var col012 = Sanitise(request.Column012);
             var col013 = Sanitise(request.Column013);
+            var col014 = Sanitise(string.IsNullOrWhiteSpace(request.Column014) ? "_014" : request.Column014);
             var col041 = Sanitise(request.Column041);
-            var col039 = Sanitise(request.Column039);
-            var col040 = Sanitise(request.Column040);
             var col042 = Sanitise(request.Column042);
             var col046 = Sanitise(request.Column046);
+            var col047 = Sanitise(string.IsNullOrWhiteSpace(request.Column047) ? "_047" : request.Column047);
             var col048 = Sanitise(request.Column048);
+            var col094 = Sanitise(string.IsNullOrWhiteSpace(request.Column094) ? "_094" : request.Column094);
             var fv041 = SafeFilterValue(request.FilterValue041);
             var fv039 = SafeFilterValue(request.FilterValue039);
 
             var sql = $@"-- ================================================================
 -- HEMIS RULE 22: STAFF VALIDATION (dbo_PROF)
 -- ================================================================
--- Database: {request.Database}
--- Table: [{profTable}]
--- Scope: 100% validation of all rows that match Control 1, Control 2, or Control 3
+-- Database : {request.Database}
+-- Table    : [{profTable}]
+-- Scope    : 100% Population Validation
+--
 -- Control 1: [{col041}] = '{fv041}' AND [{col039}] = '{fv039}'
 -- Control 2: [{col041}] = '{fv041}' AND [{col039}] <> '{fv039}'
 -- Control 3: [{col041}] <> '{fv041}' AND [{col039}] <> '{fv039}'
--- Ordering: deterministic by [{col037}], [{col038}]
 -- ================================================================
 
 SELECT COUNT(*) AS Control1Available
@@ -597,29 +606,32 @@ WHERE {BuildControl3Condition(col041, col039, fv041, fv039)};
 
 WITH Rule22Classified AS
 (
-            SELECT
+    SELECT
         {BuildControlTypeCase(col041, col039, fv041, fv039)} AS Control_Type,
         {BuildControlDefinitionCase(col041, col039, fv041, fv039)} AS Control_Definition,
         ROW_NUMBER() OVER
         (
             PARTITION BY {BuildControlTypeCase(col041, col039, fv041, fv039)}
             ORDER BY
-                CASE WHEN TRY_CONVERT(bigint, [{col037}]) IS NULL THEN 1 ELSE 0 END,
-                TRY_CONVERT(bigint, [{col037}]),
-                CAST([{col037}] AS nvarchar(255)),
-                CAST([{col038}] AS nvarchar(255))
+                CASE WHEN TRY_CONVERT(BIGINT, [{col037}]) IS NULL THEN 1 ELSE 0 END,
+                TRY_CONVERT(BIGINT, [{col037}]),
+                CAST([{col037}] AS NVARCHAR(255)),
+                CAST([{col038}] AS NVARCHAR(255))
         ) AS Control_Row_Number,
-        CAST([{col037}] AS nvarchar(255)) AS Staff_Number_037,
-        CAST([{col038}] AS nvarchar(255)) AS Year_038,
-        CAST([{col011}] AS nvarchar(255)) AS Col_011,
-        CAST([{col012}] AS nvarchar(255)) AS Col_012,
-        CAST([{col013}] AS nvarchar(255)) AS Col_013,
-        CAST([{col039}] AS nvarchar(255)) AS Col_039,
-        CAST([{col040}] AS nvarchar(255)) AS Col_040,
-        CAST([{col041}] AS nvarchar(255)) AS Col_041,
-        CAST([{col042}] AS nvarchar(255)) AS Col_042,
-        CAST([{col046}] AS nvarchar(255)) AS Col_046,
-        CAST([{col048}] AS nvarchar(255)) AS Col_048,
+        CAST([{col037}] AS NVARCHAR(255)) AS Staff_Number,
+        CAST([{col038}] AS NVARCHAR(255)) AS Employment_Commencement_Year,
+        CAST([{col039}] AS NVARCHAR(255)) AS Personnel_Category,
+        CAST([{col040}] AS NVARCHAR(255)) AS Rank_of_Staff_Member,
+        CAST([{col011}] AS NVARCHAR(255)) AS Date_of_Birth,
+        CAST([{col012}] AS NVARCHAR(255)) AS Gender,
+        CAST([{col013}] AS NVARCHAR(255)) AS Race,
+        CAST([{col014}] AS NVARCHAR(255)) AS Nationality,
+        CAST([{col041}] AS NVARCHAR(255)) AS Permanent_Temporary_Status,
+        CAST([{col042}] AS NVARCHAR(255)) AS Full_Time_Part_Time_Status,
+        CAST([{col046}] AS NVARCHAR(255)) AS Staff_Qualification,
+        CAST([{col047}] AS NVARCHAR(255)) AS Joint_Appointment,
+        CAST([{col048}] AS NVARCHAR(255)) AS On_Payroll_Code,
+        CAST([{col094}] AS NVARCHAR(255)) AS Research_Fellow,
         'PASS' AS Validation_Result
     FROM [{profTable}]
     WHERE {BuildIncludedCondition(col041, col039, fv041, fv039)}
@@ -639,17 +651,20 @@ SELECT
     Control_Type,
     Control_Definition,
     Control_Row_Number,
-    Staff_Number_037,
-    Year_038,
-    Col_011,
-    Col_012,
-    Col_013,
-    Col_039,
-    Col_040,
-    Col_041,
-    Col_042,
-    Col_046,
-    Col_048,
+    Staff_Number,
+    Employment_Commencement_Year,
+    Personnel_Category,
+    Rank_of_Staff_Member,
+    Date_of_Birth,
+    Gender,
+    Race,
+    Nationality,
+    Permanent_Temporary_Status,
+    Full_Time_Part_Time_Status,
+    Staff_Qualification,
+    Joint_Appointment,
+    On_Payroll_Code,
+    Research_Fellow,
     Validation_Result
 FROM Rule22Classified
 ORDER BY
@@ -673,15 +688,18 @@ ORDER BY
             var profTable = Sanitise(request.ProfTable);
             var col037 = Sanitise(request.Column037);
             var col038 = Sanitise(request.Column038);
+            var col039 = Sanitise(request.Column039);
+            var col040 = Sanitise(request.Column040);
             var col011 = Sanitise(request.Column011);
             var col012 = Sanitise(request.Column012);
             var col013 = Sanitise(request.Column013);
+            var col014 = Sanitise(string.IsNullOrWhiteSpace(request.Column014) ? "_014" : request.Column014);
             var col041 = Sanitise(request.Column041);
-            var col039 = Sanitise(request.Column039);
-            var col040 = Sanitise(request.Column040);
             var col042 = Sanitise(request.Column042);
             var col046 = Sanitise(request.Column046);
+            var col047 = Sanitise(string.IsNullOrWhiteSpace(request.Column047) ? "_047" : request.Column047);
             var col048 = Sanitise(request.Column048);
+            var col094 = Sanitise(string.IsNullOrWhiteSpace(request.Column094) ? "_094" : request.Column094);
             var fv041 = SafeFilterValue(request.FilterValue041);
             var fv039 = SafeFilterValue(request.FilterValue039);
 
@@ -693,15 +711,18 @@ ORDER BY
                 profTable,
                 col037,
                 col038,
+                col039,
+                col040,
                 col011,
                 col012,
                 col013,
+                col014,
                 col041,
-                col039,
-                col040,
                 col042,
                 col046,
+                col047,
                 col048,
+                col094,
                 fv041,
                 fv039,
                 includeAllReviewRows ? null : ReviewPreviewRowsPerControl));
@@ -721,17 +742,20 @@ ORDER BY
                 Timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
                 Database = request.Database,
                 ProfTable = request.ProfTable,
-                Column037 = request.Column037,
-                Column038 = request.Column038,
-                Column011 = request.Column011,
-                Column012 = request.Column012,
-                Column013 = request.Column013,
-                Column041 = request.Column041,
-                Column039 = request.Column039,
-                Column040 = request.Column040,
-                Column042 = request.Column042,
-                Column046 = request.Column046,
-                Column048 = request.Column048,
+                Column037 = col037,
+                Column038 = col038,
+                Column039 = col039,
+                Column040 = col040,
+                Column011 = col011,
+                Column012 = col012,
+                Column013 = col013,
+                Column014 = col014,
+                Column041 = col041,
+                Column042 = col042,
+                Column046 = col046,
+                Column047 = col047,
+                Column048 = col048,
+                Column094 = col094,
                 FilterValue041 = fv041,
                 FilterValue039 = fv039,
                 Control1SampleSize = 0,
@@ -866,15 +890,18 @@ WHERE RunID = @RunID;";
                 ProfTable = request.ProfTable,
                 Column037 = request.Column037,
                 Column038 = request.Column038,
+                Column039 = request.Column039,
+                Column040 = request.Column040,
                 Column011 = request.Column011,
                 Column012 = request.Column012,
                 Column013 = request.Column013,
+                Column014 = string.IsNullOrWhiteSpace(request.Column014) ? "_014" : request.Column014,
                 Column041 = request.Column041,
-                Column039 = request.Column039,
-                Column040 = request.Column040,
                 Column042 = request.Column042,
                 Column046 = request.Column046,
+                Column047 = string.IsNullOrWhiteSpace(request.Column047) ? "_047" : request.Column047,
                 Column048 = request.Column048,
+                Column094 = string.IsNullOrWhiteSpace(request.Column094) ? "_094" : request.Column094,
                 Control1SampleSize = request.Control1SampleSize,
                 Control2SampleSize = request.Control2SampleSize,
                 Control3SampleSize = request.Control3SampleSize
@@ -912,15 +939,18 @@ ORDER BY ORDINAL_POSITION;";
             string profTable,
             string col037,
             string col038,
+            string col039,
+            string col040,
             string col011,
             string col012,
             string col013,
+            string col014,
             string col041,
-            string col039,
-            string col040,
             string col042,
             string col046,
+            string col047,
             string col048,
+            string col094,
             string fv041,
             string fv039,
             int? perControlLimit)
@@ -942,17 +972,20 @@ WITH Rule22Classified AS
                 CAST([{col037}] AS nvarchar(255)),
                 CAST([{col038}] AS nvarchar(255))
         ) AS Sample_Number,
-        CAST([{col037}] AS nvarchar(255)) AS Staff_Number_037,
-        CAST([{col038}] AS nvarchar(255)) AS Year_038,
-        CAST([{col011}] AS nvarchar(255)) AS Col_011,
-        CAST([{col012}] AS nvarchar(255)) AS Col_012,
-        CAST([{col013}] AS nvarchar(255)) AS Col_013,
-        CAST([{col039}] AS nvarchar(255)) AS Col_039,
-        CAST([{col040}] AS nvarchar(255)) AS Col_040,
-        CAST([{col041}] AS nvarchar(255)) AS Col_041,
-        CAST([{col042}] AS nvarchar(255)) AS Col_042,
-        CAST([{col046}] AS nvarchar(255)) AS Col_046,
-        CAST([{col048}] AS nvarchar(255)) AS Col_048,
+        CAST([{col037}] AS nvarchar(255)) AS Staff_Number,
+        CAST([{col038}] AS nvarchar(255)) AS Employment_Commencement_Year,
+        CAST([{col039}] AS nvarchar(255)) AS Personnel_Category,
+        CAST([{col040}] AS nvarchar(255)) AS Rank_of_Staff_Member,
+        CAST([{col011}] AS nvarchar(255)) AS Date_of_Birth,
+        CAST([{col012}] AS nvarchar(255)) AS Gender,
+        CAST([{col013}] AS nvarchar(255)) AS Race,
+        CAST([{col014}] AS nvarchar(255)) AS Nationality,
+        CAST([{col041}] AS nvarchar(255)) AS Permanent_Temporary_Status,
+        CAST([{col042}] AS nvarchar(255)) AS Full_Time_Part_Time_Status,
+        CAST([{col046}] AS nvarchar(255)) AS Staff_Qualification,
+        CAST([{col047}] AS nvarchar(255)) AS Joint_Appointment,
+        CAST([{col048}] AS nvarchar(255)) AS On_Payroll_Code,
+        CAST([{col094}] AS nvarchar(255)) AS Research_Fellow,
         {BuildValidationResultCase(col041, col039, fv041, fv039)} AS Validation_Result,
         {BuildExceptionReasonCase(col041, col039, fv041, fv039)} AS Exception_Reason
     FROM [{profTable}]
@@ -962,17 +995,20 @@ SELECT
     Control_Type,
     Control_Definition,
     Sample_Number,
-    Staff_Number_037,
-    Year_038,
-    Col_011,
-    Col_012,
-    Col_013,
-    Col_039,
-    Col_040,
-    Col_041,
-    Col_042,
-    Col_046,
-    Col_048,
+    Staff_Number,
+    Employment_Commencement_Year,
+    Personnel_Category,
+    Rank_of_Staff_Member,
+    Date_of_Birth,
+    Gender,
+    Race,
+    Nationality,
+    Permanent_Temporary_Status,
+    Full_Time_Part_Time_Status,
+    Staff_Qualification,
+    Joint_Appointment,
+    On_Payroll_Code,
+    Research_Fellow,
     Validation_Result,
     Exception_Reason
 FROM Rule22Classified
@@ -994,22 +1030,25 @@ ORDER BY
             {
                 rows.Add(new Rule22ReviewRowViewModel
                 {
-                    ControlType = reader.IsDBNull(0) ? "" : reader.GetString(0),
-                    ControlDefinition = reader.IsDBNull(1) ? "" : reader.GetString(1),
-                    SampleNumber = reader.IsDBNull(2) ? 0 : Convert.ToInt32(reader.GetValue(2)),
-                    StaffNumber037 = reader.IsDBNull(3) ? "" : reader.GetString(3),
-                    Year038 = reader.IsDBNull(4) ? "" : reader.GetString(4),
-                    Col011 = reader.IsDBNull(5) ? "" : reader.GetString(5),
-                    Col012 = reader.IsDBNull(6) ? "" : reader.GetString(6),
-                    Col013 = reader.IsDBNull(7) ? "" : reader.GetString(7),
-                    Col039 = reader.IsDBNull(8) ? "" : reader.GetString(8),
-                    Col040 = reader.IsDBNull(9) ? "" : reader.GetString(9),
-                    Col041 = reader.IsDBNull(10) ? "" : reader.GetString(10),
-                    Col042 = reader.IsDBNull(11) ? "" : reader.GetString(11),
-                    Col046 = reader.IsDBNull(12) ? "" : reader.GetString(12),
-                    Col048 = reader.IsDBNull(13) ? "" : reader.GetString(13),
-                    ValidationResult = reader.IsDBNull(14) ? "" : reader.GetString(14),
-                    ExceptionReason = reader.IsDBNull(15) ? "" : reader.GetString(15)
+                    ControlType       = reader.IsDBNull(0)  ? "" : reader.GetString(0),
+                    ControlDefinition = reader.IsDBNull(1)  ? "" : reader.GetString(1),
+                    SampleNumber      = reader.IsDBNull(2)  ? 0  : Convert.ToInt32(reader.GetValue(2)),
+                    StaffNumber037    = reader.IsDBNull(3)  ? "" : reader.GetString(3),
+                    Year038           = reader.IsDBNull(4)  ? "" : reader.GetString(4),
+                    Col039            = reader.IsDBNull(5)  ? "" : reader.GetString(5),
+                    Col040            = reader.IsDBNull(6)  ? "" : reader.GetString(6),
+                    Col011            = reader.IsDBNull(7)  ? "" : reader.GetString(7),
+                    Col012            = reader.IsDBNull(8)  ? "" : reader.GetString(8),
+                    Col013            = reader.IsDBNull(9)  ? "" : reader.GetString(9),
+                    Col014            = reader.IsDBNull(10) ? "" : reader.GetString(10),
+                    Col041            = reader.IsDBNull(11) ? "" : reader.GetString(11),
+                    Col042            = reader.IsDBNull(12) ? "" : reader.GetString(12),
+                    Col046            = reader.IsDBNull(13) ? "" : reader.GetString(13),
+                    Col047            = reader.IsDBNull(14) ? "" : reader.GetString(14),
+                    Col048            = reader.IsDBNull(15) ? "" : reader.GetString(15),
+                    Col094            = reader.IsDBNull(16) ? "" : reader.GetString(16),
+                    ValidationResult  = reader.IsDBNull(17) ? "" : reader.GetString(17),
+                    ExceptionReason   = reader.IsDBNull(18) ? "" : reader.GetString(18)
                 });
             }
 
@@ -1093,15 +1132,18 @@ ORDER BY
                 ProfTable = request.ProfTable,
                 Column037 = request.Column037,
                 Column038 = request.Column038,
+                Column039 = request.Column039,
+                Column040 = request.Column040,
                 Column011 = request.Column011,
                 Column012 = request.Column012,
                 Column013 = request.Column013,
+                Column014 = string.IsNullOrWhiteSpace(request.Column014) ? "_014" : request.Column014,
                 Column041 = request.Column041,
-                Column039 = request.Column039,
-                Column040 = request.Column040,
                 Column042 = request.Column042,
                 Column046 = request.Column046,
+                Column047 = string.IsNullOrWhiteSpace(request.Column047) ? "_047" : request.Column047,
                 Column048 = request.Column048,
+                Column094 = string.IsNullOrWhiteSpace(request.Column094) ? "_094" : request.Column094,
                 Control1SampleSize = request.Control1SampleSize,
                 Control2SampleSize = request.Control2SampleSize,
                 Control3SampleSize = request.Control3SampleSize
@@ -1492,15 +1534,18 @@ ORDER BY RunTimestamp DESC, RunID DESC;";
 
             summary.Column037 = Rule22ColumnMappingHelper.Normalize(summary.Column037, "_037");
             summary.Column038 = Rule22ColumnMappingHelper.Normalize(summary.Column038, "_038");
+            summary.Column039 = Rule22ColumnMappingHelper.Normalize(summary.Column039, "_039");
+            summary.Column040 = Rule22ColumnMappingHelper.Normalize(summary.Column040, "_040");
             summary.Column011 = Rule22ColumnMappingHelper.Normalize(summary.Column011, "_011");
             summary.Column012 = Rule22ColumnMappingHelper.Normalize(summary.Column012, "_012");
             summary.Column013 = Rule22ColumnMappingHelper.Normalize(summary.Column013, "_013");
-            summary.Column039 = Rule22ColumnMappingHelper.Normalize(summary.Column039, "_039");
-            summary.Column040 = Rule22ColumnMappingHelper.Normalize(summary.Column040, "_040");
+            summary.Column014 = Rule22ColumnMappingHelper.Normalize(summary.Column014, "_014");
             summary.Column041 = Rule22ColumnMappingHelper.Normalize(summary.Column041, "_041");
             summary.Column042 = Rule22ColumnMappingHelper.Normalize(summary.Column042, "_042");
             summary.Column046 = Rule22ColumnMappingHelper.Normalize(summary.Column046, "_046");
+            summary.Column047 = Rule22ColumnMappingHelper.Normalize(summary.Column047, "_047");
             summary.Column048 = Rule22ColumnMappingHelper.Normalize(summary.Column048, "_048");
+            summary.Column094 = Rule22ColumnMappingHelper.Normalize(summary.Column094, "_094");
             summary.FilterValue041 = fv041;
             summary.FilterValue039 = fv039;
             summary.Control1SampleSize = 0;

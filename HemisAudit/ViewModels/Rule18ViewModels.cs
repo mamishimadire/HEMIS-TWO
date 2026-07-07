@@ -38,6 +38,10 @@ namespace HemisAudit.ViewModels
         public string FoundationFilterValue { get; set; } = "Y";
         public string DistanceFilterCol { get; set; } = "_024";
         public string DistanceFilterValue { get; set; } = "D";
+        public string CredJoinCol { get; set; } = "_001";
+        public string CredCourseCol { get; set; } = "_030";
+        public string CrseCourseCol { get; set; } = "_030";
+        public string CrseNameCol { get; set; } = "_058";
     }
 
     public class ColumnValuesResult
@@ -84,6 +88,10 @@ namespace HemisAudit.ViewModels
         public string FoundationFilterValue { get; set; } = "Y";
         public string DistanceFilterCol { get; set; } = "_024";
         public string DistanceFilterValue { get; set; } = "D";
+        public string CredJoinCol { get; set; } = "_001";
+        public string CredCourseCol { get; set; } = "_030";
+        public string CrseCourseCol { get; set; } = "_030";
+        public string CrseNameCol { get; set; } = "_058";
     }
 
     public class Rule18ControlSummaryItemViewModel
@@ -144,6 +152,11 @@ namespace HemisAudit.ViewModels
         public string FoundationFilterValue { get; set; } = "Y";
         public string DistanceFilterCol { get; set; } = "_024";
         public string DistanceFilterValue { get; set; } = "D";
+        public string CredJoinCol { get; set; } = "_001";
+        public string CredCourseCol { get; set; } = "_030";
+        public string CrseCourseCol { get; set; } = "_030";
+        public string CrseNameCol { get; set; } = "_058";
+        public string Server { get; set; } = "";
         public string TableLinkageText { get; set; } = "";
         public string RuleModeText { get; set; } = "";
         public List<string> ProcedureSteps { get; set; } = new();
@@ -199,6 +212,10 @@ namespace HemisAudit.ViewModels
         public string FoundationFilterValue { get; set; } = "Y";
         public string DistanceFilterCol { get; set; } = "_024";
         public string DistanceFilterValue { get; set; } = "D";
+        public string CredJoinCol { get; set; } = "_001";
+        public string CredCourseCol { get; set; } = "_030";
+        public string CrseCourseCol { get; set; } = "_030";
+        public string CrseNameCol { get; set; } = "_058";
         public string CurrentUserEngagementRole { get; set; } = "";
         public bool HasDataAnalystSignoff { get; set; }
         public bool CurrentUserHasSignedOff { get; set; }

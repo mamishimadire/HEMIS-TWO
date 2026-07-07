@@ -17,6 +17,8 @@ namespace HemisAudit.ViewModels
         public string? AutoStudTable { get; set; }
         public string? AutoQualTable { get; set; }
         public string? AutoPqmTable { get; set; }
+        public string? AutoCredTable { get; set; }
+        public string? AutoCrseTable { get; set; }
         public string? Error { get; set; }
     }
 
@@ -73,6 +75,11 @@ namespace HemisAudit.ViewModels
         public string PqmTable { get; set; } = "";
         public string PqmQualNameColumn { get; set; } = "";
         public string PqmQualTypeColumn { get; set; } = "";
+        public string CredTable { get; set; } = "";
+        public string CredJoinCol { get; set; } = "_001";
+        public string CredCourseCol { get; set; } = "_030";
+        public string CrseTable { get; set; } = "";
+        public string CrseCourseCol { get; set; } = "_030";
     }
 
     public class Rule19VerifyResult
@@ -80,6 +87,8 @@ namespace HemisAudit.ViewModels
         public bool Success { get; set; }
         public int StudRecordCount { get; set; }
         public int QualRecordCount { get; set; }
+        public int CredRecordCount { get; set; }
+        public int CrseRecordCount { get; set; }
         public int EligiblePopulationCount { get; set; }
         public List<Rule19ValidationRowRecord> PreviewRows { get; set; } = new();
         public string? Error { get; set; }
@@ -104,6 +113,11 @@ namespace HemisAudit.ViewModels
         public string PqmTable { get; set; } = "";
         public string PqmQualNameColumn { get; set; } = "";
         public string PqmQualTypeColumn { get; set; } = "";
+        public string CredTable { get; set; } = "";
+        public string CredJoinCol { get; set; } = "_001";
+        public string CredCourseCol { get; set; } = "_030";
+        public string CrseTable { get; set; } = "";
+        public string CrseCourseCol { get; set; } = "_030";
     }
 
     public class Rule19BreakdownItemViewModel
@@ -159,6 +173,13 @@ namespace HemisAudit.ViewModels
         public string PqmTable { get; set; } = "";
         public string PqmQualNameColumn { get; set; } = "";
         public string PqmQualTypeColumn { get; set; } = "";
+        public string CredTable { get; set; } = "";
+        public string CredJoinCol { get; set; } = "_001";
+        public string CredCourseCol { get; set; } = "_030";
+        public string CrseTable { get; set; } = "";
+        public string CrseCourseCol { get; set; } = "_030";
+        public int CredRecordCount { get; set; }
+        public int CrseRecordCount { get; set; }
         public List<Rule19BreakdownItemViewModel> Breakdown { get; set; } = new();
         public List<Rule19ValidationRowRecord> MatchingRows { get; set; } = new();
         public string? Warning { get; set; }
@@ -204,6 +225,11 @@ namespace HemisAudit.ViewModels
         public string PqmTable { get; set; } = "";
         public string PqmQualNameColumn { get; set; } = "";
         public string PqmQualTypeColumn { get; set; } = "";
+        public string CredTable { get; set; } = "";
+        public string CredJoinCol { get; set; } = "_001";
+        public string CredCourseCol { get; set; } = "_030";
+        public string CrseTable { get; set; } = "";
+        public string CrseCourseCol { get; set; } = "_030";
         public string CurrentUserEngagementRole { get; set; } = "";
         public bool HasDataAnalystSignoff { get; set; }
         public bool CurrentUserHasSignedOff { get; set; }

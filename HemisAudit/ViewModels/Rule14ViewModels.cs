@@ -50,6 +50,9 @@ namespace HemisAudit.ViewModels
             get => CrseTable;
             set => CrseTable = value;
         }
+        public string CrseApprovedCol { get; set; } = "_031";
+        public string CrseLinkCol { get; set; } = "_030";
+        public string CregLinkCol { get; set; } = "_030";
     }
 
     public class Rule14VerifyResult
@@ -123,6 +126,10 @@ namespace HemisAudit.ViewModels
             get => CrseTable;
             set => CrseTable = value;
         }
+        public string CrseApprovedCol { get; set; } = "_031";
+        public string CrseApprovedVal { get; set; } = "A";
+        public string CrseLinkCol { get; set; } = "_030";
+        public string CregLinkCol { get; set; } = "_030";
     }
 
     public class Rule14ControlSummaryItemViewModel
@@ -207,6 +214,10 @@ namespace HemisAudit.ViewModels
             get => CrseTable;
             set => CrseTable = value;
         }
+        public string CrseApprovedCol { get; set; } = "_031";
+        public string CrseApprovedVal { get; set; } = "A";
+        public string CrseLinkCol { get; set; } = "_030";
+        public string CregLinkCol { get; set; } = "_030";
         public string TableLinkageText { get; set; } = "";
         public string RuleModeText { get; set; } = "";
         public List<string> ProcedureSteps { get; set; } = new();
@@ -275,6 +286,10 @@ namespace HemisAudit.ViewModels
             get => CrseTable;
             set => CrseTable = value;
         }
+        public string CrseApprovedCol { get; set; } = "_031";
+        public string CrseApprovedVal { get; set; } = "A";
+        public string CrseLinkCol { get; set; } = "_030";
+        public string CregLinkCol { get; set; } = "_030";
         public string CurrentUserEngagementRole { get; set; } = "";
         public bool HasDataAnalystSignoff { get; set; }
         public bool CurrentUserHasSignedOff { get; set; }

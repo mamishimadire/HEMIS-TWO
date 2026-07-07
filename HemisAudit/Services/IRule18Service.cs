@@ -21,5 +21,7 @@ namespace HemisAudit.Services
         Task RemoveSignoffAsync(int runId, string reviewerEmail);
         Task<string> GenerateSqlAsync(Rule18ValidationRequest request);
         Task<Rule18ValidationSummary> GetExportSummaryAsync(Rule18ValidationRequest request);
+        Task<byte[]> ExportFullExcelAsync(Rule18ValidationSummary summary, string? overrideServer = null);
+        Task<byte[]> ExportFullCsvAsync(Rule18ValidationSummary summary, string? overrideServer = null);
     }
 }

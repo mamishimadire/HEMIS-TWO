@@ -7,9 +7,16 @@ namespace HemisAudit.ViewModels
         // STUD table column roles
         public string StudStudentNo { get; set; } = "_007";
         public string StudColumn008 { get; set; } = "_008";
-        public string StudColumn010 { get; set; } = "_010";
+        public string StudColumn066 { get; set; } = "_066";
+        public string StudColumn067 { get; set; } = "_067";
+        public string StudColumn068 { get; set; } = "_068";
         public string StudColumn012 { get; set; } = "_012";
+        public string StudColumn013 { get; set; } = "_013";
+        public string StudColumn014 { get; set; } = "_014";
+        public string StudColumn015 { get; set; } = "_015";
+        public string StudColumn010 { get; set; } = "_010";
         public string StudColumn026 { get; set; } = "_026";
+        public string StudColumn025 { get; set; } = "_025";
         public string StudQualCode { get; set; } = "_001";
         public string StudName { get; set; } = "_019";
         public string StudIdNo { get; set; } = "_024";
@@ -24,6 +31,7 @@ namespace HemisAudit.ViewModels
         public string CregCourseCode { get; set; } = "_030";
         // CRSE table column roles
         public string CrseCourseCode { get; set; } = "_030";
+        public string CrseCourseName { get; set; } = "_058";
         public string CrseFoundationFlag { get; set; } = "_091";
         public string CrseFoundationValue { get; set; } = "Y";
     }
@@ -103,9 +111,16 @@ namespace HemisAudit.ViewModels
         public string PartDescription { get; set; } = "";
         public string StudentNumber007 { get; set; } = "";
         public string StudentColumn008 { get; set; } = "";
-        public string StudentColumn010 { get; set; } = "";
+        public string StudentColumn066 { get; set; } = "";
+        public string StudentColumn067 { get; set; } = "";
+        public string StudentColumn068 { get; set; } = "";
         public string StudentColumn012 { get; set; } = "";
+        public string StudentColumn013 { get; set; } = "";
+        public string StudentColumn014 { get; set; } = "";
+        public string StudentColumn015 { get; set; } = "";
+        public string StudentColumn010 { get; set; } = "";
         public string StudentColumn026 { get; set; } = "";
+        public string StudentColumn025 { get; set; } = "";
         public string QualificationCode001 { get; set; } = "";
         public string Name019 { get; set; } = "";
         public string IdNumber024 { get; set; } = "";
@@ -114,6 +129,7 @@ namespace HemisAudit.ViewModels
         public string QualificationType005 { get; set; } = "";
         public string BridgeQualificationCode001 { get; set; } = "";
         public string CourseCode030 { get; set; } = "";
+        public string CourseName058 { get; set; } = "";
         public string CrseCourseCode030 { get; set; } = "";
         public string FoundationCourse091 { get; set; } = "";
         public string StudentType { get; set; } = "";

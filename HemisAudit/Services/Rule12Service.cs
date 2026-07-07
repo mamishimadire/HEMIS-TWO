@@ -705,35 +705,132 @@ END";
             if (!string.IsNullOrWhiteSpace(cregExtra3Col)) extraCols.Append($"\n    a.CREG__EXTRA3 AS CREG__{cregExtra3Col.TrimStart('_')},");
             if (!string.IsNullOrWhiteSpace(cresExtra1Col)) extraCols.Append($"\n    a.CRES__EXTRA1 AS CRES__{cresExtra1Col.TrimStart('_')},");
 
-            var sql = $@"-- HEMIS RULE 12: ACTIVE STUDENTS
--- Tables: [{cregTable}], [{qualTable}], [{cresTable}]
--- Join 1: [{cregTable}].[{cregQualCol}] = [{qualTable}].[{qualJoinCol}]
--- Join 2: [{cregTable}].[{cregCourseCol}] = [{cresTable}].[{cresCourseCol}]
--- Filter: [{cresTable}].[{cresStatusCol}] = '{cresStatusFilter}'
--- Extra CREG cols: {(string.IsNullOrWhiteSpace(cregExtra1Col) ? "none" : cregExtra1Col)}, {(string.IsNullOrWhiteSpace(cregExtra2Col) ? "none" : cregExtra2Col)}, filter={cregFilterCol} ({cregFilterValues}), {(string.IsNullOrWhiteSpace(cregExtra3Col) ? "none" : cregExtra3Col)}
--- Extra CRES col: {(string.IsNullOrWhiteSpace(cresExtra1Col) ? "none" : cresExtra1Col)}
--- PASS when the active student qualification exists in [{qualTable}]
+            var sql = $@"-- ============================================================================
+-- HEMIS RULE 12: ACTIVE STUDENTS - 100% POPULATION WITH PROPER EXTRACTION
+-- ============================================================================
 
-{BuildRule12PrepSql(cregTable, qualTable, cresTable, cregStudentCol, cregQualCol, cregCourseCol, qualJoinCol, qualDescCol, cresCourseCol, cresStatusCol, cresStatusFilter, cregExtra1Col, cregExtra2Col, cregFilterCol, cregFilterValues, cregExtra3Col, cresExtra1Col)}
-SELECT
-    'Control_1' AS Control_Type,
-    'CONTROL 1: [{cregTable}].[{cregQualCol}] = [{qualTable}].[{qualJoinCol}] WHERE [{cresTable}].[{cresStatusCol}] = ''{cresStatusFilter}''' AS Control_Label,
-    a.CREG__007,
-    a.CREG__001,
-    a.CREG__030,{extraCols}
-    q.QUAL__001,
-    q.QUAL__003,
-    a.CRES__030,
-    a.CRES__031,
-    CASE WHEN q.QUAL__001 IS NOT NULL THEN 'PASS' ELSE 'FAIL' END AS Validation_Result
-FROM #Rule12Active a
-LEFT JOIN #Rule12Quals q ON q.QUAL__001 = a.CREG__001
-ORDER BY a.CREG__007, a.CREG__001;
+DROP TABLE IF EXISTS #Rule12_Active_Courses;
+DROP TABLE IF EXISTS #Rule12_Extracted_Population;
+DROP TABLE IF EXISTS #Rule12_Qual_Master;
+DROP TABLE IF EXISTS #Rule12_Validation;
+
+-- ============================================================================
+-- STEP 1: EXTRACT ACTIVE APPROVED COURSES
+-- ============================================================================
+
+SELECT DISTINCT
+    UPPER(LTRIM(RTRIM(CONVERT(NVARCHAR(255), CRSE.[{cresCourseCol}])))) AS [Course_Code],
+    CONVERT(NVARCHAR(500), CRSE.[{cresExtra1Col}])                       AS [Course_Name],
+    CONVERT(NVARCHAR(50),  CRSE.[{cresStatusCol}])                       AS [Course_Approval_Status]
+INTO #Rule12_Active_Courses
+FROM [{cresTable}] CRSE
+WHERE UPPER(LTRIM(RTRIM(CONVERT(NVARCHAR(50), CRSE.[{cresStatusCol}])))) = '{cresStatusFilter}'
+  AND CRSE.[{cresCourseCol}] IS NOT NULL;
+
+CREATE INDEX IX_Rule12_Active_Courses ON #Rule12_Active_Courses ([Course_Code]);
+
+-- ============================================================================
+-- STEP 2: EXTRACT 100% ACTIVE STUDENT POPULATION
+-- ============================================================================
 
 SELECT
-    (SELECT COUNT(1) FROM #Rule12Active) AS Active_Students,
-    (SELECT COUNT(1) FROM #Rule12Active a LEFT JOIN #Rule12Quals q ON q.QUAL__001 = a.CREG__001 WHERE q.QUAL__001 IS NOT NULL) AS Matched_Quals,
-    (SELECT COUNT(1) FROM #Rule12Active a LEFT JOIN #Rule12Quals q ON q.QUAL__001 = a.CREG__001 WHERE q.QUAL__001 IS NULL) AS Missing_Quals;";
+    ROW_NUMBER() OVER (ORDER BY CREG.[{cregStudentCol}], CREG.[{cregQualCol}], CREG.[{cregCourseCol}]) AS [Extract_Number],
+    CONVERT(NVARCHAR(255), CREG.[{cregStudentCol}])                                                     AS [Student_Number],
+    UPPER(LTRIM(RTRIM(CONVERT(NVARCHAR(255), CREG.[{cregQualCol}]))))                                   AS [Qualification_Code],
+    UPPER(LTRIM(RTRIM(CONVERT(NVARCHAR(255), CREG.[{cregCourseCol}]))))                                 AS [Course_Code],
+    CONVERT(NVARCHAR(255), CREG.[{cregExtra1Col}])                                                      AS [CREG_{cregExtra1Col}],
+    CONVERT(NVARCHAR(255), CREG.[{cregExtra2Col}])                                                      AS [CREG_{cregExtra2Col}],
+    UPPER(LTRIM(RTRIM(CONVERT(NVARCHAR(255), CREG.[{cregFilterCol}]))))                                 AS [CREG_{cregFilterCol}],
+    CONVERT(NVARCHAR(255), CREG.[{cregExtra3Col}])                                                      AS [CREG_{cregExtra3Col}],
+    AC.[Course_Name],
+    AC.[Course_Approval_Status]
+INTO #Rule12_Extracted_Population
+FROM [{cregTable}] CREG
+INNER JOIN #Rule12_Active_Courses AC
+    ON AC.[Course_Code] = UPPER(LTRIM(RTRIM(CONVERT(NVARCHAR(255), CREG.[{cregCourseCol}]))))
+WHERE CREG.[{cregQualCol}] IS NOT NULL
+  AND LTRIM(RTRIM(CONVERT(NVARCHAR(255), CREG.[{cregQualCol}]))) <> '';
+
+CREATE INDEX IX_Rule12_Extracted_Population ON #Rule12_Extracted_Population ([Qualification_Code]);
+
+-- ============================================================================
+-- STEP 3: EXTRACT QUALIFICATION MASTER
+-- ============================================================================
+
+SELECT DISTINCT
+    UPPER(LTRIM(RTRIM(CONVERT(NVARCHAR(255), QUAL.[{qualJoinCol}])))) AS [Qualification_Code],
+    CONVERT(NVARCHAR(500), QUAL.[{qualDescCol}])                       AS [Qualification_Name]
+INTO #Rule12_Qual_Master
+FROM [{qualTable}] QUAL
+WHERE QUAL.[{qualJoinCol}] IS NOT NULL
+  AND LTRIM(RTRIM(CONVERT(NVARCHAR(255), QUAL.[{qualJoinCol}]))) <> '';
+
+CREATE INDEX IX_Rule12_Qual_Master ON #Rule12_Qual_Master ([Qualification_Code]);
+
+-- ============================================================================
+-- STEP 4: VALIDATE ACTIVE STUDENT POPULATION AGAINST QUALIFICATION MASTER
+-- ============================================================================
+
+SELECT
+    P.[Extract_Number],
+    P.[Student_Number],
+    P.[Qualification_Code],
+    P.[Course_Code],
+    P.[Course_Name],
+    P.[Course_Approval_Status],
+    P.[CREG_{cregExtra1Col}],
+    P.[CREG_{cregExtra2Col}],
+    P.[CREG_{cregFilterCol}],
+    P.[CREG_{cregExtra3Col}],
+    Q.[Qualification_Code] AS [QUAL_Qualification_Code],
+    Q.[Qualification_Name] AS [QUAL_Qualification_Name],
+    CASE WHEN Q.[Qualification_Code] IS NOT NULL THEN 'PASS' ELSE 'FAIL' END AS [Validation_Result],
+    CASE
+        WHEN Q.[Qualification_Code] IS NOT NULL
+            THEN 'Active student qualification exists in [{qualTable}].'
+        ELSE 'Active student qualification does not exist in [{qualTable}].'
+    END AS [Validation_Reason]
+INTO #Rule12_Validation
+FROM #Rule12_Extracted_Population P
+LEFT JOIN #Rule12_Qual_Master Q ON Q.[Qualification_Code] = P.[Qualification_Code];
+
+-- ============================================================================
+-- STEP 5: FULL EXTRACTED POPULATION
+-- ============================================================================
+
+SELECT * FROM #Rule12_Extracted_Population ORDER BY [Extract_Number];
+
+-- ============================================================================
+-- STEP 6: FULL VALIDATION RESULT
+-- ============================================================================
+
+SELECT * FROM #Rule12_Validation ORDER BY [Extract_Number];
+
+-- ============================================================================
+-- STEP 7: EXCEPTIONS ONLY
+-- ============================================================================
+
+SELECT * FROM #Rule12_Validation WHERE [Validation_Result] = 'FAIL' ORDER BY [Extract_Number];
+
+-- ============================================================================
+-- STEP 8: SUMMARY
+-- ============================================================================
+
+SELECT
+    COUNT(*)                                                                              AS [Total_Active_Student_Records],
+    SUM(CASE WHEN [Validation_Result] = 'PASS' THEN 1 ELSE 0 END)                       AS [PASS_Count],
+    SUM(CASE WHEN [Validation_Result] = 'FAIL' THEN 1 ELSE 0 END)                       AS [FAIL_Count],
+    CAST(SUM(CASE WHEN [Validation_Result] = 'FAIL' THEN 1 ELSE 0 END) * 100.0
+         / NULLIF(COUNT(*), 0) AS DECIMAL(5,2))                                          AS [Exception_Rate_Pct]
+FROM #Rule12_Validation;
+
+DROP TABLE IF EXISTS #Rule12_Active_Courses;
+DROP TABLE IF EXISTS #Rule12_Extracted_Population;
+DROP TABLE IF EXISTS #Rule12_Qual_Master;
+DROP TABLE IF EXISTS #Rule12_Validation;
+-- ============================================================================
+-- END RULE 12
+-- ============================================================================";
 
             return Task.FromResult(sql.Trim());
         }
@@ -907,12 +1004,11 @@ WHERE RunID = @RunID;";
             $@"SELECT
     (SELECT COUNT(1) FROM [{cregTable}]) AS CregCount,
     (SELECT COUNT(1) FROM [{qualTable}]) AS QualCount,
-    (SELECT COUNT(1) FROM #Rule12CresActive) AS CresActiveCount,
-    (SELECT COUNT(1) FROM #Rule12Active) AS TotalActiveStudents,
-    SUM(CASE WHEN q.QUAL__001 IS NOT NULL THEN 1 ELSE 0 END) AS MatchedQuals,
-    SUM(CASE WHEN q.QUAL__001 IS NULL     THEN 1 ELSE 0 END) AS MissingQuals
-FROM #Rule12Active a
-LEFT JOIN #Rule12Quals q ON q.QUAL__001 = a.CREG__001;";
+    (SELECT COUNT(1) FROM #Rule12_Active_Courses) AS CresActiveCount,
+    COUNT(1) AS TotalActiveStudents,
+    SUM(CASE WHEN [Validation_Result] = 'PASS' THEN 1 ELSE 0 END) AS MatchedQuals,
+    SUM(CASE WHEN [Validation_Result] = 'FAIL' THEN 1 ELSE 0 END) AS MissingQuals
+FROM #Rule12_Validation;";
 
         private static async Task<(int cregCount, int qualCount, int cresActiveCount, int totalActiveStudents, int matchedQuals, int missingQuals)>
             RunPrepAndGetCountsAsync(SqlConnection conn, string prepSql, string cregTable, string qualTable)
@@ -962,68 +1058,86 @@ LEFT JOIN #Rule12Quals q ON q.QUAL__001 = a.CREG__001;";
             string cregFilterCol = "", string cregFilterValues = "",
             string cregExtra3Col = "", string cresExtra1Col = "")
         {
-            var extra1Sql   = string.IsNullOrWhiteSpace(cregExtra1Col)
-                ? "CAST(NULL AS nvarchar(255))"
-                : $"CONVERT(nvarchar(255), cr.[{cregExtra1Col}])";
-            var extra2Sql   = string.IsNullOrWhiteSpace(cregExtra2Col)
-                ? "CAST(NULL AS nvarchar(255))"
-                : $"CONVERT(nvarchar(255), cr.[{cregExtra2Col}])";
-            var filterSql   = string.IsNullOrWhiteSpace(cregFilterCol)
-                ? "CAST(NULL AS nvarchar(255))"
-                : $"UPPER(LTRIM(RTRIM(CONVERT(nvarchar(255), cr.[{cregFilterCol}]))))";
-            var extra3Sql   = string.IsNullOrWhiteSpace(cregExtra3Col)
-                ? "CAST(NULL AS nvarchar(255))"
-                : $"CONVERT(nvarchar(255), cr.[{cregExtra3Col}])";
+            var extra1Sql  = string.IsNullOrWhiteSpace(cregExtra1Col)  ? "CAST(NULL AS NVARCHAR(255))" : $"CONVERT(NVARCHAR(255), cr.[{cregExtra1Col}])";
+            var extra2Sql  = string.IsNullOrWhiteSpace(cregExtra2Col)  ? "CAST(NULL AS NVARCHAR(255))" : $"CONVERT(NVARCHAR(255), cr.[{cregExtra2Col}])";
+            var filterSql  = string.IsNullOrWhiteSpace(cregFilterCol)  ? "CAST(NULL AS NVARCHAR(255))" : $"UPPER(LTRIM(RTRIM(CONVERT(NVARCHAR(255), cr.[{cregFilterCol}]))))";
+            var extra3Sql  = string.IsNullOrWhiteSpace(cregExtra3Col)  ? "CAST(NULL AS NVARCHAR(255))" : $"CONVERT(NVARCHAR(255), cr.[{cregExtra3Col}])";
+            var courseNameSql = string.IsNullOrWhiteSpace(cresExtra1Col) ? "CAST(NULL AS NVARCHAR(500))" : $"CONVERT(NVARCHAR(500), cres.[{cresExtra1Col}])";
+            var extra1Alias = string.IsNullOrWhiteSpace(cregExtra1Col) ? "CREG__EXTRA1" : $"CREG_{cregExtra1Col.TrimStart('_')}";
+            var extra2Alias = string.IsNullOrWhiteSpace(cregExtra2Col) ? "CREG__EXTRA2" : $"CREG_{cregExtra2Col.TrimStart('_')}";
+            var filterAlias = string.IsNullOrWhiteSpace(cregFilterCol) ? "CREG__FILTER" : $"CREG_{cregFilterCol.TrimStart('_')}";
+            var extra3Alias = string.IsNullOrWhiteSpace(cregExtra3Col) ? "CREG__EXTRA3" : $"CREG_{cregExtra3Col.TrimStart('_')}";
             var filterWhere = BuildFilterWhereClause(cregFilterCol, cregFilterValues);
-            var cresExtra1SelectInto = string.IsNullOrWhiteSpace(cresExtra1Col)
-                ? "CAST(NULL AS nvarchar(255)) AS CresExtra1"
-                : $"CONVERT(nvarchar(255), cres.[{cresExtra1Col}]) AS CresExtra1";
-            var cresExtra1ResultSql = string.IsNullOrWhiteSpace(cresExtra1Col)
-                ? "CAST(NULL AS nvarchar(255))"
-                : "ca.CresExtra1";
 
             return $@"
-DROP TABLE IF EXISTS #Rule12CresActive;
-DROP TABLE IF EXISTS #Rule12Active;
-DROP TABLE IF EXISTS #Rule12Quals;
-
-SELECT UPPER(LTRIM(RTRIM(CONVERT(nvarchar(255), cres.[{cresCourseCol}])))) AS CourseCode,
-    {cresExtra1SelectInto}
-INTO #Rule12CresActive
-FROM [{cresTable}] cres
-WHERE UPPER(LTRIM(RTRIM(CONVERT(nvarchar(255), cres.[{cresStatusCol}])))) = '{cresStatusFilter}';
-
-CREATE INDEX IX_Rule12CresActive ON #Rule12CresActive (CourseCode);
-
-SELECT
-    CONVERT(nvarchar(255), cr.[{cregStudentCol}])                              AS CREG__007,
-    UPPER(LTRIM(RTRIM(CONVERT(nvarchar(255), cr.[{cregQualCol}]))))            AS CREG__001,
-    UPPER(LTRIM(RTRIM(CONVERT(nvarchar(255), cr.[{cregCourseCol}]))))          AS CREG__030,
-    {extra1Sql}                                                                 AS CREG__EXTRA1,
-    {extra2Sql}                                                                 AS CREG__EXTRA2,
-    {filterSql}                                                                 AS CREG__FILTER,
-    {extra3Sql}                                                                 AS CREG__EXTRA3,
-    ca.CourseCode                                                               AS CRES__030,
-    '{cresStatusFilter}'                                                        AS CRES__031,
-    {cresExtra1ResultSql}                                                       AS CRES__EXTRA1
-INTO #Rule12Active
-FROM [{cregTable}] cr
-INNER JOIN #Rule12CresActive ca
-    ON ca.CourseCode = UPPER(LTRIM(RTRIM(CONVERT(nvarchar(255), cr.[{cregCourseCol}]))))
-WHERE cr.[{cregQualCol}] IS NOT NULL
-  AND LTRIM(RTRIM(CONVERT(nvarchar(255), cr.[{cregQualCol}]))) <> ''{filterWhere};
-
-CREATE INDEX IX_Rule12Active ON #Rule12Active (CREG__001);
+DROP TABLE IF EXISTS #Rule12_Active_Courses;
+DROP TABLE IF EXISTS #Rule12_Extracted_Population;
+DROP TABLE IF EXISTS #Rule12_Qual_Master;
+DROP TABLE IF EXISTS #Rule12_Validation;
 
 SELECT DISTINCT
-    UPPER(LTRIM(RTRIM(CONVERT(nvarchar(255), q.[{qualJoinCol}])))) AS QUAL__001,
-    CONVERT(nvarchar(255), q.[{qualDescCol}])                      AS QUAL__003
-INTO #Rule12Quals
+    UPPER(LTRIM(RTRIM(CONVERT(NVARCHAR(255), cres.[{cresCourseCol}])))) AS [Course_Code],
+    {courseNameSql}                                                        AS [Course_Name],
+    CONVERT(NVARCHAR(50), cres.[{cresStatusCol}])                          AS [Course_Approval_Status]
+INTO #Rule12_Active_Courses
+FROM [{cresTable}] cres
+WHERE UPPER(LTRIM(RTRIM(CONVERT(NVARCHAR(50), cres.[{cresStatusCol}])))) = '{cresStatusFilter}'
+  AND cres.[{cresCourseCol}] IS NOT NULL;
+
+CREATE INDEX IX_Rule12_Active_Courses ON #Rule12_Active_Courses ([Course_Code]);
+
+SELECT
+    ROW_NUMBER() OVER (ORDER BY cr.[{cregStudentCol}], cr.[{cregQualCol}], cr.[{cregCourseCol}]) AS [Extract_Number],
+    CONVERT(NVARCHAR(255), cr.[{cregStudentCol}])                                                 AS [Student_Number],
+    UPPER(LTRIM(RTRIM(CONVERT(NVARCHAR(255), cr.[{cregQualCol}]))))                              AS [Qualification_Code],
+    UPPER(LTRIM(RTRIM(CONVERT(NVARCHAR(255), cr.[{cregCourseCol}]))))                            AS [Course_Code],
+    {extra1Sql}                                                                                   AS [{extra1Alias}],
+    {extra2Sql}                                                                                   AS [{extra2Alias}],
+    {filterSql}                                                                                   AS [{filterAlias}],
+    {extra3Sql}                                                                                   AS [{extra3Alias}],
+    ca.[Course_Name],
+    ca.[Course_Approval_Status]
+INTO #Rule12_Extracted_Population
+FROM [{cregTable}] cr
+INNER JOIN #Rule12_Active_Courses ca
+    ON ca.[Course_Code] = UPPER(LTRIM(RTRIM(CONVERT(NVARCHAR(255), cr.[{cregCourseCol}]))))
+WHERE cr.[{cregQualCol}] IS NOT NULL
+  AND LTRIM(RTRIM(CONVERT(NVARCHAR(255), cr.[{cregQualCol}]))) <> ''{filterWhere};
+
+CREATE INDEX IX_Rule12_Extracted_Population ON #Rule12_Extracted_Population ([Qualification_Code]);
+
+SELECT DISTINCT
+    UPPER(LTRIM(RTRIM(CONVERT(NVARCHAR(255), q.[{qualJoinCol}])))) AS [Qualification_Code],
+    CONVERT(NVARCHAR(500), q.[{qualDescCol}])                       AS [Qualification_Name]
+INTO #Rule12_Qual_Master
 FROM [{qualTable}] q
 WHERE q.[{qualJoinCol}] IS NOT NULL
-  AND LTRIM(RTRIM(CONVERT(nvarchar(255), q.[{qualJoinCol}]))) <> '';
+  AND LTRIM(RTRIM(CONVERT(NVARCHAR(255), q.[{qualJoinCol}]))) <> '';
 
-CREATE INDEX IX_Rule12Quals ON #Rule12Quals (QUAL__001);";
+CREATE INDEX IX_Rule12_Qual_Master ON #Rule12_Qual_Master ([Qualification_Code]);
+
+SELECT
+    P.[Extract_Number],
+    P.[Student_Number],
+    P.[Qualification_Code],
+    P.[Course_Code],
+    P.[Course_Name],
+    P.[Course_Approval_Status],
+    P.[{extra1Alias}],
+    P.[{extra2Alias}],
+    P.[{filterAlias}],
+    P.[{extra3Alias}],
+    Q.[Qualification_Code] AS [QUAL_Qualification_Code],
+    Q.[Qualification_Name] AS [QUAL_Qualification_Name],
+    CASE WHEN Q.[Qualification_Code] IS NOT NULL THEN 'PASS' ELSE 'FAIL' END AS [Validation_Result],
+    CASE
+        WHEN Q.[Qualification_Code] IS NOT NULL
+            THEN 'Active student qualification exists in [{qualTable}].'
+        ELSE 'Active student qualification does not exist in [{qualTable}].'
+    END AS [Validation_Reason]
+INTO #Rule12_Validation
+FROM #Rule12_Extracted_Population P
+LEFT JOIN #Rule12_Qual_Master Q ON Q.[Qualification_Code] = P.[Qualification_Code];";
         }
 
         private static string BuildFilterWhereClause(string filterCol, string filterValues)
@@ -1045,11 +1159,10 @@ CREATE INDEX IX_Rule12Quals ON #Rule12Quals (QUAL__001);";
 
         private static string BuildCountFromPrepSql() => @"
 SELECT
-    (SELECT COUNT(1) FROM #Rule12Active) AS TotalActiveStudents,
-    SUM(CASE WHEN q.QUAL__001 IS NOT NULL THEN 1 ELSE 0 END) AS MatchedQuals,
-    SUM(CASE WHEN q.QUAL__001 IS NULL     THEN 1 ELSE 0 END) AS MissingQuals
-FROM #Rule12Active a
-LEFT JOIN #Rule12Quals q ON q.QUAL__001 = a.CREG__001;";
+    COUNT(1) AS TotalActiveStudents,
+    SUM(CASE WHEN [Validation_Result] = 'PASS' THEN 1 ELSE 0 END) AS MatchedQuals,
+    SUM(CASE WHEN [Validation_Result] = 'FAIL' THEN 1 ELSE 0 END) AS MissingQuals
+FROM #Rule12_Validation;";
 
         private static string BuildReviewFromPrepSql(
             int? maxRows,
@@ -1059,30 +1172,12 @@ LEFT JOIN #Rule12Quals q ON q.QUAL__001 = a.CREG__001;";
             var topClause = maxRows.HasValue && maxRows.Value > 0 ? $"TOP {maxRows.Value}" : string.Empty;
             return $@"
 SELECT {topClause}
-    1 AS Control_Sort,
-    'Control_1' AS Control_Type,
-    'CONTROL 1: [{cregTable}].[{cregQualCol}] = [{qualTable}].[{qualJoinCol}] WHERE [{cresTable}].[{cresStatusCol}] = ''{cresStatusFilter}''' AS Control_Label,
-    CASE WHEN q.QUAL__001 IS NOT NULL THEN 'PASS' ELSE 'FAIL' END AS Validation_Result,
-    CASE
-        WHEN q.QUAL__001 IS NOT NULL
-            THEN 'Active student qualification exists in {qualTable}.'
-        ELSE 'Active student qualification does not exist in {qualTable}.'
-    END AS Validation_Explanation,
-    a.CREG__007,
-    a.CREG__001,
-    a.CREG__030,
-    a.CREG__EXTRA1,
-    a.CREG__EXTRA2,
-    a.CREG__FILTER,
-    a.CREG__EXTRA3,
-    q.QUAL__001,
-    q.QUAL__003,
-    a.CRES__030,
-    a.CRES__031,
-    a.CRES__EXTRA1
-FROM #Rule12Active a
-LEFT JOIN #Rule12Quals q ON q.QUAL__001 = a.CREG__001
-ORDER BY a.CREG__007, a.CREG__001;";
+    1 AS [Control_Sort],
+    'Control_1' AS [Control_Type],
+    'CONTROL 1: [{cregTable}].[{cregQualCol}] = [{qualTable}].[{qualJoinCol}] WHERE [{cresTable}].[{cresStatusCol}] = ''{cresStatusFilter}''' AS [Control_Label],
+    v.*
+FROM #Rule12_Validation v
+ORDER BY [Extract_Number];";
         }
 
         private async Task<List<Rule12ValidationRowRecord>> LoadControlRowsFromPrepAsync(
@@ -2219,27 +2314,24 @@ WHERE RunID = @RunID;";
         {
             var values = row.DisplayValues;
             var validationResult = ReadValue(values, "Validation_Result");
-            var isPass   = string.Equals(validationResult, "PASS", StringComparison.OrdinalIgnoreCase);
-            var creg007  = FormatRule12ColumnValue(ReadValue(values, "CREG__007"));
-            var creg001  = FormatRule12ColumnValue(ReadValue(values, "CREG__001"));
-            var creg030  = FormatRule12ColumnValue(ReadValue(values, "CREG__030"));
-            var qual001  = FormatRule12ColumnValue(ReadValue(values, "QUAL__001"));
-            var qual003  = FormatRule12ColumnValue(ReadValue(values, "QUAL__003"));
-            var cres030  = FormatRule12ColumnValue(ReadValue(values, "CRES__030"));
-            var cres031  = FormatRule12ColumnValue(ReadValue(values, "CRES__031"));
+            var isPass      = string.Equals(validationResult, "PASS", StringComparison.OrdinalIgnoreCase);
+            var studentNum  = FormatRule12ColumnValue(ReadValue(values, "Student_Number"));
+            var qualCode    = FormatRule12ColumnValue(ReadValue(values, "Qualification_Code"));
+            var courseCode  = FormatRule12ColumnValue(ReadValue(values, "Course_Code"));
+            var qualMatched = FormatRule12ColumnValue(ReadValue(values, "QUAL_Qualification_Code"));
+            var qualName    = FormatRule12ColumnValue(ReadValue(values, "QUAL_Qualification_Name"));
+            var courseAppr  = FormatRule12ColumnValue(ReadValue(values, "Course_Approval_Status"));
 
-            const string criteriaText = "Active student: CRES._031 = 'A' | CREG._001 = QUAL._001";
+            const string criteriaText = "Active student: Course_Approval_Status = 'A' | Qualification_Code = QUAL.Qualification_Code";
             var validationExplanation = isPass
-                ? $"Active student '{creg007}' qualification '{creg001}' exists in QUAL as '{qual001}'."
-                : $"Active student '{creg007}' qualification '{creg001}' does not exist in QUAL.";
-            var qualCriteriaMessage = $"Active student (CRES._031='{cres031}'): qualification code '{creg001}'.";
-            var credLinkMessage = isPass
-                ? $"Matched QUAL._001 = '{qual001}' ({qual003})."
-                : "No matching QUAL._001 value was found.";
-            var registrationMessage = isPass
-                ? "Qualification exists in QUAL."
-                : "Qualification not found in QUAL.";
-            var finalResultMessage = isPass
+                ? $"Active student '{studentNum}' qualification '{qualCode}' exists in QUAL as '{qualMatched}'."
+                : $"Active student '{studentNum}' qualification '{qualCode}' does not exist in QUAL.";
+            var qualCriteriaMessage   = $"Active student (Course_Approval_Status='{courseAppr}'): qualification code '{qualCode}'.";
+            var credLinkMessage       = isPass
+                ? $"Matched QUAL.Qualification_Code = '{qualMatched}' ({qualName})."
+                : "No matching QUAL qualification code was found.";
+            var registrationMessage   = isPass ? "Qualification exists in QUAL." : "Qualification not found in QUAL.";
+            var finalResultMessage    = isPass
                 ? "Passed: active student qualification exists in QUAL."
                 : "Failed: active student qualification does not exist in QUAL.";
 

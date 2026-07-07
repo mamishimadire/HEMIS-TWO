@@ -246,7 +246,7 @@
                         <div class="scope-toolbar__info">
                             <span id="scope-count-label">Loading…</span>
                         </div>
-                        @if (!Model.IsArchived)
+                        @if (!Model.IsArchived && string.Equals(Model.CurrentUserEngagementRole, "DataAnalyst", StringComparison.OrdinalIgnoreCase))
                         {
                             <div class="scope-toolbar__actions">
                                 <button type="button" class="btn btn-secondary btn-sm" onclick="scopeSelectAll()">Select All</button>
@@ -255,7 +255,7 @@
                             </div>
                         }
                     </div>
-                    <div class="module-card-grid" id="module-card-grid" data-scope="@scopeJson" data-archived="@Model.IsArchived.ToString().ToLower()" data-total-rules="67">
+                    <div class="module-card-grid" id="module-card-grid" data-scope="@scopeJson" data-archived="@Model.IsArchived.ToString().ToLower()" data-total-rules="67" data-engagement-role="@Model.CurrentUserEngagementRole">
                         @foreach (var integrityRule in IntegrityRuleCatalog.GetRuleNumbers().Where(ruleNumber => ruleNumber >= 1 && ruleNumber <= 10).Select(IntegrityRuleCatalog.Get))
                         {
                             <article class="module-card">
@@ -714,6 +714,14 @@
                             <p class="module-card__text">Checks that every <code>CREG._007 + _001</code> (student number + qualification code) pair exists in <code>STUD</code> and that <code>CREG._051</code> (E051 code) matches the configured filter (default: <code>E</code>). Exception code <strong>00708</strong> when missing or E051 invalid.</p>
                             <div class="module-card__actions">
                                 <a href="/Rule67?clientId=@Model.Id" class="btn btn-success">Open Rule 67</a>
+                            </div>
+                        </article>
+                        <article class="module-card">
+                            <div class="module-card__eyebrow">Rule 68</div>
+                            <h4 class="module-card__title">Credit Overload Validation</h4>
+                            <p class="module-card__text">Sums <code>CRED._036</code> (credits) per student-qualification pair from <code>CREG</code>. If the total exceeds <strong>1.0</strong> the pair fails with exception code <strong>03603</strong>. Cross-references confirmed exceptions in <code>dbo_STUD_VALIDATION_DETAIL</code> (Rule 32 pattern).</p>
+                            <div class="module-card__actions">
+                                <a href="/Rule68?clientId=@Model.Id" class="btn btn-success">Open Rule 68</a>
                             </div>
                         </article>
                     </div>
@@ -1443,6 +1451,8 @@ else
     if (!grid) return;
 
     var isArchived = grid.dataset.archived === 'true';
+    var engagementRole = (grid.dataset.engagementRole || '').toLowerCase();
+    var isDataAnalyst = engagementRole === 'dataanalyst';
     var savedScope = [];
     try { savedScope = JSON.parse(grid.dataset.scope || '[]'); } catch (_) {}
     var savedSet = new Set(savedScope.map(Number));
@@ -1463,7 +1473,7 @@ else
 
         var inScope = savedSet.has(ruleNum);
         if (inScope)    card.classList.add('module-card--selected');
-        if (!isArchived) {
+        if (!isArchived && isDataAnalyst) {
             card.addEventListener('click', function (e) {
                 if (e.target.closest('.btn')) return; // don't toggle when clicking Open Rule
                 scopeToggleCard(card);
@@ -1471,10 +1481,8 @@ else
         }
     });
 
-    if (!isArchived) {
-        // Apply outscope dimming to unselected cards when a scope is defined
-        if (savedSet.size > 0) applyOutscope();
-    }
+    // Apply outscope dimming to unselected cards when a scope is defined
+    if (savedSet.size > 0) applyOutscope();
 
     updateScopeCount();
 
@@ -1524,6 +1532,7 @@ else
 
     // Called by toolbar buttons
     window.scopeSelectAll = function () {
+        if (!isDataAnalyst || isArchived) return;
         cards.forEach(function (c) {
             c.classList.add('module-card--selected');
             c.classList.remove('module-card--outscope');
@@ -1532,6 +1541,7 @@ else
         syncHiddenForm();
     };
     window.scopeClearAll = function () {
+        if (!isDataAnalyst || isArchived) return;
         cards.forEach(function (c) {
             c.classList.remove('module-card--selected', 'module-card--outscope');
         });

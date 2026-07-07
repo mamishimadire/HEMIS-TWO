@@ -32,13 +32,13 @@ namespace HemisAudit.ViewModels
         public string Server { get; set; } = "";
         public string Database { get; set; } = "";
         public string Driver { get; set; } = "ODBC Driver 17 for SQL Server";
-        public string StudTable { get; set; } = "dbo_QUAL";
+        public string StudTable { get; set; } = "dbo_CRED";
         public string QualTable
         {
             get => StudTable;
             set => StudTable = value;
         }
-        public string BridgeTable { get; set; } = "dbo_CRED";
+        public string BridgeTable { get; set; } = "dbo_QUAL";
         public string CredTable
         {
             get => BridgeTable;
@@ -50,6 +50,11 @@ namespace HemisAudit.ViewModels
             get => CrseTable;
             set => CrseTable = value;
         }
+        public string QualApprovedCol { get; set; } = "_004";
+        public string CredQualJoinCol { get; set; } = "_001";
+        public string CredCregJoinCol1 { get; set; } = "_001";
+        public string CredCregJoinCol2 { get; set; } = "_030";
+        public string CregStudentCol { get; set; } = "_007";
     }
 
     public class Rule15VerifyResult
@@ -112,6 +117,12 @@ namespace HemisAudit.ViewModels
             get => CrseTable;
             set => CrseTable = value;
         }
+        public string QualApprovedCol { get; set; } = "_004";
+        public string QualApprovedVal { get; set; } = "A";
+        public string CredQualJoinCol { get; set; } = "_001";
+        public string CredCregJoinCol1 { get; set; } = "_001";
+        public string CredCregJoinCol2 { get; set; } = "_030";
+        public string CregStudentCol { get; set; } = "_007";
     }
 
     public class Rule15ControlSummaryItemViewModel
@@ -196,6 +207,12 @@ namespace HemisAudit.ViewModels
             get => CrseTable;
             set => CrseTable = value;
         }
+        public string QualApprovedCol { get; set; } = "_004";
+        public string QualApprovedVal { get; set; } = "A";
+        public string CredQualJoinCol { get; set; } = "_001";
+        public string CredCregJoinCol1 { get; set; } = "_001";
+        public string CredCregJoinCol2 { get; set; } = "_030";
+        public string CregStudentCol { get; set; } = "_007";
         public string TableLinkageText { get; set; } = "";
         public string RuleModeText { get; set; } = "";
         public List<string> ProcedureSteps { get; set; } = new();
@@ -253,6 +270,12 @@ namespace HemisAudit.ViewModels
             get => CrseTable;
             set => CrseTable = value;
         }
+        public string QualApprovedCol { get; set; } = "_004";
+        public string QualApprovedVal { get; set; } = "A";
+        public string CredQualJoinCol { get; set; } = "_001";
+        public string CredCregJoinCol1 { get; set; } = "_001";
+        public string CredCregJoinCol2 { get; set; } = "_030";
+        public string CregStudentCol { get; set; } = "_007";
         public string CurrentUserEngagementRole { get; set; } = "";
         public bool HasDataAnalystSignoff { get; set; }
         public bool CurrentUserHasSignedOff { get; set; }

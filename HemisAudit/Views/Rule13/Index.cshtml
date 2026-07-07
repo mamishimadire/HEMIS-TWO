@@ -110,6 +110,59 @@
                         </div>
                         <input id="pgTypesText" type="hidden" value="" />
                     </div>
+
+                    <div style="margin-top:20px;border-top:1px solid #e0e0e0;padding-top:16px">
+                        <div style="font-weight:700;margin-bottom:8px;font-size:14px">Column Configuration <span style="font-weight:400;font-size:12px;color:#555">— map the key columns on each table used in Rule 13</span></div>
+                        <div class="form-grid">
+                            <div class="field-group">
+                                <label for="cesmIdCol">CESM — Record ID Column (_001)</label>
+                                <select id="cesmIdCol"><option value="_001">_001</option></select>
+                            </div>
+                            <div class="field-group">
+                                <label for="cesmCodeCol">CESM — CESM Code Column (_006)</label>
+                                <select id="cesmCodeCol"><option value="_006">_006</option></select>
+                            </div>
+                            <div class="field-group">
+                                <label for="qualIdCol">QUAL — Record ID Column (_001)</label>
+                                <select id="qualIdCol"><option value="_001">_001</option></select>
+                            </div>
+                            <div class="field-group">
+                                <label for="qualNameCol">QUAL — Qualification Name Column (_003)</label>
+                                <select id="qualNameCol"><option value="_003">_003</option></select>
+                            </div>
+                            <div class="field-group">
+                                <label for="studIdCol">STUD — Qualification Link Column (_001)</label>
+                                <select id="studIdCol"><option value="_001">_001</option></select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div style="margin-top:20px;border-top:1px solid #e0e0e0;padding-top:16px">
+                        <div style="font-weight:700;margin-bottom:8px;font-size:14px">PQM Table Configuration <span style="font-weight:400;font-size:12px;color:#1B5E20">— auto-detected and required for validation</span></div>
+                        <div id="pqmMatchingInfo" class="info-box info-box--blue" style="display:none;margin-bottom:12px">
+                            <strong>PQM Matching Logic:</strong> CESM [<span id="pqmCesmCodeColLabel">_006</span>] 4-digit prefix matches PQM <span id="pqmCode1ColLabel">CESM_Code</span> or <span id="pqmCode2ColLabel">CESM_Code2</span>,
+                            AND QUAL [<span id="pqmQualNameColLabel">_003</span>] (case-insensitive, whitespace-normalised) matches PQM <span id="pqmNameColLabel">Authorised_Qualification_Name</span> — both on the same PQM row.
+                        </div>
+                        <div class="form-grid">
+                            <div class="field-group">
+                                <label for="pqmTable">PQM Table</label>
+                                <select id="pqmTable"><option value="">-- Select PQM table --</option></select>
+                            </div>
+                            <div class="field-group">
+                                <label for="pqmNameCol">PQM — Authorised Qualification Name</label>
+                                <select id="pqmNameCol"><option value="Authorised_Qualification_Name">Authorised_Qualification_Name</option></select>
+                            </div>
+                            <div class="field-group">
+                                <label for="pqmCode1Col">PQM — CESM Code (Primary)</label>
+                                <select id="pqmCode1Col"><option value="CESM_Code">CESM_Code</option></select>
+                            </div>
+                            <div class="field-group">
+                                <label for="pqmCode2Col">PQM — CESM Code 2 (Secondary)</label>
+                                <select id="pqmCode2Col"><option value="CESM_Code2">CESM_Code2</option></select>
+                            </div>
+                        </div>
+                    </div>
+
                     <div id="configOutput" class="status-output"></div>
                 </div>
             </div>
@@ -270,6 +323,15 @@ window.toggleAccordion = function (section) {
         cregTable: document.getElementById('cregTable'),
         crseTable: document.getElementById('crseTable'),
         pgTypesText: document.getElementById('pgTypesText'),
+        pqmTable: document.getElementById('pqmTable'),
+        cesmIdCol: document.getElementById('cesmIdCol'),
+        cesmCodeCol: document.getElementById('cesmCodeCol'),
+        qualIdCol: document.getElementById('qualIdCol'),
+        qualNameCol: document.getElementById('qualNameCol'),
+        studIdCol: document.getElementById('studIdCol'),
+        pqmNameCol: document.getElementById('pqmNameCol'),
+        pqmCode1Col: document.getElementById('pqmCode1Col'),
+        pqmCode2Col: document.getElementById('pqmCode2Col'),
         connectionOutput: document.getElementById('connectionOutput'),
         configOutput: document.getElementById('configOutput'),
         analysisPane: document.querySelector('[data-tab-panel="analysis"]'),
@@ -399,11 +461,19 @@ window.toggleAccordion = function (section) {
         });
     }
 
-    function buildComparisonResultCell(row) {
+    function buildComparisonResultCell(row, hasPqm) {
         const isPass = String(row.validationResult || '').toUpperCase() === 'PASS';
+        const pqmBadge = hasPqm && row.pqmResult
+            ? `<span class="badge ${String(row.pqmResult).toUpperCase() === 'PASS' ? 'badge--pass' : 'badge--fail'}" title="${escapeHtml(row.pqmExceptionReason || '')}" style="margin-left:4px">PQM: ${escapeHtml(row.pqmResult)}</span>`
+            : '';
+        const reviewBadge = row.pqmNeedsReview
+            ? `<span class="badge badge--warn" title="${escapeHtml(row.pqmExceptionReason || '')}" style="margin-left:4px">Review</span>`
+            : '';
         return `
             <div class="rule20-comparison-result">
                 <span class="badge ${isPass ? 'badge--pass' : 'badge--fail'}" title="${escapeHtml(row.validationExplanation || '')}">${escapeHtml(row.validationResult || 'FAIL')}</span>
+                ${pqmBadge}${reviewBadge}
+                ${row.pqmExceptionReason ? `<div style="font-size:11px;color:#555;margin-top:4px;max-width:300px">${escapeHtml(row.pqmExceptionReason)}</div>` : ''}
             </div>`;
     }
 
@@ -413,6 +483,8 @@ window.toggleAccordion = function (section) {
         const cesmTableName = escapeHtml(String(state.summary?.studTable || 'dbo_CESM').toUpperCase());
         const qualTableName = escapeHtml(String(state.summary?.qualTable || 'dbo_QUAL').toUpperCase());
         const studTableName = escapeHtml(String(state.summary?.cregTable || 'dbo_STUD').toUpperCase());
+        const hasPqm = !!(state.summary?.pqmTable);
+        const pqmTableName = hasPqm ? escapeHtml(String(state.summary.pqmTable).toUpperCase()) : '';
 
         const sections = selectedParts.map(partCode => {
             const partRows = rows.filter(row => String(row.partCode || '').toUpperCase() === partCode);
@@ -422,6 +494,16 @@ window.toggleAccordion = function (section) {
 
             const partSummary = (state.summary?.partSummaries || []).find(part =>
                 String(part.partCode || '').toUpperCase() === partCode);
+
+            const pqmHeaderCols = hasPqm
+                ? `<th class="rule20-spacer" rowspan="3"></th><th colspan="3">PQM</th>`
+                : '';
+            const pqmSubHeaderCols = hasPqm
+                ? `<th colspan="3">${pqmTableName}</th>`
+                : '';
+            const pqmColHeaders = hasPqm
+                ? `<th>PQM Code</th><th>PQM Name</th><th>PQM Result</th>`
+                : '';
 
             return `
                 <div class="card rule20-comparison-card" style="padding:20px;margin-top:16px">
@@ -444,12 +526,14 @@ window.toggleAccordion = function (section) {
                                     <th colspan="2">LINK TABLE</th>
                                     <th class="rule20-spacer" rowspan="3"></th>
                                     <th colspan="2"></th>
+                                    ${pqmHeaderCols}
                                     <th rowspan="3">Results</th>
                                 </tr>
                                 <tr>
                                     <th colspan="2">${cesmTableName}</th>
                                     <th colspan="2">${qualTableName}</th>
                                     <th colspan="2">${studTableName}</th>
+                                    ${pqmSubHeaderCols}
                                 </tr>
                                 <tr>
                                     <th>_001</th>
@@ -458,10 +542,18 @@ window.toggleAccordion = function (section) {
                                     <th>_003</th>
                                     <th>_001</th>
                                     <th>Link Status</th>
+                                    ${pqmColHeaders}
                                 </tr>
                             </thead>
                             <tbody>
-                                ${partRows.map(row => `
+                                ${partRows.map(row => {
+                                    const pqmCells = hasPqm
+                                        ? `<td class="rule20-spacer"></td>
+                                           <td class="rule20-align-center">${escapeHtml(row.pqmCode || '')}</td>
+                                           <td style="font-size:12px">${escapeHtml(row.pqmName || '')}</td>
+                                           <td class="rule20-align-center"><span class="badge ${String(row.pqmResult || '').toUpperCase() === 'PASS' ? 'badge--pass' : (row.pqmResult ? 'badge--fail' : 'badge--neutral')}" title="${escapeHtml(row.pqmExceptionReason || '')}">${escapeHtml(row.pqmResult || '-')}${row.pqmNeedsReview ? ' &#9873;' : ''}</span></td>`
+                                        : '';
+                                    return `
                                     <tr>
                                         <td class="rule20-align-center">${escapeHtml(row.qualificationCode001)}</td>
                                         <td class="rule20-align-center">${escapeHtml(row.courseCode030)}</td>
@@ -471,8 +563,10 @@ window.toggleAccordion = function (section) {
                                         <td class="rule20-spacer"></td>
                                         <td class="rule20-align-center">${escapeHtml(row.foundationCourse091)}</td>
                                         <td class="rule20-align-center">${escapeHtml(row.notebookStatus)}</td>
-                                        <td class="rule20-align-center">${buildComparisonResultCell(row)}</td>
-                                    </tr>`).join('')}
+                                        ${pqmCells}
+                                        <td class="rule20-align-center">${buildComparisonResultCell(row, hasPqm)}</td>
+                                    </tr>`;
+                                }).join('')}
                             </tbody>
                         </table>
                     </div>
@@ -550,8 +644,35 @@ window.toggleAccordion = function (section) {
             cregTable: normalizeTableName(els.cregTable?.value || ''),
             crseTable: normalizeTableName(els.crseTable?.value || els.cregTable?.value || ''),
             pgTypesText: els.pgTypesText?.value || defaultPgTypesText,
-            governingPartCodes: [...defaultGoverningPartCodes]
+            governingPartCodes: [...defaultGoverningPartCodes],
+            pqmTable: normalizeTableName(els.pqmTable?.value || ''),
+            cesmIdCol: els.cesmIdCol?.value || '_001',
+            cesmCodeCol: els.cesmCodeCol?.value || '_006',
+            qualIdCol: els.qualIdCol?.value || '_001',
+            qualNameCol: els.qualNameCol?.value || '_003',
+            studIdCol: els.studIdCol?.value || '_001',
+            pqmNameCol: els.pqmNameCol?.value || 'Authorised_Qualification_Name',
+            pqmCode1Col: els.pqmCode1Col?.value || 'CESM_Code',
+            pqmCode2Col: els.pqmCode2Col?.value || 'CESM_Code2'
         };
+    }
+
+    function updatePqmInfoBox() {
+        const hasPqm = !!(els.pqmTable?.value?.trim());
+        const infoBox = document.getElementById('pqmMatchingInfo');
+        if (infoBox) infoBox.style.display = ''; // always visible — PQM is required
+        if (hasPqm) {
+            const cesmCodeColLabel = document.getElementById('pqmCesmCodeColLabel');
+            const qualNameColLabel = document.getElementById('pqmQualNameColLabel');
+            const pqmCode1Label = document.getElementById('pqmCode1ColLabel');
+            const pqmCode2Label = document.getElementById('pqmCode2ColLabel');
+            const pqmNameLabel = document.getElementById('pqmNameColLabel');
+            if (cesmCodeColLabel) cesmCodeColLabel.textContent = els.cesmCodeCol?.value || '_006';
+            if (qualNameColLabel) qualNameColLabel.textContent = els.qualNameCol?.value || '_003';
+            if (pqmCode1Label) pqmCode1Label.textContent = els.pqmCode1Col?.value || 'CESM_Code';
+            if (pqmCode2Label) pqmCode2Label.textContent = els.pqmCode2Col?.value || 'CESM_Code2';
+            if (pqmNameLabel) pqmNameLabel.textContent = els.pqmNameCol?.value || 'Authorised_Qualification_Name';
+        }
     }
 
     function populateSelect(select, items, selectedValue) {
@@ -588,6 +709,13 @@ window.toggleAccordion = function (section) {
             .map(step => `<li>${escapeHtml(step)}</li>`)
             .join('');
 
+        const hasPqm = !!(summary.pqmTable);
+        const reviewCountCard = hasPqm && Number(summary.reviewCount || 0) > 0
+            ? `<div class="stat-card stat-card--warn">
+                    <div class="stat-card__label">PQM Review Required</div>
+                    <div class="stat-card__value">${formatNumber(summary.reviewCount)}</div>
+               </div>`
+            : '';
         els.analysisPane.innerHTML = `
             <div class="stats-grid" style="margin-bottom:24px">
                 <div class="stat-card">
@@ -606,6 +734,7 @@ window.toggleAccordion = function (section) {
                     <div class="stat-card__label">FAIL Rows</div>
                     <div class="stat-card__value">${formatNumber(summary.failCount)}</div>
                 </div>
+                ${reviewCountCard}
             </div>
             <div class="card" style="padding:20px">
                 <div class="form-grid" style="margin-bottom:16px">
@@ -890,6 +1019,41 @@ window.toggleAccordion = function (section) {
         if (els.cregTable) populateSelect(els.cregTable, workspace.cregTable ? [workspace.cregTable] : [], workspace.cregTable);
         if (els.crseTable) populateSelect(els.crseTable, workspace.crseTable ? [workspace.crseTable] : [], workspace.crseTable);
         if (els.pgTypesText) els.pgTypesText.value = workspace.pgTypesText || defaultPgTypesText;
+
+        // Restore PQM config
+        if (workspace.pqmTable !== undefined) {
+            if (els.pqmTable) {
+                // Ensure the saved value is in the list
+                let found = Array.from(els.pqmTable.options).some(o => o.value === (workspace.pqmTable || ''));
+                if (!found && workspace.pqmTable) {
+                    const opt = document.createElement('option');
+                    opt.value = workspace.pqmTable;
+                    opt.textContent = workspace.pqmTable;
+                    els.pqmTable.appendChild(opt);
+                }
+                els.pqmTable.value = workspace.pqmTable || '';
+            }
+            const setColSelect = (sel, val, def) => {
+                if (!sel) return;
+                let found = Array.from(sel.options).some(o => o.value === (val || def));
+                if (!found && val) {
+                    const opt = document.createElement('option');
+                    opt.value = val;
+                    opt.textContent = val;
+                    sel.appendChild(opt);
+                }
+                sel.value = val || def;
+            };
+            setColSelect(els.cesmIdCol,   workspace.cesmIdCol,   '_001');
+            setColSelect(els.cesmCodeCol, workspace.cesmCodeCol, '_006');
+            setColSelect(els.qualIdCol,   workspace.qualIdCol,   '_001');
+            setColSelect(els.qualNameCol, workspace.qualNameCol, '_003');
+            setColSelect(els.studIdCol,   workspace.studIdCol,   '_001');
+            setColSelect(els.pqmNameCol,  workspace.pqmNameCol,  'Authorised_Qualification_Name');
+            setColSelect(els.pqmCode1Col, workspace.pqmCode1Col, 'CESM_Code');
+            setColSelect(els.pqmCode2Col, workspace.pqmCode2Col, 'CESM_Code2');
+        }
+        updatePqmInfoBox();
         els.workspaceRunState.textContent = workspace.runId ? `Run #${workspace.runId}` : 'No saved run loaded';
         els.workspaceRunLabel.textContent = workspace.runId ? `Rule 13 Run #${workspace.runId}` : 'No saved run yet';
         els.workspaceStatusLabel.textContent = workspace.currentStatus || '-';
@@ -962,7 +1126,66 @@ window.toggleAccordion = function (section) {
         if (els.qualTable) populateSelect(els.qualTable, tables, data.autoQualTable || defaultQualTable);
         populateSelect(els.cregTable, tables, data.autoCregTable);
         populateSelect(els.crseTable, tables, data.autoCrseTable || data.autoCregTable);
+
+        // Populate PQM table dropdown — auto-detect and always select
+        if (els.pqmTable) {
+            els.pqmTable.innerHTML = '';
+            let pqmAutoSelected = false;
+            tables.forEach(t => {
+                const opt = document.createElement('option');
+                opt.value = t;
+                opt.textContent = t;
+                if (data.autoPqmTable && data.autoPqmTable === t) {
+                    opt.selected = true;
+                    pqmAutoSelected = true;
+                }
+                els.pqmTable.appendChild(opt);
+            });
+            // If no auto-detected PQM table, try to find one by name
+            if (!pqmAutoSelected && els.pqmTable.options.length > 0) {
+                const pqmOpt = Array.from(els.pqmTable.options).find(o =>
+                    o.value.toUpperCase().includes('PQM'));
+                if (pqmOpt) pqmOpt.selected = true;
+                else els.pqmTable.selectedIndex = 0;
+            }
+        }
+
+        // Load columns for CESM, QUAL, STUD, and PQM tables — PQM is always required
+        await Promise.allSettled([
+            loadColumnsForTable(els.studTable?.value,  ['cesm_id', 'cesm_code'], [els.cesmIdCol, els.cesmCodeCol]),
+            loadColumnsForTable(els.qualTable?.value,  ['qual_id', 'qual_name'],  [els.qualIdCol, els.qualNameCol]),
+            loadColumnsForTable(els.cregTable?.value,  ['stud_id'],               [els.studIdCol]),
+            loadColumnsForTable(els.pqmTable?.value,   ['pqm_name', 'pqm_code1', 'pqm_code2'], [els.pqmNameCol, els.pqmCode1Col, els.pqmCode2Col])
+        ]);
+
+        updatePqmInfoBox();
         els.configOutput.innerHTML = `<div class="alert alert--success">Loaded ${tables.length} table(s).</div>`;
+    }
+
+    async function loadColumnsForTable(tableName, roles, selectEls) {
+        if (!tableName || !els.server?.value || !els.database?.value) return;
+        const conn = { server: els.server.value.trim(), database: els.database.value, driver: els.driver?.value || 'ODBC Driver 17 for SQL Server' };
+        for (let i = 0; i < roles.length; i++) {
+            const role = roles[i];
+            const sel = selectEls[i];
+            if (!sel) continue;
+            try {
+                const data = await postJson(`${apiBasePath}/GetColumns`, { ...conn, tableName, tableRole: role });
+                if (data.success && Array.isArray(data.columns)) {
+                    const currentVal = sel.value;
+                    sel.innerHTML = '';
+                    data.columns.forEach(col => {
+                        const opt = document.createElement('option');
+                        opt.value = col;
+                        opt.textContent = col;
+                        sel.appendChild(opt);
+                    });
+                    // Prefer current saved value, then auto-selected
+                    const preferred = currentVal && data.columns.includes(currentVal) ? currentVal : (data.autoSelected || data.columns[0]);
+                    if (preferred) sel.value = preferred;
+                }
+            } catch (e) { /* non-fatal */ }
+        }
     }
 
     async function verifyTables() {
@@ -984,6 +1207,11 @@ window.toggleAccordion = function (section) {
         const request = getRequest();
         if (!request.clientId) {
             setWorkspaceState('Select the approved engagement assigned to you before running this rule.', 'warning');
+            return;
+        }
+        if (!request.pqmTable) {
+            setWorkspaceState('PQM table is required. Select the PQM table from the configuration above before running Rule 13.', 'warning');
+            els.pqmTable?.focus();
             return;
         }
 
@@ -1100,6 +1328,28 @@ window.toggleAccordion = function (section) {
     els.database?.addEventListener('change', () => loadTables().catch(err => {
         els.configOutput.innerHTML = `<div class="alert alert--error">${escapeHtml(err.message)}</div>`;
     }));
+
+    // When CESM table changes, reload CESM columns
+    els.studTable?.addEventListener('change', () => {
+        loadColumnsForTable(els.studTable.value, ['cesm_id', 'cesm_code'], [els.cesmIdCol, els.cesmCodeCol]).catch(() => {});
+    });
+    // When QUAL table changes, reload QUAL columns
+    els.qualTable?.addEventListener('change', () => {
+        loadColumnsForTable(els.qualTable.value, ['qual_id', 'qual_name'], [els.qualIdCol, els.qualNameCol]).catch(() => {});
+    });
+    // When STUD table changes, reload STUD link column
+    els.cregTable?.addEventListener('change', () => {
+        loadColumnsForTable(els.cregTable.value, ['stud_id'], [els.studIdCol]).catch(() => {});
+    });
+    // When PQM table changes, always reload PQM columns — PQM is required
+    els.pqmTable?.addEventListener('change', () => {
+        updatePqmInfoBox();
+        loadColumnsForTable(els.pqmTable.value, ['pqm_name', 'pqm_code1', 'pqm_code2'], [els.pqmNameCol, els.pqmCode1Col, els.pqmCode2Col]).catch(() => {});
+    });
+    // Update info box labels when column selections change
+    [els.cesmCodeCol, els.qualNameCol, els.pqmNameCol, els.pqmCode1Col, els.pqmCode2Col].forEach(sel => {
+        sel?.addEventListener('change', () => updatePqmInfoBox());
+    });
     document.getElementById('verifyBtn')?.addEventListener('click', () => verifyTables().catch(err => {
         hideSpinner();
         els.configOutput.innerHTML = `<div class="alert alert--error">${escapeHtml(err.message)}</div>`;

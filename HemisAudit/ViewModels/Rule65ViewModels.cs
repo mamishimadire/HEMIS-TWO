@@ -19,6 +19,7 @@ namespace HemisAudit.ViewModels
         public string Driver { get; set; } = "ODBC Driver 17 for SQL Server";
         public string CancellationTable { get; set; } = "canceliation list";
         public string ClientTable { get; set; } = "CENSUS_LIST_CLIENT";
+        public bool UseClientCensusTable { get; set; } = true;
         public Rule65ColumnMapping ColumnMapping { get; set; } = new();
     }
 
@@ -56,6 +57,7 @@ namespace HemisAudit.ViewModels
         public string Database { get; set; } = "";
         public string CancellationTable { get; set; } = "canceliation list";
         public string ClientTable { get; set; } = "CENSUS_LIST_CLIENT";
+        public bool UseClientCensusTable { get; set; } = true;
         public Rule65ColumnMapping ColumnMapping { get; set; } = new();
         public int TotalCount { get; set; }
         public int PassCount { get; set; }
@@ -77,6 +79,7 @@ namespace HemisAudit.ViewModels
         public string Driver { get; set; } = "ODBC Driver 17 for SQL Server";
         public string CancellationTable { get; set; } = "canceliation list";
         public string ClientTable { get; set; } = "CENSUS_LIST_CLIENT";
+        public bool UseClientCensusTable { get; set; } = true;
         public Rule65ColumnMapping ColumnMapping { get; set; } = new();
     }
 
@@ -130,6 +133,7 @@ namespace HemisAudit.ViewModels
         public string Driver { get; set; } = "ODBC Driver 17 for SQL Server";
         public string CancellationTable { get; set; } = "canceliation list";
         public string ClientTable { get; set; } = "CENSUS_LIST_CLIENT";
+        public bool UseClientCensusTable { get; set; } = true;
         public Rule65ColumnMapping ColumnMapping { get; set; } = new();
         public string CurrentUserEngagementRole { get; set; } = "";
         public bool HasDataAnalystSignoff { get; set; }

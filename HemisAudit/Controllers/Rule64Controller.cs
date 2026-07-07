@@ -16,6 +16,7 @@ namespace HemisAudit.Controllers
         private readonly IAuditLogService _audit;
         private readonly UserManager<ApplicationUser> _users;
         private readonly ISystemDatabaseService _systemDb;
+        private readonly IExportService _export;
         private readonly ILogger<Rule64Controller> _logger;
 
         public Rule64Controller(
@@ -23,12 +24,14 @@ namespace HemisAudit.Controllers
             IAuditLogService audit,
             UserManager<ApplicationUser> users,
             ISystemDatabaseService systemDb,
+            IExportService export,
             ILogger<Rule64Controller> logger)
         {
             _rule64 = rule64;
             _audit = audit;
             _users = users;
             _systemDb = systemDb;
+            _export = export;
             _logger = logger;
         }
 
@@ -648,6 +651,30 @@ namespace HemisAudit.Controllers
             if (!string.Equals(role, "DataAnalyst", StringComparison.OrdinalIgnoreCase))
                 return new { success = false, error = "Only the assigned data analyst can configure Rule 64." };
             return (object?)await action() ?? new { success = false, error = "No data returned." };
+        }
+
+        [HttpPost]
+        public async Task<IActionResult> DownloadExcel([FromBody] System.Text.Json.JsonElement payload)
+        {
+            try
+            {
+                int savedRunId = 0;
+                if (payload.TryGetProperty("savedRunId", out var ridProp)) savedRunId = ridProp.GetInt32();
+
+                Rule64ValidationSummary? summary = null;
+                if (savedRunId > 0)
+                    summary = await _rule64.GetStoredSummaryAsync(savedRunId);
+
+                if (summary == null)
+                    return BadRequest(new { success = false, error = "Could not load Rule 64 results." });
+
+                var bytes = _export.ExportRule64Excel(summary);
+                return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "Rule64_STUD_CREG_Student_Number_Validation.xlsx");
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { success = false, error = ex.Message });
+            }
         }
     }
 }

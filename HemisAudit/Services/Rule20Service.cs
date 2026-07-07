@@ -563,40 +563,72 @@ END";
 
             var sql = $@"-- ============================================================================
 -- HEMIS RULE 20: FOUNDATION VALIDATION
+-- 100% POPULATION - NO SAMPLING
 -- ============================================================================
--- Database: {request.Database}
--- Foundation Student Filter: {request.StudTable}.{m.StudFoundationFlag} = '{m.StudFoundationValue}'
--- Rule 20 Population Filter: {request.CrseTable}.{m.CrseFoundationFlag} = '{m.CrseFoundationValue}'
--- Join Path: {request.StudTable} -> {request.CregTable} on {m.StudQualCode}/{m.CregQualCode}
---            {request.CregTable} -> {request.CrseTable} on {m.CregCourseCode}/{m.CrseCourseCode}
--- Qualification Enrichment: {request.StudTable} -> {request.QualTable} on {m.StudQualCode}/{m.QualQualCode}
--- PASS Rule: rows in the filtered STUD -> CRED -> CRSE linkage PASS
--- PG Types: {string.Join(", ", pgTypes)}
--- Rule Scope: {FormatGoverningPartCodes(governingPartCodes)}
--- Overall PASS Rule: the filtered STUD -> CRED -> CRSE population must PASS
--- Procedure:
---   {string.Join("\n--   ", procedureSteps)}
+-- Database : {request.Database}
+-- Rule     : Foundation Students must be linked to Foundation Courses
+-- Population:
+--      {request.StudTable}.{m.StudFoundationFlag} = '{m.StudFoundationValue}'
+-- Validation:
+--      {request.CrseTable}.{m.CrseFoundationFlag} = '{m.CrseFoundationValue}'
+-- Joins:
+--      {request.StudTable}.{m.StudQualCode} = {request.CregTable}.{m.CregQualCode}
+--      {request.CregTable}.{m.CregCourseCode} = {request.CrseTable}.{m.CrseCourseCode}
+--      {request.StudTable}.{m.StudQualCode} = {request.QualTable}.{m.QualQualCode}
 -- ============================================================================
-
-{BuildFoundationStudentCountQuery(studTable, qualTable, bridgeTable, crseTable, m)}
 
 SELECT
-    S.[{m.StudStudentNo}] AS STUD_Student_Number_007,
-    S.[{m.StudColumn008}] AS STUD_Column_008,
-    S.[{m.StudColumn010}] AS STUD_Column_010,
-    S.[{m.StudColumn012}] AS STUD_Column_012,
-    S.[{m.StudColumn026}] AS STUD_Column_026,
-    S.[{m.StudQualCode}] AS STUD_Qualification_Code,
-    S.[{m.StudFoundationFlag}] AS STUD_Foundation_Flag,
-    BRIDGE.[{m.CregQualCode}] AS CRED_Qualification_Code,
-    BRIDGE.[{m.CregCourseCode}] AS CRED_Course_Code,
-    CRSE.[{m.CrseFoundationFlag}] AS CRSE_Foundation_Course,
-    CRSE.[{m.CrseCourseCode}] AS CRSE_Course_Code,
-    CASE WHEN {IsFoundationValidationPassCondition("CRSE", m)} THEN 'PASS' ELSE 'FAIL' END AS Validation_Result
+
+    --------------------------------------------------------------------------
+    -- Student Information
+    --------------------------------------------------------------------------
+    S.[{m.StudStudentNo}]      AS [Student_Number],
+    S.[{m.StudColumn008}]      AS [South_African_Identity_Number],
+    S.[{m.StudColumn066}]      AS [Surname],
+    S.[{m.StudColumn067}]      AS [First_Name],
+    S.[{m.StudColumn068}]      AS [Middle_Name],
+    S.[{m.StudColumn012}]      AS [Date_of_Birth],
+    S.[{m.StudColumn013}]      AS [Gender],
+    S.[{m.StudColumn014}]      AS [Race],
+    S.[{m.StudColumn015}]      AS [Nationality],
+    S.[{m.StudColumn010}]      AS [Entrance_Category],
+    S.[{m.StudColumn026}]      AS [CESSM_Category],
+    S.[{m.StudColumn025}]      AS [Qualification_Requirements_Status],
+
+    --------------------------------------------------------------------------
+    -- Qualification Information
+    --------------------------------------------------------------------------
+    S.[{m.StudQualCode}]       AS [Qualification_Code],
+    Q.[{m.QualDescription}]    AS [Qualification_Description],
+
+    --------------------------------------------------------------------------
+    -- Foundation Information
+    --------------------------------------------------------------------------
+    S.[{m.StudFoundationFlag}] AS [Foundation_Student_Indicator],
+    BRIDGE.[{m.CregCourseCode}] AS [Course_Code],
+    CRSE.[{m.CrseCourseName}]  AS [Course_Name],
+    CRSE.[{m.CrseFoundationFlag}] AS [Foundation_Course_Indicator],
+
+    --------------------------------------------------------------------------
+    -- Audit Validation
+    --------------------------------------------------------------------------
+    CASE
+        WHEN S.[{m.StudFoundationFlag}] = '{m.StudFoundationValue}'
+         AND CRSE.[{m.CrseFoundationFlag}] = '{m.CrseFoundationValue}'
+        THEN 'PASS'
+        ELSE 'FAIL'
+    END AS [Validation_Result],
+
+    --------------------------------------------------------------------------
+    -- Audit Rule
+    --------------------------------------------------------------------------
+    'Rule 20 - Foundation Validation' AS [Audit_Rule]
+
 {BuildBaseJoinClause(studTable, qualTable, bridgeTable, crseTable, m)}
 WHERE {FoundationStudentCondition("S", m)}
   AND {IsFoundationCourseCondition("CRSE", m)}
-ORDER BY S.[{m.StudStudentNo}];";
+ORDER BY S.[{m.StudStudentNo}],
+         BRIDGE.[{m.CregCourseCode}];";
 
             return Task.FromResult(sql.Trim());
         }
@@ -831,9 +863,16 @@ SELECT
     '{GetPartDescription(partCode)}' AS PartDescription,
     CAST(S.[{ColOrDefault(m?.StudStudentNo, "_007")}] AS nvarchar(255)) AS StudentNumber007,
     CAST(S.[{ColOrDefault(m?.StudColumn008, "_008")}] AS nvarchar(255)) AS StudentColumn008,
-    CAST(S.[{ColOrDefault(m?.StudColumn010, "_010")}] AS nvarchar(255)) AS StudentColumn010,
+    CAST(S.[{ColOrDefault(m?.StudColumn066, "_066")}] AS nvarchar(255)) AS StudentColumn066,
+    CAST(S.[{ColOrDefault(m?.StudColumn067, "_067")}] AS nvarchar(255)) AS StudentColumn067,
+    CAST(S.[{ColOrDefault(m?.StudColumn068, "_068")}] AS nvarchar(255)) AS StudentColumn068,
     CAST(S.[{ColOrDefault(m?.StudColumn012, "_012")}] AS nvarchar(255)) AS StudentColumn012,
+    CAST(S.[{ColOrDefault(m?.StudColumn013, "_013")}] AS nvarchar(255)) AS StudentColumn013,
+    CAST(S.[{ColOrDefault(m?.StudColumn014, "_014")}] AS nvarchar(255)) AS StudentColumn014,
+    CAST(S.[{ColOrDefault(m?.StudColumn015, "_015")}] AS nvarchar(255)) AS StudentColumn015,
+    CAST(S.[{ColOrDefault(m?.StudColumn010, "_010")}] AS nvarchar(255)) AS StudentColumn010,
     CAST(S.[{ColOrDefault(m?.StudColumn026, "_026")}] AS nvarchar(255)) AS StudentColumn026,
+    CAST(S.[{ColOrDefault(m?.StudColumn025, "_025")}] AS nvarchar(255)) AS StudentColumn025,
     CAST(S.[{ColOrDefault(m?.StudQualCode, "_001")}] AS nvarchar(255)) AS QualificationCode001,
     CAST(S.[{ColOrDefault(m?.StudName, "_019")}] AS nvarchar(255)) AS Name019,
     CAST(S.[{ColOrDefault(m?.StudIdNo, "_024")}] AS nvarchar(255)) AS IdNumber024,
@@ -842,6 +881,7 @@ SELECT
     CAST(Q.[{ColOrDefault(m?.QualType, "_005")}] AS nvarchar(255)) AS QualificationType005,
     CAST(BRIDGE.[{ColOrDefault(m?.CregQualCode, "_001")}] AS nvarchar(255)) AS BridgeQualificationCode001,
     CAST(BRIDGE.[{ColOrDefault(m?.CregCourseCode, "_030")}] AS nvarchar(255)) AS CourseCode030,
+    CAST(CRSE.[{ColOrDefault(m?.CrseCourseName, "_058")}] AS nvarchar(255)) AS CourseName058,
     CAST(CRSE.[{ColOrDefault(m?.CrseCourseCode, "_030")}] AS nvarchar(255)) AS CrseCourseCode030,
     CAST(CRSE.[{ColOrDefault(m?.CrseFoundationFlag, "_091")}] AS nvarchar(255)) AS FoundationCourse091,
     CASE WHEN {IsPostgraduateQualificationCondition("Q", pgTypeSqlList, m)} THEN 'Postgraduate' ELSE 'Undergraduate' END AS StudentType,
@@ -988,9 +1028,16 @@ ORDER BY S.[{ColOrDefault(m?.StudStudentNo, "_007")}];";
                 PartDescription = ReadString(reader, "PartDescription"),
                 StudentNumber007 = ReadString(reader, "StudentNumber007"),
                 StudentColumn008 = ReadString(reader, "StudentColumn008"),
-                StudentColumn010 = ReadString(reader, "StudentColumn010"),
+                StudentColumn066 = ReadString(reader, "StudentColumn066"),
+                StudentColumn067 = ReadString(reader, "StudentColumn067"),
+                StudentColumn068 = ReadString(reader, "StudentColumn068"),
                 StudentColumn012 = ReadString(reader, "StudentColumn012"),
+                StudentColumn013 = ReadString(reader, "StudentColumn013"),
+                StudentColumn014 = ReadString(reader, "StudentColumn014"),
+                StudentColumn015 = ReadString(reader, "StudentColumn015"),
+                StudentColumn010 = ReadString(reader, "StudentColumn010"),
                 StudentColumn026 = ReadString(reader, "StudentColumn026"),
+                StudentColumn025 = ReadString(reader, "StudentColumn025"),
                 QualificationCode001 = ReadString(reader, "QualificationCode001"),
                 Name019 = ReadString(reader, "Name019"),
                 IdNumber024 = ReadString(reader, "IdNumber024"),
@@ -999,6 +1046,7 @@ ORDER BY S.[{ColOrDefault(m?.StudStudentNo, "_007")}];";
                 QualificationType005 = ReadString(reader, "QualificationType005"),
                 BridgeQualificationCode001 = ReadString(reader, "BridgeQualificationCode001"),
                 CourseCode030 = ReadString(reader, "CourseCode030"),
+                CourseName058 = ReadString(reader, "CourseName058"),
                 CrseCourseCode030 = ReadString(reader, "CrseCourseCode030"),
                 FoundationCourse091 = ReadString(reader, "FoundationCourse091"),
                 StudentType = ReadString(reader, "StudentType"),
@@ -1022,10 +1070,10 @@ ORDER BY S.[{ColOrDefault(m?.StudStudentNo, "_007")}];";
             var cregColumns = await GetTableColumnsAsync(server, database, driver, cregTable);
             var crseColumns = await GetTableColumnsAsync(server, database, driver, crseTable);
 
-            EnsureRequiredColumns(studTable, studColumns, [m.StudStudentNo, m.StudColumn008, m.StudColumn010, m.StudColumn012, m.StudColumn026, m.StudQualCode, m.StudName, m.StudIdNo, m.StudFoundationFlag]);
+            EnsureRequiredColumns(studTable, studColumns, [m.StudStudentNo, m.StudColumn008, m.StudColumn066, m.StudColumn067, m.StudColumn068, m.StudColumn012, m.StudColumn013, m.StudColumn014, m.StudColumn015, m.StudColumn010, m.StudColumn026, m.StudColumn025, m.StudQualCode, m.StudFoundationFlag]);
             EnsureRequiredColumns(qualTable, qualColumns, [m.QualQualCode, m.QualDescription, m.QualType]);
             EnsureRequiredColumns(cregTable, cregColumns, [m.CregQualCode, m.CregCourseCode]);
-            EnsureRequiredColumns(crseTable, crseColumns, [m.CrseCourseCode, m.CrseFoundationFlag]);
+            EnsureRequiredColumns(crseTable, crseColumns, [m.CrseCourseCode, m.CrseCourseName, m.CrseFoundationFlag]);
         }
 
         private async Task<List<string>> GetTableColumnsAsync(string server, string database, string driver, string tableName)
@@ -1098,9 +1146,16 @@ ORDER BY ORDINAL_POSITION;";
         {
             m.StudStudentNo = ColOrDefault(m.StudStudentNo, "_007");
             m.StudColumn008 = ColOrDefault(m.StudColumn008, "_008");
-            m.StudColumn010 = ColOrDefault(m.StudColumn010, "_010");
+            m.StudColumn066 = ColOrDefault(m.StudColumn066, "_066");
+            m.StudColumn067 = ColOrDefault(m.StudColumn067, "_067");
+            m.StudColumn068 = ColOrDefault(m.StudColumn068, "_068");
             m.StudColumn012 = ColOrDefault(m.StudColumn012, "_012");
+            m.StudColumn013 = ColOrDefault(m.StudColumn013, "_013");
+            m.StudColumn014 = ColOrDefault(m.StudColumn014, "_014");
+            m.StudColumn015 = ColOrDefault(m.StudColumn015, "_015");
+            m.StudColumn010 = ColOrDefault(m.StudColumn010, "_010");
             m.StudColumn026 = ColOrDefault(m.StudColumn026, "_026");
+            m.StudColumn025 = ColOrDefault(m.StudColumn025, "_025");
             m.StudQualCode = ColOrDefault(m.StudQualCode, "_001");
             m.StudName = ColOrDefault(m.StudName, "_019");
             m.StudIdNo = ColOrDefault(m.StudIdNo, "_024");
@@ -1112,14 +1167,22 @@ ORDER BY ORDINAL_POSITION;";
             m.CregQualCode = ColOrDefault(m.CregQualCode, "_001");
             m.CregCourseCode = ColOrDefault(m.CregCourseCode, "_030");
             m.CrseCourseCode = ColOrDefault(m.CrseCourseCode, "_030");
+            m.CrseCourseName = ColOrDefault(m.CrseCourseName, "_058");
             m.CrseFoundationFlag = ColOrDefault(m.CrseFoundationFlag, "_091");
             m.CrseFoundationValue = ValOrDefault(m.CrseFoundationValue, "Y");
 
             ValidateColumnName(m.StudStudentNo);
             ValidateColumnName(m.StudColumn008);
-            ValidateColumnName(m.StudColumn010);
+            ValidateColumnName(m.StudColumn066);
+            ValidateColumnName(m.StudColumn067);
+            ValidateColumnName(m.StudColumn068);
             ValidateColumnName(m.StudColumn012);
+            ValidateColumnName(m.StudColumn013);
+            ValidateColumnName(m.StudColumn014);
+            ValidateColumnName(m.StudColumn015);
+            ValidateColumnName(m.StudColumn010);
             ValidateColumnName(m.StudColumn026);
+            ValidateColumnName(m.StudColumn025);
             ValidateColumnName(m.StudQualCode);
             ValidateColumnName(m.StudName);
             ValidateColumnName(m.StudIdNo);
@@ -1130,6 +1193,7 @@ ORDER BY ORDINAL_POSITION;";
             ValidateColumnName(m.CregQualCode);
             ValidateColumnName(m.CregCourseCode);
             ValidateColumnName(m.CrseCourseCode);
+            ValidateColumnName(m.CrseCourseName);
             ValidateColumnName(m.CrseFoundationFlag);
         }
 
@@ -1414,9 +1478,16 @@ SELECT
     PartDescription,
     StudentNumber007,
     StudentColumn008,
-    StudentColumn010,
+    StudentColumn066,
+    StudentColumn067,
+    StudentColumn068,
     StudentColumn012,
+    StudentColumn013,
+    StudentColumn014,
+    StudentColumn015,
+    StudentColumn010,
     StudentColumn026,
+    StudentColumn025,
     QualificationCode001,
     Name019,
     IdNumber024,
@@ -1425,6 +1496,7 @@ SELECT
     QualificationType005,
     BridgeQualificationCode001,
     CourseCode030,
+    CourseName058,
     CrseCourseCode030,
     FoundationCourse091,
     StudentType,
@@ -1451,9 +1523,16 @@ SELECT
     PartDescription,
     StudentNumber007,
     StudentColumn008,
-    StudentColumn010,
+    StudentColumn066,
+    StudentColumn067,
+    StudentColumn068,
     StudentColumn012,
+    StudentColumn013,
+    StudentColumn014,
+    StudentColumn015,
+    StudentColumn010,
     StudentColumn026,
+    StudentColumn025,
     QualificationCode001,
     Name019,
     IdNumber024,
@@ -1462,6 +1541,7 @@ SELECT
     QualificationType005,
     BridgeQualificationCode001,
     CourseCode030,
+    CourseName058,
     CrseCourseCode030,
     FoundationCourse091,
     StudentType,
@@ -1489,9 +1569,16 @@ WITH Ranked AS (
         PartDescription,
         StudentNumber007,
         StudentColumn008,
-        StudentColumn010,
+        StudentColumn066,
+        StudentColumn067,
+        StudentColumn068,
         StudentColumn012,
+        StudentColumn013,
+        StudentColumn014,
+        StudentColumn015,
+        StudentColumn010,
         StudentColumn026,
+        StudentColumn025,
         QualificationCode001,
         Name019,
         IdNumber024,
@@ -1500,6 +1587,7 @@ WITH Ranked AS (
         QualificationType005,
         BridgeQualificationCode001,
         CourseCode030,
+        CourseName058,
         CrseCourseCode030,
         FoundationCourse091,
         StudentType,
@@ -1522,9 +1610,16 @@ SELECT
     PartDescription,
     StudentNumber007,
     StudentColumn008,
-    StudentColumn010,
+    StudentColumn066,
+    StudentColumn067,
+    StudentColumn068,
     StudentColumn012,
+    StudentColumn013,
+    StudentColumn014,
+    StudentColumn015,
+    StudentColumn010,
     StudentColumn026,
+    StudentColumn025,
     QualificationCode001,
     Name019,
     IdNumber024,
@@ -1533,6 +1628,7 @@ SELECT
     QualificationType005,
     BridgeQualificationCode001,
     CourseCode030,
+    CourseName058,
     CrseCourseCode030,
     FoundationCourse091,
     StudentType,
@@ -1558,9 +1654,16 @@ SELECT
     '{ScopeDescription}' AS PartDescription,
     CAST(S.[{ColOrDefault(m?.StudStudentNo, "_007")}] AS nvarchar(255)) AS StudentNumber007,
     CAST(S.[{ColOrDefault(m?.StudColumn008, "_008")}] AS nvarchar(255)) AS StudentColumn008,
-    CAST(S.[{ColOrDefault(m?.StudColumn010, "_010")}] AS nvarchar(255)) AS StudentColumn010,
+    CAST(S.[{ColOrDefault(m?.StudColumn066, "_066")}] AS nvarchar(255)) AS StudentColumn066,
+    CAST(S.[{ColOrDefault(m?.StudColumn067, "_067")}] AS nvarchar(255)) AS StudentColumn067,
+    CAST(S.[{ColOrDefault(m?.StudColumn068, "_068")}] AS nvarchar(255)) AS StudentColumn068,
     CAST(S.[{ColOrDefault(m?.StudColumn012, "_012")}] AS nvarchar(255)) AS StudentColumn012,
+    CAST(S.[{ColOrDefault(m?.StudColumn013, "_013")}] AS nvarchar(255)) AS StudentColumn013,
+    CAST(S.[{ColOrDefault(m?.StudColumn014, "_014")}] AS nvarchar(255)) AS StudentColumn014,
+    CAST(S.[{ColOrDefault(m?.StudColumn015, "_015")}] AS nvarchar(255)) AS StudentColumn015,
+    CAST(S.[{ColOrDefault(m?.StudColumn010, "_010")}] AS nvarchar(255)) AS StudentColumn010,
     CAST(S.[{ColOrDefault(m?.StudColumn026, "_026")}] AS nvarchar(255)) AS StudentColumn026,
+    CAST(S.[{ColOrDefault(m?.StudColumn025, "_025")}] AS nvarchar(255)) AS StudentColumn025,
     CAST(S.[{ColOrDefault(m?.StudQualCode, "_001")}] AS nvarchar(255)) AS QualificationCode001,
     CAST(S.[{ColOrDefault(m?.StudName, "_019")}] AS nvarchar(255)) AS Name019,
     CAST(S.[{ColOrDefault(m?.StudIdNo, "_024")}] AS nvarchar(255)) AS IdNumber024,
@@ -1569,6 +1672,7 @@ SELECT
     CAST(Q.[{ColOrDefault(m?.QualType, "_005")}] AS nvarchar(255)) AS QualificationType005,
     CAST(BRIDGE.[{ColOrDefault(m?.CregQualCode, "_001")}] AS nvarchar(255)) AS BridgeQualificationCode001,
     CAST(BRIDGE.[{ColOrDefault(m?.CregCourseCode, "_030")}] AS nvarchar(255)) AS CourseCode030,
+    CAST(CRSE.[{ColOrDefault(m?.CrseCourseName, "_058")}] AS nvarchar(255)) AS CourseName058,
     CAST(CRSE.[{ColOrDefault(m?.CrseCourseCode, "_030")}] AS nvarchar(255)) AS CrseCourseCode030,
     CAST(CRSE.[{ColOrDefault(m?.CrseFoundationFlag, "_091")}] AS nvarchar(255)) AS FoundationCourse091,
     CASE WHEN {IsPostgraduateQualificationCondition("Q", pgTypeSqlList, m)} THEN 'Postgraduate' ELSE 'Undergraduate' END AS StudentType,
@@ -1991,9 +2095,16 @@ LEFT JOIN [{crseTable}] CRSE ON BRIDGE.[{ColOrDefault(m?.CregCourseCode, "_030")
             {
                 normalizedRows[i].StudentNumber007 = NormalizeRowText(normalizedRows[i].StudentNumber007);
                 normalizedRows[i].StudentColumn008 = NormalizeRowText(normalizedRows[i].StudentColumn008);
-                normalizedRows[i].StudentColumn010 = NormalizeRowText(normalizedRows[i].StudentColumn010);
+                normalizedRows[i].StudentColumn066 = NormalizeRowText(normalizedRows[i].StudentColumn066);
+                normalizedRows[i].StudentColumn067 = NormalizeRowText(normalizedRows[i].StudentColumn067);
+                normalizedRows[i].StudentColumn068 = NormalizeRowText(normalizedRows[i].StudentColumn068);
                 normalizedRows[i].StudentColumn012 = NormalizeRowText(normalizedRows[i].StudentColumn012);
+                normalizedRows[i].StudentColumn013 = NormalizeRowText(normalizedRows[i].StudentColumn013);
+                normalizedRows[i].StudentColumn014 = NormalizeRowText(normalizedRows[i].StudentColumn014);
+                normalizedRows[i].StudentColumn015 = NormalizeRowText(normalizedRows[i].StudentColumn015);
+                normalizedRows[i].StudentColumn010 = NormalizeRowText(normalizedRows[i].StudentColumn010);
                 normalizedRows[i].StudentColumn026 = NormalizeRowText(normalizedRows[i].StudentColumn026);
+                normalizedRows[i].StudentColumn025 = NormalizeRowText(normalizedRows[i].StudentColumn025);
                 normalizedRows[i].QualificationCode001 = NormalizeRowText(normalizedRows[i].QualificationCode001);
                 normalizedRows[i].Name019 = NormalizeRowText(normalizedRows[i].Name019);
                 normalizedRows[i].IdNumber024 = NormalizeRowText(normalizedRows[i].IdNumber024);
@@ -2002,6 +2113,7 @@ LEFT JOIN [{crseTable}] CRSE ON BRIDGE.[{ColOrDefault(m?.CregCourseCode, "_030")
                 normalizedRows[i].QualificationType005 = NormalizeRowText(normalizedRows[i].QualificationType005);
                 normalizedRows[i].BridgeQualificationCode001 = NormalizeRowText(normalizedRows[i].BridgeQualificationCode001);
                 normalizedRows[i].CourseCode030 = NormalizeRowText(normalizedRows[i].CourseCode030);
+                normalizedRows[i].CourseName058 = NormalizeRowText(normalizedRows[i].CourseName058);
                 normalizedRows[i].CrseCourseCode030 = NormalizeRowText(normalizedRows[i].CrseCourseCode030);
                 normalizedRows[i].FoundationCourse091 = NormalizeRowText(normalizedRows[i].FoundationCourse091);
                 normalizedRows[i].StudentType = NormalizeRowText(normalizedRows[i].StudentType);

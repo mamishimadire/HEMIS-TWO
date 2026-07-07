@@ -115,8 +115,8 @@
                 <div class="accordion-body" id="body-config" style="display:none">
                     <div class="info-box info-box--red">
                         <strong>Rule 14 Logic:</strong><br />
-                        <span>Step 1: filter <strong>dbo_CRSE</strong> to approved courses where <strong>_031 = 'A'</strong>.</span><br />
-                        <span>Step 2: test whether <strong>dbo_CREG</strong> contains a matching registration on <strong>_030</strong> for each approved course.</span><br />
+                        <span>Step 1: filter <strong>dbo_CRSE</strong> to approved courses (configurable approval column/value).</span><br />
+                        <span>Step 2: test whether <strong>dbo_CREG</strong> contains a matching registration (configurable link columns) for each approved course.</span><br />
                         <span>The validation tests 100% of the approved course population and marks each course PASS or FAIL based on registration existence.</span>
                     </div>
                     <div class="form-grid">
@@ -129,8 +129,26 @@
                             <select id="cregTable"></select>
                         </div>
                     </div>
-                    <div class="alert alert--info" style="margin-top:16px">
-                        <strong>Control 1:</strong> <code>CRSE._031 = 'A' AND CREG._030 = CRSE._030</code>
+                    <div class="form-grid" style="margin-top:16px">
+                        <div class="field-group">
+                            <label for="crseApprovedCol">CRSE Approval Column</label>
+                            <select id="crseApprovedCol"><option value="_031">_031</option></select>
+                        </div>
+                        <div class="field-group">
+                            <label for="crseApprovedVal">Approval Value</label>
+                            <input id="crseApprovedVal" type="text" value="A" maxlength="10" style="width:80px" />
+                        </div>
+                        <div class="field-group">
+                            <label for="crseLinkCol">CRSE Link Column (join)</label>
+                            <select id="crseLinkCol"><option value="_030">_030</option></select>
+                        </div>
+                        <div class="field-group">
+                            <label for="cregLinkCol">CREG Link Column (join)</label>
+                            <select id="cregLinkCol"><option value="_030">_030</option></select>
+                        </div>
+                    </div>
+                    <div class="alert alert--info" style="margin-top:16px" id="criteriaPreview">
+                        <strong>Control 1:</strong> <code id="criteriaPreviewText">CRSE._031 = 'A' AND CREG._030 = CRSE._030</code>
                     </div>
                     <div id="configOutput" class="status-output"></div>
                 </div>
@@ -283,6 +301,11 @@ window.toggleAccordion = function (section) {
         database: document.getElementById('database'),
         studTable: document.getElementById('studTable'),
         cregTable: document.getElementById('cregTable'),
+        crseApprovedCol: document.getElementById('crseApprovedCol'),
+        crseApprovedVal: document.getElementById('crseApprovedVal'),
+        crseLinkCol: document.getElementById('crseLinkCol'),
+        cregLinkCol: document.getElementById('cregLinkCol'),
+        criteriaPreviewText: document.getElementById('criteriaPreviewText'),
         connectionOutput: document.getElementById('connectionOutput'),
         configOutput: document.getElementById('configOutput'),
         analysisPane: document.getElementById('analysisPane'),
@@ -418,6 +441,18 @@ window.toggleAccordion = function (section) {
         }
     }
 
+    function getCriteriaText() {
+        const ac = els.crseApprovedCol?.value || '_031';
+        const av = els.crseApprovedVal?.value || 'A';
+        const lc = els.crseLinkCol?.value || '_030';
+        const rc = els.cregLinkCol?.value || '_030';
+        return `CRSE.${ac} = '${av}' AND CREG.${rc} = CRSE.${lc}`;
+    }
+
+    function updateCriteriaPreview() {
+        if (els.criteriaPreviewText) els.criteriaPreviewText.textContent = getCriteriaText();
+    }
+
     function getRequest() {
         return {
             clientId: parseInt(els.clientId.value || '0', 10) || 0,
@@ -428,7 +463,11 @@ window.toggleAccordion = function (section) {
             studTable: els.studTable?.value || 'dbo_CRSE',
             bridgeTable: els.cregTable?.value || defaultBridgeTable,
             cregTable: els.cregTable?.value || defaultBridgeTable,
-            crseTable: els.cregTable?.value || defaultBridgeTable
+            crseTable: els.cregTable?.value || defaultBridgeTable,
+            crseApprovedCol: els.crseApprovedCol?.value || '_031',
+            crseApprovedVal: els.crseApprovedVal?.value || 'A',
+            crseLinkCol: els.crseLinkCol?.value || '_030',
+            cregLinkCol: els.cregLinkCol?.value || '_030'
         };
     }
 
@@ -682,6 +721,11 @@ window.toggleAccordion = function (section) {
         populateSelect(els.database, workspace.database ? [workspace.database] : [], workspace.database);
         populateSelect(els.studTable, workspace.studTable ? [workspace.studTable] : [], workspace.studTable);
         populateSelect(els.cregTable, [workspace.bridgeTable || workspace.crseTable || defaultBridgeTable], workspace.bridgeTable || workspace.crseTable || defaultBridgeTable);
+        if (workspace.crseApprovedCol) populateSelect(els.crseApprovedCol, [workspace.crseApprovedCol], workspace.crseApprovedCol);
+        if (els.crseApprovedVal) els.crseApprovedVal.value = workspace.crseApprovedVal || 'A';
+        if (workspace.crseLinkCol) populateSelect(els.crseLinkCol, [workspace.crseLinkCol], workspace.crseLinkCol);
+        if (workspace.cregLinkCol) populateSelect(els.cregLinkCol, [workspace.cregLinkCol], workspace.cregLinkCol);
+        updateCriteriaPreview();
 
         els.workspaceRunState.textContent = workspace.runId ? `Run #${workspace.runId}` : 'No saved run loaded';
         els.workspaceRunLabel.textContent = workspace.runId ? `Rule 14 Run #${workspace.runId}` : 'No saved run yet';
@@ -768,6 +812,30 @@ window.toggleAccordion = function (section) {
         populateSelect(els.studTable, data.tables || [], data.autoStudTable);
         populateSelect(els.cregTable, data.tables || [], data.autoBridgeTable || data.autoCrseTable);
         setAlert(els.configOutput, 'success', `Loaded ${data.tables.length} table(s).`);
+        await loadFilterColumns();
+    }
+
+    async function loadFilterColumns() {
+        const baseReq = { server: els.server?.value.trim() || '', database: els.database?.value || '', driver: els.driver?.value || 'ODBC Driver 17 for SQL Server' };
+        const crseTbl = els.studTable?.value, cregTbl = els.cregTable?.value;
+        if (!baseReq.server || !baseReq.database || !crseTbl || !cregTbl) return;
+        try {
+            const [crseRes, cregRes] = await Promise.all([
+                postJson(`${apiBasePath}/GetTableColumns`, { ...baseReq, tableName: crseTbl }),
+                postJson(`${apiBasePath}/GetTableColumns`, { ...baseReq, tableName: cregTbl })
+            ]);
+            const curAc = els.crseApprovedCol?.value || '_031';
+            const curLc = els.crseLinkCol?.value || '_030';
+            const curRc = els.cregLinkCol?.value || '_030';
+            if (crseRes.success) {
+                populateSelect(els.crseApprovedCol, crseRes.columns, curAc);
+                populateSelect(els.crseLinkCol, crseRes.columns, curLc);
+            }
+            if (cregRes.success) {
+                populateSelect(els.cregLinkCol, cregRes.columns, curRc);
+            }
+            updateCriteriaPreview();
+        } catch { /* non-fatal */ }
     }
 
     async function verifyTables() {
@@ -977,19 +1045,24 @@ window.toggleAccordion = function (section) {
         const criteriaText = controlMeta?.criteriaText || '';
         const registrationTableName = summary.bridgeTable || summary.cregTable || defaultBridgeTable;
 
+        const crseApproved = summary.crseApprovedCol || '_031';
+        const crseLink = summary.crseLinkCol || '_030';
+        const cregLink = summary.cregLinkCol || '_030';
+        const crseApprovedVal = summary.crseApprovedVal || 'A';
+
         const rowHtml = rows.map(row => {
             const rawV = row.displayValues || {}; const v = Object.fromEntries(Object.entries(rawV).map(([k, val]) => [k.toUpperCase(), val]));
             const resultText = String(row.validationResult || '').toUpperCase() === 'FAIL' ? 'FAIL' : 'PASS';
             return `
                 <tr>
-                    <td>${escapeHtml(v.CRSE__030 || '')}</td>
-                    <td>${escapeHtml(v.CRSE__031 || '')}</td>
-                    <td class="criteria-cell ${row.validationResult === 'FAIL' ? 'is-fail' : 'is-pass'}">${escapeHtml(v.CRSE_CRITERIA_MESSAGE || '')}</td>
-                    <td>${escapeHtml(v.CREG__030 || '')}</td>
+                    <td>${escapeHtml(v.CRSE__LINK || '')}</td>
+                    <td>${escapeHtml(v.CRSE__APPROVED || '')}</td>
+                    <td class="criteria-cell ${row.validationResult === 'FAIL' ? 'is-fail' : 'is-pass'}">${escapeHtml(v.CRSE_CRITERIA_MESSAGE || (v.CRSE__APPROVED ? `${crseApproved}='${v.CRSE__APPROVED}'` : ''))}</td>
+                    <td>${escapeHtml(v.CREG__LINK || '')}</td>
                     <td class="mid-pass-cell ${row.validationResult === 'FAIL' ? 'is-fail' : 'is-pass'}">${escapeHtml(v.CREG_LINK_MESSAGE || '')}</td>
                     <td class="final-cell ${row.validationResult === 'FAIL' ? 'is-fail' : 'is-pass'}">
                         <div class="result-text">${escapeHtml(resultText)}</div>
-                        <div class="message-text">${escapeHtml(v.FINAL_RESULT_MESSAGE || buildFinalMessage(resultText, criteriaText))}</div>
+                        <div class="message-text">${escapeHtml(row.validationExplanation || v.FINAL_RESULT_MESSAGE || buildFinalMessage(resultText, criteriaText))}</div>
                     </td>
                 </tr>`;
         }).join('');
@@ -1002,17 +1075,17 @@ window.toggleAccordion = function (section) {
                     <table class="Rule14-grid">
                         <thead>
                             <tr>
-                                <th colspan="2" class="group-stud">dbo_CRSE</th>
-                                <th class="criteria-head">Criteria:<br />CRSE._031 = 'A'</th>
+                                <th colspan="2" class="group-stud">${escapeHtml(summary.studTable || 'dbo_CRSE')}</th>
+                                <th class="criteria-head">Criteria:<br />${escapeHtml(crseApproved)} = '${escapeHtml(crseApprovedVal)}'</th>
                                 <th class="group-bridge">${escapeHtml(registrationTableName)}</th>
                                 <th class="criteria-head"></th>
                                 <th class="group-final">Final results</th>
                             </tr>
                             <tr>
-                                <th>_030</th>
-                                <th>_031</th>
+                                <th>${escapeHtml(crseLink)}</th>
+                                <th>${escapeHtml(crseApproved)}</th>
                                 <th></th>
-                                <th>_030</th>
+                                <th>${escapeHtml(cregLink)}</th>
                                 <th></th>
                                 <th class="final-head">pass/fail</th>
                             </tr>
@@ -1129,6 +1202,12 @@ window.toggleAccordion = function (section) {
     document.getElementById('downloadCsvBtn')?.addEventListener('click', () => state.summary && downloadBlob(`${apiBasePath}/DownloadCsv`, state.summary, 'Rule14_Course_Credentials.csv').catch(err => setWorkspaceState(err.message, 'error')));
     document.getElementById('downloadSqlBtn')?.addEventListener('click', () => downloadBlob(`${apiBasePath}/DownloadSql`, getRequest(), 'Rule14_Course_Credentials.sql').catch(err => setWorkspaceState(err.message, 'error')));
     els.clientId?.addEventListener('change', () => loadWorkspace().catch(err => setWorkspaceState(err.message, 'error')));
+    els.studTable?.addEventListener('change', () => loadFilterColumns().catch(() => {}));
+    els.cregTable?.addEventListener('change', () => loadFilterColumns().catch(() => {}));
+    els.crseApprovedCol?.addEventListener('change', updateCriteriaPreview);
+    els.crseApprovedVal?.addEventListener('input', updateCriteriaPreview);
+    els.crseLinkCol?.addEventListener('change', updateCriteriaPreview);
+    els.cregLinkCol?.addEventListener('change', updateCriteriaPreview);
 
     renderAnalysis(null);
     renderResults();

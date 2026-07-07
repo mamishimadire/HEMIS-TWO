@@ -161,7 +161,16 @@ namespace HemisAudit.Controllers
                     FulfilledColumn = review.Summary.FulfilledColumn,
                     FulfilledValue = review.Summary.FulfilledValue,
                     QualTypeColumn = review.Summary.QualTypeColumn,
-                    MdTypesText = review.Summary.MdTypesText
+                    MdTypesText = review.Summary.MdTypesText,
+                    QualNameColumn = review.Summary.QualNameColumn,
+                    PqmTable = review.Summary.PqmTable,
+                    PqmQualNameColumn = review.Summary.PqmQualNameColumn,
+                    PqmQualTypeColumn = review.Summary.PqmQualTypeColumn,
+                    CredTable = review.Summary.CredTable,
+                    CredJoinCol = review.Summary.CredJoinCol,
+                    CredCourseCol = review.Summary.CredCourseCol,
+                    CrseTable = review.Summary.CrseTable,
+                    CrseCourseCol = review.Summary.CrseCourseCol
                 });
             }
             catch (Exception ex)

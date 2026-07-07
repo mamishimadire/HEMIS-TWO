@@ -19,6 +19,7 @@ namespace HemisAudit.Services
         Task RemoveSignoffAsync(int runId, string reviewerEmail);
         Task<string> GenerateSqlAsync(Rule16ValidationRequest request);
         Task<Rule16ValidationSummary> GetExportSummaryAsync(Rule16ValidationRequest request);
+        Task<List<string>> GetTableColumnsListAsync(string server, string database, string driver, string tableName);
     }
 }
 

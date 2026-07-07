@@ -2,46 +2,32 @@
 @{
     ViewData["Title"] = $"Rule 21 Run {Model.RunId}";
     Layout = "~/Views/Shared/_Layout.cshtml";
-    var canDownload = ViewBag.CanDownloadSavedRun is bool allowed && allowed;
-    var canManageEngagement = ViewBag.CanManageEngagement is bool manageEngagement && manageEngagement;
-    var canOpenWorkspace = ViewBag.CanOpenWorkspace is bool openWorkspace && openWorkspace;
-    var isArchived = ViewBag.IsArchived is bool archived && archived;
+    var canDownload = ViewBag.CanDownloadSavedRun is bool a && a;
+    var canManageEngagement = ViewBag.CanManageEngagement is bool b && b;
+    var canOpenWorkspace = ViewBag.CanOpenWorkspace is bool c && c;
+    var isArchived = ViewBag.IsArchived is bool d && d;
     var moduleNavigation = ViewBag.ModuleNavigation as HemisAudit.ViewModels.ModuleSequenceNavigationViewModel;
-    var previewRows = Model.Summary.MatchingRows
-        .Where(row => string.Equals(row.BreakdownValue, "PASS", StringComparison.OrdinalIgnoreCase))
-        .Take(10)
-        .ToList();
-    if (!previewRows.Any())
-        previewRows = Model.Summary.MatchingRows.Take(10).ToList();
-
-    var preferredHeaders = new[] { "Control_Type", "Sample_Number", "FTE_Indicator_010", "Validation_Result", "_007", "_008", "_001", "_009", "_010", "_011" };
-    var displayKeys = previewRows
-        .SelectMany(r => r.DisplayValues.Keys)
-        .Distinct(StringComparer.OrdinalIgnoreCase)
-        .ToList();
-    var extraUnderscoreHeaders = displayKeys
-        .Where(header => header.StartsWith("_", StringComparison.OrdinalIgnoreCase) && !preferredHeaders.Contains(header, StringComparer.OrdinalIgnoreCase))
-        .OrderBy(header => header, StringComparer.OrdinalIgnoreCase)
-        .Take(4)
-        .ToList();
-    var headers = preferredHeaders
-        .Where(header =>
-            header is "Control_Type" or "Sample_Number" or "FTE_Indicator_010" or "Validation_Result" ||
-            displayKeys.Contains(header, StringComparer.OrdinalIgnoreCase))
-        .Concat(extraUnderscoreHeaders)
-        .ToList();
+    var flaggedRows = Model.Summary.FlaggedRows ?? new List<HemisAudit.ViewModels.Rule21ValidationRowViewModel>();
+    var clearRows = Model.Summary.ClearSampleRows ?? new List<HemisAudit.ViewModels.Rule21ValidationRowViewModel>();
+    var previewRows = flaggedRows.Take(10).Concat(clearRows.Take(10)).ToList();
+    var total = Model.Summary.TotalValidated;
+    var flaggedCount = Model.Summary.FlaggedCount;
+    var clearCount = Model.Summary.ClearCount;
+    var rate = Model.Summary.ExceptionRate;
+    var maxCount = Math.Max(Math.Max(flaggedCount, clearCount), 1);
+    var flaggedH = Math.Max((decimal)flaggedCount / maxCount * 220m, flaggedCount > 0 ? 24m : 4m);
+    var clearH = Math.Max((decimal)clearCount / maxCount * 220m, clearCount > 0 ? 24m : 4m);
+    var complianceColor = rate <= 10m ? "#008000" : rate <= 30m ? "#f59e0b" : "#dc2626";
 }
 
 @if (TempData["Success"] != null)
 {
     <div class="alert alert--success" style="margin-bottom:16px">@TempData["Success"]</div>
 }
-
 @if (TempData["Error"] != null)
 {
     <div class="alert alert--error" style="margin-bottom:16px">@TempData["Error"]</div>
 }
-
 @if (moduleNavigation != null)
 {
     @await Html.PartialAsync("_ModuleSequenceNav", moduleNavigation)
@@ -54,63 +40,49 @@
     .review-panel { display:none; }
     .review-panel.is-active { display:block; }
     .viz-grid { display:grid; gap:16px; grid-template-columns:repeat(auto-fit, minmax(240px, 1fr)); }
-    .viz-card { background:#fff; border:1px solid #e5e7eb; border-radius:18px; padding:20px; box-shadow:0 18px 40px rgba(15, 23, 42, .06); }
-    .viz-bar { background:#e5e7eb; border-radius:999px; height:14px; overflow:hidden; margin-top:10px; }
-    .viz-bar > span { display:block; height:100%; }
+    .viz-card { background:#fff; border:1px solid #e5e7eb; border-radius:18px; padding:20px; box-shadow:0 4px 12px rgba(15,23,42,.06); }
     .code-panel { background:#0f172a; border-radius:18px; color:#e2e8f0; overflow:auto; padding:18px; }
     .code-panel pre { margin:0; white-space:pre-wrap; word-break:break-word; }
-    .rule21-preview-wrap { overflow-x:auto; border:1px solid #e5e7eb; border-radius:16px; background:#fff; }
-    .rule21-preview-table { width:max-content; min-width:100%; table-layout:auto; }
-    .rule21-preview-table thead th,
-    .rule21-preview-table td { white-space:nowrap; overflow-wrap:normal; word-break:normal; font-family:Consolas, "Courier New", monospace; font-size:13px; }
-    .rule21-preview-table td.is-pass { color:#0f766e; font-weight:700; }
-    .rule21-preview-table td.is-fail { color:#b91c1c; font-weight:700; }
+    .r21-table-wrap { overflow-x:auto; border:1px solid #e5e7eb; border-radius:12px; }
+    .r21-table { width:100%; border-collapse:collapse; font-size:13px; font-family:Consolas,"Courier New",monospace; }
+    .r21-table th { background:#8b0000; color:#fff; padding:8px 10px; text-align:left; white-space:nowrap; }
+    .r21-table td { padding:7px 10px; border-top:1px solid #e5e7eb; white-space:nowrap; }
+    .r21-table tr.is-flagged td { background:#fff3f3; }
+    .r21-table tr.is-clear td { background:#f3fff3; }
+    .is-flagged-text { color:#b91c1c; font-weight:700; }
+    .is-clear-text { color:#0f766e; font-weight:700; }
 </style>
 
 <div class="page-header">
     <div>
-        <h1>Rule 21 Saved Run</h1>
-        <p>
-            @Model.EngagementName
-            <span style="padding:0 8px">|</span>
-            @Model.MaconomyNumber
-            <span style="padding:0 8px">|</span>
-            Run #@Model.RunId
-            <span style="padding:0 8px">|</span>
-            @Model.Summary.Timestamp
-        </p>
+        <h1>Rule 21 — First-Time Entering Students vs Non-Aligned Qualifications</h1>
+        <p>@Model.EngagementName &nbsp;|&nbsp; @Model.MaconomyNumber &nbsp;|&nbsp; Run #@Model.RunId &nbsp;|&nbsp; @Model.Summary.Timestamp</p>
     </div>
     <div style="display:flex;gap:10px;flex-wrap:wrap">
         @if (canOpenWorkspace)
         {
             <a asp-action="Index" asp-route-clientId="@Model.ClientId" class="btn btn-secondary">Back to Workspace</a>
         }
-        <a asp-controller="Dashboard" asp-action="Index" class="btn btn-secondary">Back to Dashboard</a>
-        <a asp-controller="Admin" asp-action="ClientDetail" asp-route-id="@Model.ClientId" asp-fragment="validation-runs-panel" class="btn btn-secondary">Back to Validation Runs</a>
+        <a asp-controller="Dashboard" asp-action="Index" class="btn btn-secondary">Dashboard</a>
+        <a asp-controller="Admin" asp-action="ClientDetail" asp-route-id="@Model.ClientId" asp-fragment="validation-runs-panel" class="btn btn-secondary">Validation Runs</a>
         @if (canManageEngagement)
         {
-            <a asp-controller="Admin" asp-action="ClientDetail" asp-route-id="@Model.ClientId" class="btn btn-secondary">Back to Engagement</a>
+            <a asp-controller="Admin" asp-action="ClientDetail" asp-route-id="@Model.ClientId" class="btn btn-secondary">Engagement</a>
         }
     </div>
 </div>
 
 @if (isArchived)
 {
-    <div class="alert alert--info" style="margin-bottom:24px">
-        This engagement is archived. The saved run is available for review and download only.
-    </div>
+    <div class="alert alert--info" style="margin-bottom:24px">This engagement is archived. The saved run is available for review and download only.</div>
 }
-
 @if (!Model.HasDataAnalystSignoff && !isArchived)
 {
-    <div class="alert alert--warning" style="margin-bottom:24px">
-        The data analyst signoff is still outstanding. Assigned users can still review and download this run.
-    </div>
+    <div class="alert alert--warning" style="margin-bottom:24px">The data analyst signoff is outstanding. Assigned users can still review and download this run.</div>
 }
 
 <div class="card" style="margin-bottom:24px;padding:20px">
     <h3 class="section-title" style="margin-top:0">Signoffs</h3>
-
     @if (Model.CanCurrentUserSignOff && !isArchived)
     {
         <form asp-action="AddSignoff" method="post" style="margin-bottom:16px">
@@ -118,46 +90,37 @@
             <input type="hidden" name="RunId" value="@Model.RunId" />
             <div class="field-group" style="margin-bottom:12px">
                 <label>Comment</label>
-                <textarea name="Comment" rows="3" placeholder="Add review or completion notes" disabled="@(Model.CurrentUserHasSignedOff ? "disabled" : null)">@Model.Signoffs.FirstOrDefault(s => s.IsCurrentUser)?.Comment</textarea>
+                <textarea name="Comment" rows="3" placeholder="Add review notes" @(Model.CurrentUserHasSignedOff ? "disabled" : "")>@Model.Signoffs.FirstOrDefault(s => s.IsCurrentUser)?.Comment</textarea>
             </div>
-            <button type="submit" class="btn btn-primary" disabled="@(Model.CurrentUserHasSignedOff ? "disabled" : null)">
+            <button type="submit" class="btn btn-primary" @(Model.CurrentUserHasSignedOff ? "disabled" : "")>
                 @(Model.CurrentUserHasSignedOff ? $"Signed Off as {Model.CurrentUserEngagementRole}" : $"Sign Off as {Model.CurrentUserEngagementRole}")
             </button>
         </form>
-
         @if (Model.CanCurrentUserRemoveSignoff)
         {
             <form asp-action="RemoveSignoff" method="post" style="margin-bottom:16px">
                 @Html.AntiForgeryToken()
                 <input type="hidden" name="runId" value="@Model.RunId" />
-                <button type="submit" class="btn btn-warning" onclick="return confirm('Remove the signoff for this validation run?')">Remove Signoff</button>
+                <button type="submit" class="btn btn-warning" onclick="return confirm('Remove signoff?')">Remove Signoff</button>
             </form>
         }
     }
     else if (!Model.IsCurrentRun && !isArchived)
     {
-        <div class="alert alert--info" style="margin-bottom:16px">History results are read-only for signoff. Signoff is only available on the current run.</div>
+        <div class="alert alert--info" style="margin-bottom:16px">History results are read-only for signoff.</div>
     }
-
     @if (Model.Signoffs.Any())
     {
         <table class="data-table">
-            <thead>
-                <tr>
-                    <th>Role</th>
-                    <th>Reviewer</th>
-                    <th>Comment</th>
-                    <th>Signed At</th>
-                </tr>
-            </thead>
+            <thead><tr><th>Role</th><th>Reviewer</th><th>Comment</th><th>Signed At</th></tr></thead>
             <tbody>
-                @foreach (var signoff in Model.Signoffs)
+                @foreach (var s in Model.Signoffs)
                 {
                     <tr>
-                        <td><span class="badge badge--role">@signoff.SignoffRole</span></td>
-                        <td><strong>@signoff.ReviewerName</strong><br /><small style="color:#757575">@signoff.ReviewerEmail</small></td>
-                        <td>@(string.IsNullOrWhiteSpace(signoff.Comment) ? "-" : signoff.Comment)</td>
-                        <td>@signoff.SignedOffAt.ToString("dd MMM yyyy HH:mm")</td>
+                        <td><span class="badge badge--role">@s.SignoffRole</span></td>
+                        <td><strong>@s.ReviewerName</strong><br /><small style="color:#757575">@s.ReviewerEmail</small></td>
+                        <td>@(string.IsNullOrWhiteSpace(s.Comment) ? "-" : s.Comment)</td>
+                        <td>@s.SignedOffAt.ToString("dd MMM yyyy HH:mm")</td>
                     </tr>
                 }
             </tbody>
@@ -171,296 +134,175 @@
 
 <div class="card" style="padding:0 0 24px">
     <div class="review-tabs">
-        <button type="button" class="review-tab is-active" data-review-tab="analysis">Analysis Results</button>
-        <button type="button" class="review-tab" data-review-tab="details">Results</button>
+        <button type="button" class="review-tab is-active" data-review-tab="analysis">Analysis</button>
+        <button type="button" class="review-tab" data-review-tab="flagged">FLAGGED (@flaggedCount.ToString("N0"))</button>
+        <button type="button" class="review-tab" data-review-tab="clear">CLEAR Sample (@clearCount.ToString("N0"))</button>
         <button type="button" class="review-tab" data-review-tab="visuals">Visualizations</button>
-        <button type="button" class="review-tab" data-review-tab="sql">SQL Code</button>
-        <button type="button" class="review-tab" data-review-tab="downloads">Downloads</button>
+        <button type="button" class="review-tab" data-review-tab="sql">SQL</button>
+        @if (canDownload)
+        {
+            <button type="button" class="review-tab" data-review-tab="downloads">Downloads</button>
+        }
     </div>
 
     <div class="review-panel is-active" data-review-panel="analysis" style="padding:24px">
         <div class="stats-grid" style="margin-bottom:24px">
             <div class="stat-card">
-                <div class="stat-card__label">Filtered Records Tested</div>
-                <div class="stat-card__value">@Model.Summary.TotalValidated.ToString("N0")</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-card__label">PASS Rows</div>
-                <div class="stat-card__value">@Model.Summary.PassCount.ToString("N0")</div>
+                <div class="stat-card__label">First-Time Entering (FTE)</div>
+                <div class="stat-card__value">@total.ToString("N0")</div>
             </div>
             <div class="stat-card stat-card--fail">
-                <div class="stat-card__label">FAIL Rows</div>
-                <div class="stat-card__value">@Model.Summary.FailCount.ToString("N0")</div>
+                <div class="stat-card__label">FLAGGED (Non-Aligned Found)</div>
+                <div class="stat-card__value">@flaggedCount.ToString("N0")</div>
             </div>
             <div class="stat-card">
-                <div class="stat-card__label">PASS Rate</div>
-                <div class="stat-card__value">@Model.Summary.ExceptionRate.ToString("F2")%</div>
+                <div class="stat-card__label">CLEAR (Not Found)</div>
+                <div class="stat-card__value">@clearCount.ToString("N0")</div>
+            </div>
+            <div class="stat-card @(rate > 10 ? "stat-card--fail" : "")">
+                <div class="stat-card__label">Exception Rate</div>
+                <div class="stat-card__value">@rate.ToString("F2")%</div>
             </div>
         </div>
-
         <div class="card" style="padding:20px">
-            <h3 class="section-title" style="margin-top:0">Run Summary</h3>
+            <h3 class="section-title" style="margin-top:0">Run Configuration</h3>
             <div class="form-grid">
-                <div>
-                    <div style="color:#757575;font-size:12px;text-transform:uppercase;font-weight:700">Database</div>
-                    <div>@Model.Summary.Database</div>
-                </div>
-                <div>
-                    <div style="color:#757575;font-size:12px;text-transform:uppercase;font-weight:700">Rule</div>
-                    <div>Rule 21 - First Time Entering Students Filtered Validation</div>
-                </div>
-                <div>
-                    <div style="color:#757575;font-size:12px;text-transform:uppercase;font-weight:700">Source Table</div>
-                    <div>@Model.Summary.TableName</div>
-                </div>
-                <div>
-                    <div style="color:#757575;font-size:12px;text-transform:uppercase;font-weight:700">Filter Rule</div>
-                    <div>@Model.Summary.FilterColumn = '@Model.Summary.FilterValue'</div>
-                </div>
-                <div>
-                    <div style="color:#757575;font-size:12px;text-transform:uppercase;font-weight:700">Rows Loaded In Browser</div>
-                    <div>@Model.Summary.DisplayedCount.ToString("N0")</div>
-                </div>
-                <div>
-                    <div style="color:#757575;font-size:12px;text-transform:uppercase;font-weight:700">Result Logic</div>
-                    <div>Only rows where @Model.Summary.FilterColumn matches '@Model.Summary.FilterValue' are returned.</div>
-                </div>
-                <div>
-                    <div style="color:#757575;font-size:12px;text-transform:uppercase;font-weight:700">PASS / FAIL</div>
-                    <div>@Model.Summary.PassCount.ToString("N0") PASS | @Model.Summary.FailCount.ToString("N0") FAIL</div>
-                </div>
-                <div>
-                    <div style="color:#757575;font-size:12px;text-transform:uppercase;font-weight:700">Status</div>
-                    <div>@Model.Summary.Status</div>
-                </div>
+                <div><div style="color:#757575;font-size:12px;text-transform:uppercase;font-weight:700">Database</div><div>@Model.Summary.Database</div></div>
+                <div><div style="color:#757575;font-size:12px;text-transform:uppercase;font-weight:700">Status</div><div><strong style="color:@(Model.Summary.Status=="PASS"?"#008000":"#b91c1c")">@Model.Summary.Status</strong></div></div>
+                <div><div style="color:#757575;font-size:12px;text-transform:uppercase;font-weight:700">STUD Table</div><div>@Model.Summary.StudTable (filter: @Model.Summary.StudFirstTimeColumn = '@Model.Summary.StudFirstTimeValue')</div></div>
+                <div><div style="color:#757575;font-size:12px;text-transform:uppercase;font-weight:700">QUAL Table</div><div>@Model.Summary.QualTable</div></div>
+                <div><div style="color:#757575;font-size:12px;text-transform:uppercase;font-weight:700">NAL Table</div><div>@Model.Summary.NalTable (category: @Model.Summary.NalCategoryColumn = '@Model.Summary.NalCategoryValue')</div></div>
+                <div><div style="color:#757575;font-size:12px;text-transform:uppercase;font-weight:700">STUD Total Records</div><div>@Model.Summary.StudTotalCount.ToString("N0")</div></div>
+                <div><div style="color:#757575;font-size:12px;text-transform:uppercase;font-weight:700">QUAL Total Records</div><div>@Model.Summary.QualTotalCount.ToString("N0")</div></div>
+                <div><div style="color:#757575;font-size:12px;text-transform:uppercase;font-weight:700">NAL Category Count</div><div>@Model.Summary.NalCategoryCount.ToString("N0")</div></div>
             </div>
-
-            @if (Model.Summary.Breakdown.Any())
-            {
-                <div style="margin-top:20px">
-                    <h4 style="margin:0 0 10px 0">@Model.Summary.FilterColumn Value Breakdown</h4>
-                    <table class="data-table">
-                        <thead>
-                            <tr>
-                                <th>@Model.Summary.FilterColumn</th>
-                                <th>Count</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            @foreach (var item in Model.Summary.Breakdown)
-                            {
-                                <tr>
-                                    <td>@item.Value</td>
-                                    <td>@item.Count.ToString("N0")</td>
-                                </tr>
-                            }
-                        </tbody>
-                    </table>
-                </div>
-            }
         </div>
     </div>
 
-    <div class="review-panel" data-review-panel="details" style="padding:24px">
-        @if (Model.Summary.MatchingRows.Any())
+    <div class="review-panel" data-review-panel="flagged" style="padding:24px">
+        @if (flaggedRows.Any())
         {
-            <div class="action-bar" style="justify-content:flex-start;margin:0 0 16px 0">
-                <label for="resultFilter" style="font-weight:600">Result Filter</label>
-                <select id="resultFilter" style="max-width:200px">
-                    <option value="ALL">All</option>
-                    <option value="PASS">PASS</option>
-                    <option value="FAIL">FAIL</option>
-                </select>
-            </div>
-            <div class="card" style="padding:20px">
-                <div class="alert alert--info" style="margin-bottom:16px">
-                    Showing the first @previewRows.Count.ToString("N0") matching row(s) for filter <strong>@Model.Summary.FilterValue</strong> in a notebook-style preview.
-                </div>
-                <h3 class="section-title" style="margin-top:0">Notebook-Style Results Preview</h3>
-                <div class="rule21-preview-wrap">
-                    <table class="data-table rule21-preview-table">
-                        <thead>
-                            <tr>
-                                @foreach (var header in headers)
-                                {
-                                    <th>@header</th>
-                                }
+            <div class="r21-table-wrap">
+                <table class="r21-table">
+                    <thead>
+                        <tr>
+                            <th>#</th><th>STUD Qual Ref</th><th>STUD _007</th><th>FTE Value</th>
+                            <th>QUAL Code</th><th>QUAL Name</th><th>NAL Qual Name</th><th>NAL Category</th><th>Result</th><th>Reason</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var row in flaggedRows)
+                        {
+                            <tr class="is-flagged">
+                                <td>@row.RowNumber</td>
+                                <td>@row.StudQualRef</td>
+                                <td>@row.Stud007Value</td>
+                                <td>@row.Stud010Value</td>
+                                <td>@row.QualCodeValue</td>
+                                <td>@row.QualNameValue</td>
+                                <td>@(row.NalQualName ?? "")</td>
+                                <td>@(row.NalCategory ?? "")</td>
+                                <td class="is-flagged-text">FLAGGED</td>
+                                <td>@(row.ExceptionReason ?? "")</td>
                             </tr>
-                        </thead>
-                        <tbody>
-                            @foreach (var row in previewRows)
-                            {
-                                var rowResult = row.DisplayValues.TryGetValue("Validation_Result", out var currentResult)
-                                    ? (currentResult ?? "")
-                                    : "";
-                                <tr data-result="@rowResult">
-                                    @foreach (var header in headers)
-                                    {
-                                        var value = header switch
-                                        {
-                                            "Control_Type" => "Control_1",
-                                            "Sample_Number" => row.ValidationNumber.ToString(),
-                                            "FTE_Indicator_010" => row.DisplayValues.TryGetValue("_010", out var fteValue) ? fteValue ?? "" : "",
-                                            _ => row.DisplayValues.TryGetValue(header, out var currentValue) ? currentValue ?? "" : ""
-                                        };
-                                        var cellClass = header == "Validation_Result"
-                                            ? (string.Equals(value, "PASS", StringComparison.OrdinalIgnoreCase) ? "is-pass" : string.Equals(value, "FAIL", StringComparison.OrdinalIgnoreCase) ? "is-fail" : "")
-                                            : "";
-                                        <td class="@cellClass">@value</td>
-                                    }
-                                </tr>
-                            }
-                        </tbody>
-                    </table>
-                </div>
+                        }
+                    </tbody>
+                </table>
             </div>
         }
         else
         {
-            <div class="alert alert--info" style="margin:0">No filtered rows were saved in this run.</div>
+            <div class="alert alert--success">No FLAGGED rows — all First-Time Entering students are clear of Non-Aligned qualifications.</div>
+        }
+    </div>
+
+    <div class="review-panel" data-review-panel="clear" style="padding:24px">
+        @if (clearRows.Any())
+        {
+            <div class="alert alert--info" style="margin-bottom:16px">Showing @clearRows.Count.ToString("N0") CLEAR sample row(s).</div>
+            <div class="r21-table-wrap">
+                <table class="r21-table">
+                    <thead>
+                        <tr>
+                            <th>#</th><th>STUD Qual Ref</th><th>STUD _007</th><th>FTE Value</th>
+                            <th>QUAL Code</th><th>QUAL Name</th><th>Result</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var row in clearRows)
+                        {
+                            <tr class="is-clear">
+                                <td>@row.RowNumber</td>
+                                <td>@row.StudQualRef</td>
+                                <td>@row.Stud007Value</td>
+                                <td>@row.Stud010Value</td>
+                                <td>@row.QualCodeValue</td>
+                                <td>@row.QualNameValue</td>
+                                <td class="is-clear-text">CLEAR</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+        else
+        {
+            <div class="alert alert--info">No CLEAR sample rows were saved in this run.</div>
         }
     </div>
 
     <div class="review-panel" data-review-panel="visuals" style="padding:24px">
-        @{
-            var total = Model.Summary.TotalValidated;
-            var passCount = Model.Summary.PassCount;
-            var failCount = Model.Summary.FailCount;
-            var compliance = total == 0 ? 0m : Math.Round((decimal)passCount / total * 100m, 2);
-            var maxResultCount = Math.Max(Math.Max(passCount, failCount), 1);
-            var passHeight = Math.Max((decimal)passCount / maxResultCount * 220m, passCount > 0 ? 24m : 4m);
-            var failHeight = Math.Max((decimal)failCount / maxResultCount * 220m, failCount > 0 ? 24m : 4m);
-            var complianceColor = compliance >= 90m ? "#008000" : compliance >= 70m ? "#f59e0b" : "#dc2626";
-        }
         <div class="viz-grid">
-            <div class="viz-card">
-                <div style="font-size:12px;text-transform:uppercase;font-weight:700;color:#64748b">Filtered Records Tested</div>
-                <div style="height:220px;display:flex;align-items:flex-end;justify-content:center;padding:12px 0 6px">
-                    <div style="width:120px;height:220px;background:#4CAF50;border:2px solid #1f2937;display:flex;align-items:flex-end;justify-content:center;color:#111827;font-weight:700;padding-bottom:8px">
-                        @total.ToString("N0")
-                    </div>
-                </div>
-                <div style="display:flex;justify-content:space-between;color:#64748b;font-size:13px">
-                    <span>Browser preview: @Model.Summary.DisplayedCount.ToString("N0")</span>
-                    <span>Matched filter: @Model.Summary.MatchingCount.ToString("N0")</span>
-                </div>
-            </div>
             <div class="viz-card">
                 <div style="font-size:12px;text-transform:uppercase;font-weight:700;color:#64748b">Validation Results</div>
                 <div style="height:220px;display:flex;align-items:flex-end;justify-content:center;gap:36px;padding:12px 0 6px">
                     <div style="text-align:center">
-                        <div style="width:110px;height:@(passHeight.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture))px;background:#4CAF50;border:2px solid #1f2937;display:flex;align-items:flex-start;justify-content:center;padding-top:8px;font-weight:700">@passCount.ToString("N0")</div>
-                        <div style="margin-top:8px;font-size:13px">PASS</div>
+                        <div style="width:110px;height:@(flaggedH.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture))px;background:#ef4444;border:2px solid #1f2937;display:flex;align-items:flex-start;justify-content:center;padding-top:8px;font-weight:700;color:#fff">@flaggedCount.ToString("N0")</div>
+                        <div style="margin-top:8px;font-size:13px">FLAGGED</div>
                     </div>
                     <div style="text-align:center">
-                        <div style="width:110px;height:@(failHeight.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture))px;background:#F44336;border:2px solid #1f2937;display:flex;align-items:flex-start;justify-content:center;padding-top:8px;font-weight:700">@failCount.ToString("N0")</div>
-                        <div style="margin-top:8px;font-size:13px">FAIL</div>
+                        <div style="width:110px;height:@(clearH.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture))px;background:#4caf50;border:2px solid #1f2937;display:flex;align-items:flex-start;justify-content:center;padding-top:8px;font-weight:700;color:#fff">@clearCount.ToString("N0")</div>
+                        <div style="margin-top:8px;font-size:13px">CLEAR</div>
                     </div>
                 </div>
             </div>
             <div class="viz-card">
-                <div style="font-size:12px;text-transform:uppercase;font-weight:700;color:#64748b;text-align:center">Filter Rule: @($"{Model.Summary.FilterColumn}=\"{Model.Summary.FilterValue}\"")</div>
-                <div style="display:flex;justify-content:center;align-items:center;padding:18px 0 10px">
-                    <div style="width:240px;height:240px;border-radius:50%;background:#FF9800;border:2px solid #1f2937;display:flex;align-items:flex-end;justify-content:center">
-                        <span style="margin-bottom:-22px;font-size:13px">Filtered population</span>
-                    </div>
+                <div style="font-size:12px;text-transform:uppercase;font-weight:700;color:#64748b">Exception Rate</div>
+                <div style="display:flex;align-items:center;justify-content:center;height:220px">
+                    <div style="font-size:48px;font-weight:800;color:@complianceColor">@rate.ToString("F2")%</div>
                 </div>
+                <div style="text-align:center;font-size:13px;color:#64748b">@flaggedCount.ToString("N0") of @total.ToString("N0") FTE students flagged</div>
             </div>
-            <div class="viz-card">
-                <div style="font-size:12px;text-transform:uppercase;font-weight:700;color:#64748b">Compliance: @compliance.ToString("F2")%</div>
-                <div style="background:#e5e7eb;border-radius:999px;height:220px;display:flex;align-items:center;padding:12px">
-                    <div style="width:@(compliance.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture))%;min-width:@(total > 0 ? "72px" : "0");height:100%;background:@complianceColor;border:2px solid #1f2937;border-radius:12px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:28px;font-weight:800">
-                        @compliance.ToString("F2")%
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <div class="card" style="padding:20px;margin-top:20px">
-            <h3 class="section-title" style="margin-top:0">@Model.Summary.FilterColumn Value Breakdown</h3>
-            @if (Model.Summary.Breakdown.Any())
-            {
-                @foreach (var item in Model.Summary.Breakdown.Take(10))
-                {
-                    var width = Model.Summary.TotalValidated == 0 ? 0 : (item.Count * 100m / Model.Summary.TotalValidated);
-                    <div style="margin-bottom:14px">
-                        <div style="display:flex;justify-content:space-between;gap:12px">
-                            <strong>@item.Value</strong>
-                            <span>@item.Count.ToString("N0")</span>
-                        </div>
-                        <div class="viz-bar"><span style="width:@(width.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture))%;background:#2563eb"></span></div>
-                    </div>
-                }
-            }
-            else
-            {
-                <div style="color:#64748b">No source values were returned for the selected filter column.</div>
-            }
         </div>
     </div>
 
     <div class="review-panel" data-review-panel="sql" style="padding:24px">
-        <div class="card" style="padding:20px;margin-bottom:20px">
-            <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap">
-                <div>
-                    <h3 class="section-title" style="margin:0">Saved SQL Preview</h3>
-                    <div style="color:#64748b;margin-top:4px">Review the SQL generated from the saved run configuration.</div>
-                </div>
-                @if (canDownload)
-                {
-                    <a asp-action="DownloadSavedSql" asp-route-runId="@Model.RunId" class="btn btn-primary">Download SQL</a>
-                }
-            </div>
+        <div class="code-panel">
+            <pre>@Model.GeneratedSql</pre>
         </div>
-        <div class="code-panel"><pre><code>@Model.GeneratedSql</code></pre></div>
     </div>
 
-    <div class="review-panel" data-review-panel="downloads" style="padding:24px">
-        <div class="card" style="padding:20px">
-            <h3 class="section-title" style="margin-top:0">Downloads</h3>
-            <div class="alert alert--info" style="margin-bottom:16px">
-                Excel and CSV include the full filtered Rule 21 results and summary.
+    @if (canDownload)
+    {
+        <div class="review-panel" data-review-panel="downloads" style="padding:24px">
+            <div style="display:flex;gap:12px;flex-wrap:wrap">
+                <a href="@Url.Action("DownloadSavedExcel", new { runId = Model.RunId })" class="btn btn-secondary">Download Excel</a>
+                <a href="@Url.Action("DownloadSavedCsv", new { runId = Model.RunId })" class="btn btn-secondary">Download CSV (All)</a>
+                <a href="@Url.Action("DownloadSavedExceptionsCsv", new { runId = Model.RunId })" class="btn btn-secondary">Download CSV (FLAGGED only)</a>
+                <a href="@Url.Action("DownloadSavedSql", new { runId = Model.RunId })" class="btn btn-secondary">Download SQL</a>
             </div>
-            @if (canDownload)
-            {
-                <div style="display:flex;gap:10px;flex-wrap:wrap">
-                    <a asp-action="DownloadSavedExcel" asp-route-runId="@Model.RunId" class="btn btn-success">Excel</a>
-                    <a asp-action="DownloadSavedCsv" asp-route-runId="@Model.RunId" class="btn btn-info">CSV</a>
-                    <a asp-action="DownloadSavedSql" asp-route-runId="@Model.RunId" class="btn btn-primary">SQL</a>
-                </div>
-            }
-            else
-            {
-                <div class="alert alert--warning" style="margin:0">
-                    Download is available to the assigned data analyst immediately, and to other assigned users after the data analyst signoff.
-                </div>
-            }
         </div>
-    </div>
+    }
 </div>
 
 <script>
-(() => {
-    const tabs = Array.from(document.querySelectorAll('[data-review-tab]'));
-    const panels = Array.from(document.querySelectorAll('[data-review-panel]'));
-    const resultFilter = document.getElementById('resultFilter');
-
-    function setActiveTab(name) {
-        tabs.forEach(tab => tab.classList.toggle('is-active', tab.getAttribute('data-review-tab') === name));
-        panels.forEach(panel => panel.classList.toggle('is-active', panel.getAttribute('data-review-panel') === name));
-    }
-
-    tabs.forEach(tab => tab.addEventListener('click', () => setActiveTab(tab.getAttribute('data-review-tab'))));
-
-    if (resultFilter) {
-        resultFilter.addEventListener('change', () => {
-            const selected = resultFilter.value.toUpperCase();
-            document.querySelectorAll('tr[data-result]').forEach(row => {
-                const value = String(row.getAttribute('data-result') || '').toUpperCase();
-                row.style.display = selected === 'ALL' || value === selected ? '' : 'none';
-            });
+    document.querySelectorAll('.review-tab').forEach(tab => {
+        tab.addEventListener('click', function () {
+            const panel = this.dataset.reviewTab;
+            document.querySelectorAll('.review-tab').forEach(t => t.classList.remove('is-active'));
+            document.querySelectorAll('.review-panel').forEach(p => p.classList.remove('is-active'));
+            this.classList.add('is-active');
+            document.querySelector(`[data-review-panel="${panel}"]`).classList.add('is-active');
         });
-    }
-})();
+    });
 </script>
-
