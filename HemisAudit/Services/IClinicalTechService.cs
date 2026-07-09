@@ -20,5 +20,9 @@ namespace HemisAudit.Services
         // Workspace state
         Task<ClinicalTechWorkspaceState?> GetCurrentWorkspaceStateAsync(int clientId, string? userEmail = null);
         Task<bool> SaveWorkspaceStateAsync(int clientId, ClinicalTechValidationRequest config, string? userEmail = null);
+
+        // Signoff
+        Task AddOrUpdateSignoffAsync(int runId, string email, string comment);
+        Task RemoveSignoffAsync(int runId, string email);
     }
 }

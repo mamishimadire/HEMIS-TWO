@@ -12,17 +12,20 @@ namespace HemisAudit.Controllers
     public class PharmacyController : Controller
     {
         private readonly IPharmacyService _pharmacy;
+        private readonly IExportService _export;
         private readonly IAuditLogService _audit;
         private readonly UserManager<ApplicationUser> _users;
         private readonly ISystemDatabaseService _systemDb;
 
         public PharmacyController(
             IPharmacyService pharmacy,
+            IExportService export,
             IAuditLogService audit,
             UserManager<ApplicationUser> users,
             ISystemDatabaseService systemDb)
         {
             _pharmacy = pharmacy;
+            _export = export;
             _audit = audit;
             _users = users;
             _systemDb = systemDb;
@@ -183,6 +186,49 @@ namespace HemisAudit.Controllers
             return Json(new { success = true, sql });
         }
 
+        [HttpPost]
+        public async Task<IActionResult> AddSignoff([FromBody] QualSurnameSignoffInput model)
+        {
+            var user = await _users.GetUserAsync(User);
+            if (user == null) return Json(new { success = false, error = "Not authenticated." });
+            try
+            {
+                await _pharmacy.AddOrUpdateSignoffAsync(model.RunId, user.Email!, model.Comment);
+                await _audit.LogAsync("add_signoff", $"Pharmacy signoff added for run {model.RunId}.", user.Id, user.Email);
+                return Json(new { success = true });
+            }
+            catch (Exception ex) { return Json(new { success = false, error = ex.Message }); }
+        }
+
+        [HttpPost]
+        public async Task<IActionResult> RemoveSignoff([FromBody] QualSurnameSignoffInput model)
+        {
+            var user = await _users.GetUserAsync(User);
+            if (user == null) return Json(new { success = false, error = "Not authenticated." });
+            try
+            {
+                await _pharmacy.RemoveSignoffAsync(model.RunId, user.Email!);
+                await _audit.LogAsync("remove_signoff", $"Pharmacy signoff removed for run {model.RunId}.", user.Id, user.Email);
+                return Json(new { success = true });
+            }
+            catch (Exception ex) { return Json(new { success = false, error = ex.Message }); }
+        }
+
+        [HttpPost]
+        public IActionResult DownloadExcel([FromBody] PharmacyValidationSummary summary)
+        {
+            var rows = (summary.ReviewRows ?? new()).Select(r => (r.PharmacyQualification, r.PharmacySurname, r.Status, r.ProductionQualification, r.ProductionSurname));
+            var bytes = _export.ExportQualSurnameExcel("Pharmacy", 72, summary.TotalValidated, summary.PassCount, summary.FailCount, summary.ExceptionRate, summary.Status ?? "", "Pharmacy", "Clinical_Production", "QUALIFICATION", "Surname", rows);
+            return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "Rule72_Pharmacy.xlsx");
+        }
+
+        [HttpPost]
+        public async Task<IActionResult> DownloadSql([FromBody] PharmacyValidationRequest request)
+        {
+            var sql = await _pharmacy.GenerateSqlAsync(request);
+            return Json(new { success = true, sql });
+        }
+
         // ── Helpers ────────────────────────────────────────────────────────────
 
         private async Task<T> RequireDataAnalystAsync<T>(Func<Task<T>> operation) where T : class
@@ -205,8 +251,9 @@ namespace HemisAudit.Controllers
         private static bool CanViewWorkspaceResults(string role, PharmacyWorkspaceState? workspace)
         {
             if (workspace == null) return false;
-            return string.Equals(role, "DataAnalyst", StringComparison.OrdinalIgnoreCase) ||
-                   string.Equals(role, "Admin", StringComparison.OrdinalIgnoreCase);
+            if (string.Equals(role, "DataAnalyst", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(role, "Admin", StringComparison.OrdinalIgnoreCase)) return true;
+            return workspace.IsWorkspaceSaved && workspace.HasDataAnalystSignoff;
         }
     }
 }

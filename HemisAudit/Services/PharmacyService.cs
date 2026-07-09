@@ -1,5 +1,8 @@
+using System.Security.Cryptography;
+using HemisAudit.Helpers;
 using HemisAudit.ViewModels;
 using Microsoft.Data.SqlClient;
+using Microsoft.Extensions.Configuration;
 using Newtonsoft.Json;
 
 namespace HemisAudit.Services
@@ -8,10 +11,12 @@ namespace HemisAudit.Services
     {
         private const int BrowserPreviewRowLimit = 10;
         private readonly IPendingValidationCacheService _pendingValidationCache;
+        private readonly IConfiguration _configuration;
 
-        public PharmacyService(IPendingValidationCacheService pendingValidationCache)
+        public PharmacyService(IPendingValidationCacheService pendingValidationCache, IConfiguration configuration)
         {
             _pendingValidationCache = pendingValidationCache;
+            _configuration = configuration;
         }
 
         public async Task<DatabaseListResult> GetDatabasesAsync(string server, string driver)
@@ -241,6 +246,49 @@ DROP TABLE #ProdQualifications;");
             try
             {
                 if (clientId <= 0) return null;
+
+                await using var connection = await OpenSystemConnectionAsync();
+                await using var command = connection.CreateConfiguredCommand();
+                command.CommandText = @"
+SELECT TOP 1
+    HemisServer, AuditDatabase, StudTable, DeceasedTable, StudColumn, DeceasedColumn,
+    Status, RunTimestamp, ResultsJSON, WorkspaceSavedAt
+FROM dbo.ValidationRuns
+WHERE ClientID = @ClientID AND RuleNumber = 72
+ORDER BY IsCurrent DESC, RunTimestamp DESC;";
+                command.Parameters.AddWithValue("@ClientID", clientId);
+
+                await using var reader = await command.ExecuteReaderAsync();
+                if (await reader.ReadAsync())
+                {
+                    var resultsJson = reader.IsDBNull(8) ? null : reader.GetString(8);
+                    PharmacyValidationSummary? summary = null;
+                    if (!string.IsNullOrWhiteSpace(resultsJson))
+                    {
+                        try { summary = JsonConvert.DeserializeObject<PharmacyValidationSummary>(ValidationPayloadCodec.Decode(resultsJson)); }
+                        catch { /* ignore decode errors */ }
+                    }
+
+                    return new PharmacyWorkspaceState
+                    {
+                        ClientId = clientId,
+                        Server = reader.IsDBNull(0) ? "" : reader.GetString(0),
+                        Database = reader.IsDBNull(1) ? "" : reader.GetString(1),
+                        PharmacyTable = reader.IsDBNull(2) ? "Pharmacy" : reader.GetString(2),
+                        ProductionTable = reader.IsDBNull(3) ? "Clinical_Production" : reader.GetString(3),
+                        QualificationColumn = reader.IsDBNull(4) ? "QUALIFICATION" : reader.GetString(4),
+                        SurnameColumn = reader.IsDBNull(5) ? "Surname" : reader.GetString(5),
+                        LastRunStatus = reader.IsDBNull(6) ? null : reader.GetString(6),
+                        LastRunAt = reader.IsDBNull(7) ? null : reader.GetDateTime(7),
+                        IsWorkspaceSaved = !reader.IsDBNull(9),
+                        Summary = summary
+                    };
+                }
+            }
+            catch { /* fall through to cache */ }
+
+            try
+            {
                 var cached = _pendingValidationCache.GetPending<PharmacyValidationRequest, PharmacyValidationSummary>(72, clientId, userEmail ?? "");
                 if (cached?.Request is not null && cached.Summary is not null)
                 {
@@ -259,9 +307,10 @@ DROP TABLE #ProdQualifications;");
                         LastRunAt = DateTime.UtcNow
                     };
                 }
-                return null;
             }
-            catch { return null; }
+            catch { /* ignore */ }
+
+            return null;
         }
 
         public async Task<bool> SaveWorkspaceStateAsync(int clientId, PharmacyValidationRequest config, string? userEmail = null)
@@ -353,10 +402,147 @@ LEFT JOIN (
         private static PharmacyValidationRequest CloneRequest(PharmacyValidationRequest r) =>
             JsonConvert.DeserializeObject<PharmacyValidationRequest>(JsonConvert.SerializeObject(r)) ?? new();
 
-        private static async Task<int> SaveValidationRunAsync(PharmacyValidationRequest request, PharmacyValidationSummary summary, string? userEmail, string? userName)
+        private async Task<int> SaveValidationRunAsync(PharmacyValidationRequest request, PharmacyValidationSummary summary, string? userEmail, string? userName)
         {
-            await Task.Delay(100);
-            return 1;
+            await using var connection = await OpenSystemConnectionAsync();
+            await EnsureClientNotArchivedAsync(connection, request.ClientId);
+            await MarkPreviousRunsHistoricalAsync(connection, request.ClientId, 72);
+
+            var systemUserId = await GetSystemUserIdByEmailAsync(connection, userEmail);
+            if (!systemUserId.HasValue)
+                throw new InvalidOperationException("The current analyst could not be resolved in the system database.");
+
+            var previousHash = await GetLatestValidationHashAsync(connection, request.ClientId, 72);
+
+            await using var command = connection.CreateConfiguredCommand();
+            command.CommandText = @"
+INSERT INTO dbo.ValidationRuns
+(ClientID, UserID, RuleNumber, RuleName, Status, TotalRecords, PassCount, FailCount, ExceptionRate, RunTimestamp,
+ HemisServer, AuditDatabase, StudTable, DeceasedTable, StudColumn, DeceasedColumn,
+ ExceptionsJSON, ResultsJSON, RunByUserName, LastEditedByUserName, LastEditedAt, PreviousHash, RecordHash, IsCurrent)
+VALUES
+(@ClientID, @UserID, 72, @RuleName, @Status, @TotalRecords, @PassCount, @FailCount, @ExceptionRate, GETDATE(),
+ @HemisServer, @AuditDatabase, @StudTable, @DeceasedTable, @StudColumn, @DeceasedColumn,
+ @ExceptionsJSON, @ResultsJSON, @RunByUserName, NULL, NULL, @PreviousHash, NULL, 1);
+SELECT CAST(SCOPE_IDENTITY() AS int);";
+            command.Parameters.AddWithValue("@ClientID", request.ClientId);
+            command.Parameters.AddWithValue("@UserID", systemUserId.Value);
+            command.Parameters.AddWithValue("@RuleName", "Pharmacy Qualification Validation");
+            command.Parameters.AddWithValue("@Status", summary.Status ?? "");
+            command.Parameters.AddWithValue("@TotalRecords", summary.TotalValidated);
+            command.Parameters.AddWithValue("@PassCount", summary.PassCount);
+            command.Parameters.AddWithValue("@FailCount", summary.FailCount);
+            command.Parameters.AddWithValue("@ExceptionRate", summary.ExceptionRate);
+            command.Parameters.AddWithValue("@HemisServer", request.Server);
+            command.Parameters.AddWithValue("@AuditDatabase", request.Database);
+            command.Parameters.AddWithValue("@StudTable", request.PharmacyTable);
+            command.Parameters.AddWithValue("@DeceasedTable", request.ProductionTable);
+            command.Parameters.AddWithValue("@StudColumn", request.QualificationColumn);
+            command.Parameters.AddWithValue("@DeceasedColumn", request.SurnameColumn);
+            command.Parameters.AddWithValue("@ExceptionsJSON", ValidationPayloadCodec.Encode(
+                JsonConvert.SerializeObject(summary.ReviewRows.Where(r => r.Status == "FAIL").ToList())));
+            command.Parameters.AddWithValue("@ResultsJSON", ValidationPayloadCodec.Encode(JsonConvert.SerializeObject(summary)));
+            command.Parameters.AddWithValue("@RunByUserName", (object?)userName ?? DBNull.Value);
+            command.Parameters.AddWithValue("@PreviousHash", (object?)previousHash ?? DBNull.Value);
+
+            var value = await command.ExecuteScalarAsync();
+            var runId = Convert.ToInt32(value);
+
+            await using var hashCommand = connection.CreateConfiguredCommand();
+            hashCommand.CommandText = "UPDATE dbo.ValidationRuns SET RecordHash = @RecordHash WHERE RunID = @RunID;";
+            hashCommand.Parameters.AddWithValue("@RunID", runId);
+            hashCommand.Parameters.AddWithValue("@RecordHash", ComputeHash(
+                $"Pharmacy|{runId}|{request.ClientId}|{systemUserId.Value}|{summary.Status}|{summary.TotalValidated}|{summary.PassCount}|{summary.FailCount}|{summary.ExceptionRate}|{previousHash}"));
+            await hashCommand.ExecuteNonQueryAsync();
+
+            return runId;
+        }
+
+        private async Task<SqlConnection> OpenSystemConnectionAsync()
+        {
+            var server = _configuration["SystemDatabase:Server"] ?? @"(localdb)\MSSQLLocalDB";
+            var database = _configuration["SystemDatabase:Name"] ?? "HEMISBaseSystem";
+            var trust = _configuration.GetValue("SystemDatabase:TrustServerCertificate", true);
+            var builder = new SqlConnectionStringBuilder
+            {
+                DataSource = server, InitialCatalog = database, IntegratedSecurity = true,
+                TrustServerCertificate = trust, Encrypt = false, ConnectTimeout = 180
+            };
+            var connection = new SqlConnection(builder.ConnectionString);
+            await connection.OpenAsync();
+            return connection;
+        }
+
+        private static async Task<int?> GetSystemUserIdByEmailAsync(SqlConnection connection, string? email)
+        {
+            if (string.IsNullOrWhiteSpace(email)) return null;
+            await using var command = connection.CreateConfiguredCommand();
+            command.CommandText = "SELECT TOP 1 UserID FROM dbo.Users WHERE Email = @Email;";
+            command.Parameters.AddWithValue("@Email", email);
+            var value = await command.ExecuteScalarAsync();
+            return value == null || value == DBNull.Value ? null : Convert.ToInt32(value);
+        }
+
+        private static async Task EnsureClientNotArchivedAsync(SqlConnection connection, int clientId)
+        {
+            await using var command = connection.CreateConfiguredCommand();
+            command.CommandText = "SELECT TOP 1 Status FROM dbo.Clients WHERE ClientID = @ClientID;";
+            command.Parameters.AddWithValue("@ClientID", clientId);
+            var status = Convert.ToString(await command.ExecuteScalarAsync());
+            if (string.Equals(status, "Archived", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("Archived engagements are read-only.");
+        }
+
+        private static async Task MarkPreviousRunsHistoricalAsync(SqlConnection connection, int clientId, int ruleNumber)
+        {
+            await using var command = connection.CreateConfiguredCommand();
+            command.CommandText = @"UPDATE dbo.ValidationRuns SET IsCurrent = 0
+WHERE ClientID = @ClientID AND RuleNumber = @RuleNumber AND IsCurrent = 1;";
+            command.Parameters.AddWithValue("@ClientID", clientId);
+            command.Parameters.AddWithValue("@RuleNumber", ruleNumber);
+            await command.ExecuteNonQueryAsync();
+        }
+
+        private static async Task<string?> GetLatestValidationHashAsync(SqlConnection connection, int clientId, int ruleNumber)
+        {
+            await using var command = connection.CreateConfiguredCommand();
+            command.CommandText = @"SELECT TOP 1 RecordHash FROM dbo.ValidationRuns
+WHERE ClientID = @ClientID AND RuleNumber = @RuleNumber AND RecordHash IS NOT NULL
+ORDER BY RunTimestamp DESC, RunID DESC;";
+            command.Parameters.AddWithValue("@ClientID", clientId);
+            command.Parameters.AddWithValue("@RuleNumber", ruleNumber);
+            var value = await command.ExecuteScalarAsync();
+            return value == null || value == DBNull.Value ? null : Convert.ToString(value);
+        }
+
+        public async Task AddOrUpdateSignoffAsync(int runId, string email, string comment)
+        {
+            await using var connection = await OpenSystemConnectionAsync();
+            var clientId = await QualSurnameModuleHelper.GetClientIdForRunAsync(connection, runId)
+                ?? throw new InvalidOperationException("Validation run was not found.");
+            var userId = await GetSystemUserIdByEmailAsync(connection, email)
+                ?? throw new InvalidOperationException("Reviewer could not be resolved in the system database.");
+            var role = await QualSurnameModuleHelper.GetEngagementRoleAsync(connection, clientId, userId)
+                ?? throw new InvalidOperationException("User is not assigned to this engagement.");
+            await QualSurnameModuleHelper.AddOrUpdateSignoffAsync(connection, runId, clientId, userId, role, comment);
+        }
+
+        public async Task RemoveSignoffAsync(int runId, string email)
+        {
+            await using var connection = await OpenSystemConnectionAsync();
+            var clientId = await QualSurnameModuleHelper.GetClientIdForRunAsync(connection, runId)
+                ?? throw new InvalidOperationException("Validation run was not found.");
+            var userId = await GetSystemUserIdByEmailAsync(connection, email)
+                ?? throw new InvalidOperationException("Reviewer could not be resolved in the system database.");
+            var role = await QualSurnameModuleHelper.GetEngagementRoleAsync(connection, clientId, userId)
+                ?? throw new InvalidOperationException("User is not assigned to this engagement.");
+            await QualSurnameModuleHelper.RemoveSignoffAsync(connection, runId, role);
+        }
+
+        private static string ComputeHash(string input)
+        {
+            using var sha = SHA256.Create();
+            return Convert.ToHexString(sha.ComputeHash(System.Text.Encoding.UTF8.GetBytes(input)));
         }
     }
 }

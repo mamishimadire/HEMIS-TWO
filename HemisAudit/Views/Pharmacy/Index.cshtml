@@ -167,21 +167,23 @@
             <button class="btn btn-success" id="phSaveWorkspaceBtn" onclick="phSaveWorkspace()">Save Workspace</button>
             <button class="btn btn-primary" id="phSignOffBtn" onclick="phSignOff()" style="display:none">Sign Off</button>
             <button class="btn btn-warning" id="phRemoveSignoffBtn" onclick="phRemoveSignoff()" style="display:none">Remove Signoff</button>
+            <button class="btn btn-secondary" id="phDownloadExcelBtn" onclick="phDownloadExcel()" style="display:none">Download Excel</button>
+            <button class="btn btn-secondary" id="phDownloadSqlBtn" onclick="phDownloadSql()" style="display:none">Download SQL</button>
         </div>
     </div>
 
     <div class="action-bar">
-        <button class="btn btn-info" onclick="phVerify()">Verify Tables</button>
+        <button class="btn btn-info" id="phVerifyBtn" onclick="phVerify()">Verify Tables</button>
         <button class="btn btn-success" id="phRunBtn" onclick="phRun()">Run Validation</button>
         <button class="btn btn-primary" id="phSqlBtn" onclick="phGenerateSql()">Generate SQL</button>
     </div>
 
     <div class="results-panel">
         <div class="results-tabs">
-            <button class="tab-btn active" type="button" onclick="phTab('validation')">Validation Results</button>
-            <button class="tab-btn" type="button" onclick="phTab('exceptions')">Exceptions</button>
-            <button class="tab-btn" type="button" onclick="phTab('charts')">Charts</button>
-            <button class="tab-btn" type="button" onclick="phTab('sql')">SQL Code</button>
+            <button class="tab-btn active" type="button" data-tab="validation" onclick="phTab('validation')">Validation Results</button>
+            <button class="tab-btn" type="button" data-tab="exceptions" onclick="phTab('exceptions')">Exceptions</button>
+            <button class="tab-btn" type="button" data-tab="charts" onclick="phTab('charts')">Charts</button>
+            <button class="tab-btn" type="button" data-tab="sql" onclick="phTab('sql')">SQL Code</button>
         </div>
         <div class="tab-pane active" id="ph-tab-validation">
             <div id="phValidationContent" class="empty-state"><p>Run validation to see results here.</p></div>
@@ -197,17 +199,6 @@
         </div>
     </div>
 
-    <!-- Progress popup -->
-    <div id="phProgressOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9999;display:none;align-items:center;justify-content:center">
-        <div style="background:#fff;border-radius:12px;padding:32px 40px;min-width:320px;text-align:center;box-shadow:0 8px 32px rgba(0,0,0,.18)">
-            <div style="font-size:1.1rem;font-weight:600;margin-bottom:14px" id="phProgressTitle">Processing…</div>
-            <div style="background:#e5e7eb;border-radius:99px;height:10px;overflow:hidden;margin-bottom:10px">
-                <div id="phProgressBar" style="height:100%;background:#6d28d9;border-radius:99px;width:0%;transition:width .3s ease"></div>
-            </div>
-            <div style="font-size:.92rem;color:#555" id="phProgressMsg">Please wait…</div>
-            <div style="font-size:1.4rem;font-weight:700;color:#6d28d9;margin-top:8px" id="phProgressPct">0%</div>
-        </div>
-    </div>
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
@@ -227,42 +218,6 @@ const ph = {
     pharmCols: [], prodCols: []
 };
 
-// ── Progress overlay ───────────────────────────────────────────────────────
-
-let phProgressTimer = null;
-
-function phShowProgress(title, steps) {
-    const overlay = document.getElementById('phProgressOverlay');
-    overlay.style.display = 'flex';
-    document.getElementById('phProgressTitle').textContent = title;
-    document.getElementById('phProgressMsg').textContent = steps[0] || 'Starting…';
-    document.getElementById('phProgressBar').style.width = '0%';
-    document.getElementById('phProgressPct').textContent = '0%';
-
-    let step = 0;
-    const total = steps.length;
-    phProgressTimer = setInterval(() => {
-        step = Math.min(step + 1, total - 1);
-        const pct = Math.round((step / (total - 1)) * 90);
-        document.getElementById('phProgressBar').style.width = pct + '%';
-        document.getElementById('phProgressPct').textContent = pct + '%';
-        document.getElementById('phProgressMsg').textContent = steps[step];
-    }, 600);
-}
-
-function phFinishProgress(msg) {
-    clearInterval(phProgressTimer);
-    document.getElementById('phProgressBar').style.width = '100%';
-    document.getElementById('phProgressPct').textContent = '100%';
-    document.getElementById('phProgressMsg').textContent = msg || 'Done';
-    setTimeout(() => { document.getElementById('phProgressOverlay').style.display = 'none'; }, 700);
-}
-
-function phHideProgress() {
-    clearInterval(phProgressTimer);
-    document.getElementById('phProgressOverlay').style.display = 'none';
-}
-
 // ── Utilities ──────────────────────────────────────────────────────────────
 
 function phToggle(name) {
@@ -277,7 +232,7 @@ function phToggle(name) {
 function phTab(name) {
     document.querySelectorAll('#phApp .tab-btn').forEach(b => b.classList.remove('active'));
     document.querySelectorAll('#phApp .tab-pane').forEach(p => p.classList.remove('active'));
-    event.target.classList.add('active');
+    document.querySelector(`#phApp [data-tab="${name}"]`)?.classList.add('active');
     document.getElementById(`ph-tab-${name}`)?.classList.add('active');
     if (name === 'charts' && ph.result) phRenderCharts(ph.result);
 }
@@ -292,17 +247,15 @@ function phEsc(v) {
 }
 
 async function phPost(url, data) {
-    const resp = await fetch(url, {
+    return await window.fetchJsonWithProgress(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data)
     });
-    return resp.json();
 }
 
 async function phGet(url) {
-    const resp = await fetch(url, { method: 'GET' });
-    return resp.json();
+    return await window.fetchJsonWithProgress(url, { method: 'GET' });
 }
 
 function phFillSelect(sel, items, preferred) {
@@ -328,11 +281,7 @@ async function phConnect(opts = {}) {
     ph.driver = document.getElementById('phDriver').value;
     if (!ph.server) { phSetAlert('phConnectionStatus', 'error', 'Enter a server name.'); return null; }
 
-    if (!opts.silent)
-        phShowProgress('Connecting to SQL Server', ['Resolving server name…', 'Opening connection…', 'Listing databases…', 'Connection established']);
-
     const result = await phPost('/Pharmacy/GetDatabases', { server: ph.server, driver: ph.driver });
-    if (!opts.silent) phFinishProgress('Connected');
 
     if (!result.success) { phSetAlert('phConnectionStatus', 'error', `Error: ${phEsc(result.error)}`); return null; }
 
@@ -354,11 +303,7 @@ async function phLoadTables(opts = {}) {
     ph.database = document.getElementById('phDatabase').value;
     if (!ph.database) return null;
 
-    if (!opts.silent)
-        phShowProgress('Loading tables', ['Connecting to database…', 'Querying INFORMATION_SCHEMA…', 'Auto-detecting table names…', 'Table list ready']);
-
     const result = await phPost('/Pharmacy/GetTables', { server: ph.server, database: ph.database, driver: ph.driver });
-    if (!opts.silent) phFinishProgress('Tables loaded');
 
     if (!result.success) { phSetAlert('phConnectionStatus', `error`, `Error: ${phEsc(result.error)}`); return null; }
 
@@ -390,12 +335,6 @@ async function phLoadColumns(opts = {}) {
 
     if (!ph.server || !ph.database) return;
 
-    if (!opts.silent)
-        phShowProgress('Detecting columns', [
-            'Reading Pharmacy table schema…', 'Reading Production table schema…',
-            'Matching QUALIFICATION column…', 'Matching Surname column…', 'Column detection complete'
-        ]);
-
     const pharmCols = pharmTable ? await phPost('/Pharmacy/GetColumns', {
         server: ph.server, database: ph.database, driver: ph.driver, tableName: pharmTable
     }) : { success: false, columns: [] };
@@ -403,8 +342,6 @@ async function phLoadColumns(opts = {}) {
     const prodCols = prodTable ? await phPost('/Pharmacy/GetColumns', {
         server: ph.server, database: ph.database, driver: ph.driver, tableName: prodTable
     }) : { success: false, columns: [] };
-
-    if (!opts.silent) phFinishProgress('Columns ready');
 
     ph.pharmCols = pharmCols.columns || [];
     ph.prodCols = prodCols.columns || [];
@@ -476,9 +413,7 @@ async function phAutoDetect() {
 
 async function phVerify() {
     if (!phValidate()) return;
-    phShowProgress('Verifying tables', ['Connecting…', 'Counting Pharmacy records…', 'Counting Production records…', 'Comparing QUALIFICATION values…', 'Verification complete']);
     const result = await phPost('/Pharmacy/VerifyTables', phBuildRequest());
-    phFinishProgress('Verification done');
     if (!result.success) { phSetAlert('phTableStatus', 'error', `Error: ${phEsc(result.error)}`); return; }
     phSetAlert('phTableStatus', 'success',
         `<strong>Verification Complete</strong><br>
@@ -494,20 +429,7 @@ async function phRun() {
     if (phRole !== 'DataAnalyst') { phSetWsInfo('Only the assigned data analyst can run Rule 72.', 'error'); return; }
     if (!phValidate()) return;
 
-    phShowProgress('Running Pharmacy validation', [
-        'Connecting to SQL Server…',
-        'Loading Production qualification codes…',
-        'Building reference index…',
-        'Scanning Pharmacy records…',
-        'Comparing QUALIFICATION values…',
-        'Confirming Surname matches…',
-        'Calculating exception rate…',
-        'Saving run to system database…',
-        'Finalising results…'
-    ]);
-
     const result = await phPost('/Pharmacy/RunValidation', phBuildRequest());
-    phFinishProgress(result.success ? 'Validation complete' : 'Validation error');
 
     if (!result.success) {
         const el = document.getElementById('phValidationContent');
@@ -699,9 +621,7 @@ function phSetPage(delta) {
 async function phGenerateSql() {
     if (phRole !== 'DataAnalyst') { phSetWsInfo('Only the assigned data analyst can generate SQL.', 'error'); return; }
     if (!phValidate()) return;
-    phShowProgress('Generating SQL', ['Building validation query…', 'Formatting SQL…', 'SQL ready']);
     const result = await phPost('/Pharmacy/GenerateSql', phBuildRequest());
-    phFinishProgress('SQL generated');
     if (!result.success) return;
     const el = document.getElementById('phSqlContent');
     el.classList.remove('empty-state');
@@ -723,9 +643,7 @@ function phCopy(id) {
 async function phSaveWorkspace() {
     if (phRole !== 'DataAnalyst') { phSetWsInfo('Only the assigned data analyst can save this workspace.', 'error'); return; }
     if (!ph.clientId) { phSetWsInfo('Select an engagement first.', 'error'); return; }
-    phShowProgress('Saving workspace', ['Connecting to system database…', 'Writing workspace configuration…', 'Workspace saved']);
     const result = await phPost('/Pharmacy/SaveWorkspace', phBuildRequest());
-    phFinishProgress(result.success ? 'Saved' : 'Error');
     if (!result.success) { phSetWsInfo(`Error: ${phEsc(result.error || 'Failed to save.')}`, 'error'); return; }
     ph.workspaceSaved = true;
     ph.dirty = false;
@@ -736,12 +654,10 @@ async function phSaveWorkspace() {
 async function phSignOff() {
     if (!ph.runId) { phSetWsInfo('Run validation first so the workspace can be signed off.', 'warning'); return; }
     if (!ph.workspaceSaved) { phSetWsInfo('Save the workspace first before signing off.', 'warning'); return; }
-    phShowProgress('Saving signoff', ['Verifying analyst…', 'Writing signoff…', 'Signoff recorded']);
-    const result = await phPost('/Pharmacy/SaveWorkspace', {
-        ...phBuildRequest(),
-        signoffComment: document.getElementById('phSignoffComment').value.trim()
+    const result = await phPost('/Pharmacy/AddSignoff', {
+        runId: ph.runId,
+        comment: document.getElementById('phSignoffComment').value.trim()
     });
-    phFinishProgress('Signed off');
     if (!result.success) { phSetWsInfo(`Error: ${phEsc(result.error || 'Failed to sign off.')}`, 'error'); return; }
     ph.signedOff = true;
     phSetWsInfo('Workspace signoff saved. Other assigned users can now review this signed run.', 'success');
@@ -749,12 +665,35 @@ async function phSignOff() {
 }
 
 async function phRemoveSignoff() {
-    phShowProgress('Removing signoff', ['Verifying…', 'Removing signoff…', 'Done']);
-    const result = await phPost('/Pharmacy/SaveWorkspace', phBuildRequest());
-    phFinishProgress('Removed');
+    if (!ph.runId) { phSetWsInfo('No active run to remove signoff from.', 'warning'); return; }
+    const result = await phPost('/Pharmacy/RemoveSignoff', { runId: ph.runId, comment: '' });
+    if (!result.success) { phSetWsInfo(`Error: ${phEsc(result.error || 'Failed to remove signoff.')}`, 'error'); return; }
     ph.signedOff = false;
     phSetWsInfo('Signoff removed.', 'warning');
     phRenderState();
+}
+
+async function phDownloadExcel() {
+    if (!ph.result) { phSetWsInfo('Run validation first before downloading.', 'warning'); return; }
+    await phPostFile('/Pharmacy/DownloadExcel', ph.result, 'Rule72_Pharmacy.xlsx');
+}
+
+async function phDownloadSql() {
+    if (!ph.clientId) { phSetWsInfo('Select an engagement first.', 'warning'); return; }
+    const result = await phPost('/Pharmacy/DownloadSql', phBuildRequest());
+    if (!result.success) { phSetWsInfo(`Error: ${phEsc(result.error || 'Failed.')}`, 'error'); return; }
+    const blob = new Blob([result.sql], { type: 'text/plain' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+    a.download = 'Rule72_Pharmacy.sql'; a.click(); URL.revokeObjectURL(a.href);
+}
+
+async function phPostFile(url, body, filename) {
+    const token = document.querySelector('[name=__RequestVerificationToken]')?.value || '';
+    const resp = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token }, body: JSON.stringify(body) });
+    if (!resp.ok) { phSetWsInfo('Download failed.', 'error'); return; }
+    const blob = await resp.blob();
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+    a.download = filename; a.click(); URL.revokeObjectURL(a.href);
 }
 
 // ── State management ───────────────────────────────────────────────────────
@@ -778,6 +717,9 @@ function phRenderState() {
     const saveBtn = document.getElementById('phSaveWorkspaceBtn');
     const signBtn = document.getElementById('phSignOffBtn');
     const removeBtn = document.getElementById('phRemoveSignoffBtn');
+    const verifyBtn = document.getElementById('phVerifyBtn');
+    const runBtn = document.getElementById('phRunBtn');
+    const sqlBtn = document.getElementById('phSqlBtn');
     if (saveBtn) saveBtn.disabled = !canEdit || ph.signedOff;
     if (signBtn) {
         signBtn.style.display = canEdit && ph.runId ? 'inline-flex' : 'none';
@@ -785,6 +727,13 @@ function phRenderState() {
         signBtn.textContent = ph.signedOff ? 'Signed Off' : 'Sign Off';
     }
     if (removeBtn) removeBtn.style.display = canEdit && ph.signedOff ? 'inline-flex' : 'none';
+    const dlExcelBtn = document.getElementById('phDownloadExcelBtn');
+    const dlSqlBtn = document.getElementById('phDownloadSqlBtn');
+    if (dlExcelBtn) dlExcelBtn.style.display = ph.result ? 'inline-flex' : 'none';
+    if (dlSqlBtn) dlSqlBtn.style.display = ph.clientId ? 'inline-flex' : 'none';
+    if (verifyBtn) verifyBtn.disabled = ph.signedOff;
+    if (runBtn) runBtn.disabled = ph.signedOff;
+    if (sqlBtn) sqlBtn.disabled = ph.signedOff;
 
     if (!ph.clientId) { phSetWsRunState('No engagement selected', 'neutral'); phSetWsInfo('Select an engagement to load the last saved Rule 72 workspace.', 'info'); return; }
     if (!ph.runId) { phSetWsRunState('No saved run loaded', 'neutral'); phSetWsInfo(canEdit ? 'No saved workspace yet. Connect, configure, run validation, then save.' : 'No saved workspace for this engagement yet.', 'info'); return; }
@@ -842,14 +791,12 @@ async function phHandleClientChange(value) {
 
 async function phLoadWorkspace() {
     if (!ph.clientId) { phRenderState(); return; }
-    phShowProgress('Loading workspace', ['Querying system database…', 'Restoring last configuration…', 'Reconnecting to SQL Server…', 'Workspace ready']);
     try {
         const result = await phGet(`/Pharmacy/GetWorkspaceState?clientId=${ph.clientId}`);
-        if (!result.success) { phSetWsInfo(`Error: ${phEsc(result.error || 'Failed to load workspace.')}`, 'error'); phHideProgress(); return; }
-        if (!result.hasWorkspace || !result.workspace) { phHideProgress(); phRenderState(); return; }
+        if (!result.success) { phSetWsInfo(`Error: ${phEsc(result.error || 'Failed to load workspace.')}`, 'error'); return; }
+        if (!result.hasWorkspace || !result.workspace) { phRenderState(); return; }
         await phHydrate(result.workspace);
-        phFinishProgress('Workspace loaded');
-    } catch (err) { phHideProgress(); phSetWsInfo(`Error: ${phEsc(err?.message || 'Failed.')}`, 'error'); }
+    } catch (err) { phSetWsInfo(`Error: ${phEsc(err?.message || 'Failed.')}`, 'error'); }
 }
 
 async function phHydrate(ws) {
@@ -937,9 +884,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('phPharmTable').addEventListener('change', async e => {
         ph.pharmTable = e.target.value;
         if (ph.pharmTable) {
-            phShowProgress('Loading Pharmacy columns', ['Reading schema…', 'Matching column names…', 'Done']);
             const r = await phPost('/Pharmacy/GetColumns', { server: ph.server, database: ph.database, driver: ph.driver, tableName: ph.pharmTable });
-            phFinishProgress('Columns loaded');
             ph.pharmCols = r.columns || [];
             const allCols = [...new Set([...ph.pharmCols, ...ph.prodCols])];
             phFillColSelect(document.getElementById('phQualCol'), allCols, 'QUALIFICATION');
@@ -955,9 +900,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('phProdTable').addEventListener('change', async e => {
         ph.prodTable = e.target.value;
         if (ph.prodTable) {
-            phShowProgress('Loading Production columns', ['Reading schema…', 'Matching column names…', 'Done']);
             const r = await phPost('/Pharmacy/GetColumns', { server: ph.server, database: ph.database, driver: ph.driver, tableName: ph.prodTable });
-            phFinishProgress('Columns loaded');
             ph.prodCols = r.columns || [];
             const allCols = [...new Set([...ph.pharmCols, ...ph.prodCols])];
             phFillColSelect(document.getElementById('phQualCol'), allCols, 'QUALIFICATION');

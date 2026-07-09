@@ -117,8 +117,9 @@ namespace HemisAudit.Controllers
         [HttpPost]
         public async Task<IActionResult> GetColumns([FromBody] RadiographyVerifyRequest request)
         {
+            var tableName = !string.IsNullOrWhiteSpace(request.TableName) ? request.TableName : request.RadiographyTable;
             var result = await RequireDataAnalystAsync(
-                async () => await _radiography.GetColumnsAsync(request.Server, request.Database, request.Driver, request.RadiographyTable));
+                async () => await _radiography.GetColumnsAsync(request.Server, request.Database, request.Driver, tableName));
             return Json(result);
         }
 
@@ -186,6 +187,49 @@ namespace HemisAudit.Controllers
             return Json(result);
         }
 
+        [HttpPost]
+        public async Task<IActionResult> AddSignoff([FromBody] QualSurnameSignoffInput model)
+        {
+            var user = await _users.GetUserAsync(User);
+            if (user == null) return Json(new { success = false, error = "Not authenticated." });
+            try
+            {
+                await _radiography.AddOrUpdateSignoffAsync(model.RunId, user.Email!, model.Comment);
+                await _audit.LogAsync("add_signoff", $"Radiography signoff added for run {model.RunId}.", user.Id, user.Email);
+                return Json(new { success = true });
+            }
+            catch (Exception ex) { return Json(new { success = false, error = ex.Message }); }
+        }
+
+        [HttpPost]
+        public async Task<IActionResult> RemoveSignoff([FromBody] QualSurnameSignoffInput model)
+        {
+            var user = await _users.GetUserAsync(User);
+            if (user == null) return Json(new { success = false, error = "Not authenticated." });
+            try
+            {
+                await _radiography.RemoveSignoffAsync(model.RunId, user.Email!);
+                await _audit.LogAsync("remove_signoff", $"Radiography signoff removed for run {model.RunId}.", user.Id, user.Email);
+                return Json(new { success = true });
+            }
+            catch (Exception ex) { return Json(new { success = false, error = ex.Message }); }
+        }
+
+        [HttpPost]
+        public IActionResult DownloadExcel([FromBody] RadiographyValidationSummary summary)
+        {
+            var rows = (summary.ReviewRows ?? new()).Select(r => (r.RadiographyQualification, r.RadiographySurname, r.Status, r.ProductionQualification, r.ProductionSurname));
+            var bytes = _export.ExportQualSurnameExcel("Radiography", 71, summary.TotalValidated, summary.PassCount, summary.FailCount, summary.ExceptionRate, summary.Status ?? "", "Radiography", "Clinical_Production", "QUALIFICATION", "Surname", rows);
+            return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "Rule71_Radiography.xlsx");
+        }
+
+        [HttpPost]
+        public async Task<IActionResult> DownloadSql([FromBody] RadiographyValidationRequest request)
+        {
+            var sql = await _radiography.GenerateSqlAsync(request);
+            return Json(new { success = true, sql });
+        }
+
         // ── Helper methods ─────────────────────────────────────────────────────
 
         private async Task<T> RequireDataAnalystAsync<T>(Func<Task<T>> operation) where T : class
@@ -207,11 +251,12 @@ namespace HemisAudit.Controllers
             return roles.FirstOrDefault() ?? "";
         }
 
-        private bool CanViewWorkspaceResults(string role, RadiographyWorkspaceState? workspace)
+        private static bool CanViewWorkspaceResults(string role, RadiographyWorkspaceState? workspace)
         {
             if (workspace == null) return false;
-            return string.Equals(role, "DataAnalyst", StringComparison.OrdinalIgnoreCase) ||
-                   string.Equals(role, "Admin", StringComparison.OrdinalIgnoreCase);
+            if (string.Equals(role, "DataAnalyst", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(role, "Admin", StringComparison.OrdinalIgnoreCase)) return true;
+            return workspace.IsWorkspaceSaved && workspace.HasDataAnalystSignoff;
         }
     }
 }

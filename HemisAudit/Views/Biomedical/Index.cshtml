@@ -1,0 +1,846 @@
+@using HemisAudit.Models
+@using HemisAudit.ViewModels
+@{
+    ViewData["Title"] = "Rule 74 - Biomedical Module";
+    Layout = "~/Views/Shared/_Layout.cshtml";
+    var clients = ViewBag.Clients as List<Client> ?? new List<Client>();
+    var selectedClientId = (int)(ViewBag.ClientId ?? 0);
+    var currentSystemRole = ViewBag.CurrentSystemRole as string ?? "";
+    var isResultsOnlyRole =
+        string.Equals(currentSystemRole, "Manager", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(currentSystemRole, "Director", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(currentSystemRole, "Trainee", StringComparison.OrdinalIgnoreCase);
+    var moduleNavigation = ViewBag.ModuleNavigation as ModuleSequenceNavigationViewModel;
+}
+
+@if (isResultsOnlyRole)
+{
+    <style>
+        #bmApp > .accordion-stack,
+        #bmApp > .action-bar { display: none !important; }
+    </style>
+}
+
+<div id="bmApp" class="rule-page-shell">
+    @if (moduleNavigation != null)
+    {
+        @await Html.PartialAsync("_ModuleSequenceNav", moduleNavigation)
+    }
+
+    <div class="engagement-selector">
+        <label>Engagement</label>
+        <select id="bmClientId" onchange="bmHandleClientChange(this.value)">
+            <option value="0">Select engagement (results saved here)</option>
+            @foreach (var c in clients)
+            {
+                <option value="@c.Id" selected="@(c.Id == selectedClientId ? "selected" : null)">@c.Name - @c.FiscalYear</option>
+            }
+        </select>
+        <small>Biomedical validates QUALIFICATION values from the Biomedical table against Clinical Production and confirms Surname matching.</small>
+    </div>
+
+    <div class="rule-header">
+        <div class="rule-header__icon">BM</div>
+        <div>
+            <h1 class="rule-header__title">HEMIS RULE 74: Biomedical Qualification &amp; Surname Validation</h1>
+            <p class="rule-header__sub">Cross-table validation | QUALIFICATION lookup | Surname confirmation | 100% population test</p>
+        </div>
+        <div class="rule-header__badge" id="bmStatusBadge" style="display:none"></div>
+    </div>
+
+    <div class="accordion-stack">
+
+        <div class="accordion-item" id="bm-acc-connection">
+            <button class="accordion-toggle" onclick="bmToggle('connection')">
+                <span class="acc-icon">DB</span>
+                <span>Database Connection</span>
+                <span class="acc-chevron">v</span>
+            </button>
+            <div class="accordion-body" id="bm-body-connection">
+                <div class="form-grid">
+                    <div class="field-group">
+                        <label>Server Name</label>
+                        <input type="text" id="bmServer" placeholder="e.g. MYSERVER or MYSERVER\INSTANCE" />
+                    </div>
+                    <div class="field-group">
+                        <label>Driver</label>
+                        <select id="bmDriver">
+                            <option value="ODBC Driver 17 for SQL Server">ODBC Driver 17 for SQL Server</option>
+                            <option value="ODBC Driver 18 for SQL Server">ODBC Driver 18 for SQL Server</option>
+                            <option value="SQL Server">SQL Server</option>
+                        </select>
+                    </div>
+                    <div class="field-group" id="bmDbFieldGroup" style="display:none">
+                        <label>Database</label>
+                        <select id="bmDatabase">
+                            <option value="">Select database</option>
+                        </select>
+                    </div>
+                </div>
+                <button class="btn btn-primary" onclick="bmConnect()">Connect</button>
+                <div class="status-output" id="bmConnectionStatus"></div>
+            </div>
+        </div>
+
+        <div class="accordion-item" id="bm-acc-tables">
+            <button class="accordion-toggle" onclick="bmToggle('tables')">
+                <span class="acc-icon">TB</span>
+                <span>Table Configuration</span>
+                <span class="acc-chevron">v</span>
+            </button>
+            <div class="accordion-body" id="bm-body-tables" style="display:none">
+                <div class="info-box info-box--blue">
+                    <strong>Biomedical Module Logic:</strong> Check that each QUALIFICATION from the Biomedical table exists in
+                    Clinical Production. When found, confirm the Surname matches.
+                    PASS = QUALIFICATION found in production; FAIL = missing.
+                </div>
+                <div class="form-grid">
+                    <div class="field-group">
+                        <label>Biomedical Table <span class="auto-tag" id="bmBmAutoTag" style="display:none">auto-detected</span></label>
+                        <select id="bmBmTable">
+                            <option value="">Select table</option>
+                        </select>
+                    </div>
+                    <div class="field-group">
+                        <label>Clinical Production Table <span class="auto-tag" id="bmProdAutoTag" style="display:none">auto-detected</span></label>
+                        <select id="bmProdTable">
+                            <option value="">Select table</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="status-output" id="bmTableStatus"></div>
+            </div>
+        </div>
+
+        <div class="accordion-item" id="bm-acc-columns">
+            <button class="accordion-toggle" onclick="bmToggle('columns')">
+                <span class="acc-icon">CL</span>
+                <span>Column Configuration</span>
+                <span class="acc-chevron">v</span>
+            </button>
+            <div class="accordion-body" id="bm-body-columns" style="display:none">
+                <div class="info-box info-box--dark">
+                    <strong>Column Selection:</strong> Choose the <code>QUALIFICATION</code> column (used for matching across both tables)
+                    and the <code>Surname</code> column (confirmed when QUALIFICATION is found in production).
+                </div>
+                <div class="form-grid">
+                    <div class="field-group">
+                        <label>QUALIFICATION Column <span class="auto-tag" id="bmQualAutoTag" style="display:none">auto-detected</span></label>
+                        <select id="bmQualCol" onchange="bmColChanged()">
+                            <option value="">Select column</option>
+                        </select>
+                    </div>
+                    <div class="field-group">
+                        <label>Surname Column <span class="auto-tag" id="bmSurnameAutoTag" style="display:none">auto-detected</span></label>
+                        <select id="bmSurnameCol" onchange="bmColChanged()">
+                            <option value="">Select column</option>
+                        </select>
+                    </div>
+                </div>
+                <div style="margin-top:10px">
+                    <button class="btn btn-secondary" onclick="bmAutoDetect()">Auto-Detect Columns</button>
+                </div>
+                <div id="bmColumnPreview" class="validation-preview" style="display:none;margin-top:12px"></div>
+            </div>
+        </div>
+
+    </div>
+
+    <div class="workspace-signoff-card">
+        <div class="workspace-signoff-card__header">
+            <div>
+                <div class="workspace-signoff-card__title">Saved Workspace</div>
+                <div class="workspace-signoff-card__subtitle">The last saved Rule 74 connection, configuration, results, and signoffs reload here automatically.</div>
+            </div>
+            <div id="bmWorkspaceRunState" class="badge badge--neutral badge--sm">No saved run loaded</div>
+        </div>
+        <div id="bmWorkspaceInfo" class="alert alert--info">
+            Select an engagement to load the last saved Rule 74 workspace.
+        </div>
+        <div class="workspace-signoff-grid">
+            <div class="field-group">
+                <label id="bmSignoffLabel">Signoff Comment</label>
+                <textarea id="bmSignoffComment" placeholder="Add the final review note that confirms this validation is complete."></textarea>
+            </div>
+        </div>
+        <div class="workspace-signoff-actions">
+            <button class="btn btn-success" id="bmSaveWorkspaceBtn" onclick="bmSaveWorkspace()">Save Workspace</button>
+            <button class="btn btn-primary" id="bmSignOffBtn" onclick="bmSignOff()" style="display:none">Sign Off</button>
+            <button class="btn btn-warning" id="bmRemoveSignoffBtn" onclick="bmRemoveSignoff()" style="display:none">Remove Signoff</button>
+            <button class="btn btn-secondary" id="bmDownloadExcelBtn" onclick="bmDownloadExcel()" style="display:none">Download Excel</button>
+            <button class="btn btn-secondary" id="bmDownloadSqlBtn" onclick="bmDownloadSql()" style="display:none">Download SQL</button>
+        </div>
+    </div>
+
+    <div class="action-bar">
+        <button class="btn btn-info" id="bmVerifyBtn" onclick="bmVerify()">Verify Tables</button>
+        <button class="btn btn-success" id="bmRunBtn" onclick="bmRun()">Run Validation</button>
+        <button class="btn btn-primary" id="bmSqlBtn" onclick="bmGenerateSql()">Generate SQL</button>
+    </div>
+
+    <div class="results-panel">
+        <div class="results-tabs">
+            <button class="tab-btn active" type="button" data-tab="validation" onclick="bmTab('validation')">Validation Results</button>
+            <button class="tab-btn" type="button" data-tab="exceptions" onclick="bmTab('exceptions')">Exceptions</button>
+            <button class="tab-btn" type="button" data-tab="sql" onclick="bmTab('sql')">SQL Code</button>
+        </div>
+        <div class="tab-pane active" id="bm-tab-validation">
+            <div id="bmValidationContent" class="empty-state"><p>Run validation to see results here.</p></div>
+        </div>
+        <div class="tab-pane" id="bm-tab-exceptions">
+            <div id="bmExceptionsContent" class="empty-state"><p>No exceptions data yet. Run validation first.</p></div>
+        </div>
+        <div class="tab-pane" id="bm-tab-sql">
+            <div id="bmSqlContent" class="empty-state"><p>Click "Generate SQL" or run validation to generate the SQL script.</p></div>
+        </div>
+    </div>
+</div>
+
+<script>
+const bmRole = @Html.Raw(Newtonsoft.Json.JsonConvert.SerializeObject(currentSystemRole));
+const bmPreviewLimit = 10;
+const bm = {
+    server: '', database: '', driver: 'ODBC Driver 17 for SQL Server',
+    bmTable: '', prodTable: '',
+    qualCol: '', surnameCol: '',
+    clientId: parseInt(document.getElementById('bmClientId')?.value || '0') || 0,
+    runId: null, result: null,
+    view: { filter: 'ALL', page: 1, pageSize: bmPreviewLimit },
+    engRole: '', status: '', signedOff: false, workspaceSaved: false,
+    daSignoff: false, resultsVisible: false, dirty: false, hydrating: false,
+    editAccepted: false, bmCols: [], prodCols: []
+};
+
+function bmToggle(name) {
+    const body = document.getElementById(`bm-body-${name}`);
+    const chevron = document.querySelector(`#bm-acc-${name} .acc-chevron`);
+    if (!body) return;
+    const open = body.style.display !== 'none';
+    body.style.display = open ? 'none' : 'block';
+    if (chevron) chevron.textContent = open ? 'v' : '^';
+}
+
+function bmTab(name) {
+    document.querySelectorAll('#bmApp .tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('#bmApp .tab-pane').forEach(p => p.classList.remove('active'));
+    document.querySelector(`#bmApp [data-tab="${name}"]`)?.classList.add('active');
+    document.getElementById(`bm-tab-${name}`)?.classList.add('active');
+}
+
+function bmSetAlert(elId, type, msg) {
+    const el = document.getElementById(elId);
+    if (el) el.innerHTML = `<div class="alert alert--${type}">${msg}</div>`;
+}
+
+function bmEsc(v) {
+    return String(v ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+async function bmPost(url, data) {
+    return await window.fetchJsonWithProgress(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+    });
+}
+
+async function bmGet(url) {
+    return await window.fetchJsonWithProgress(url, { method: 'GET' });
+}
+
+function bmFillSelect(sel, items, preferred) {
+    if (!sel) return;
+    sel.innerHTML = '<option value="">Select table</option>';
+    (items || []).forEach(v => sel.appendChild(new Option(v, v)));
+    if (preferred && items.includes(preferred)) sel.value = preferred;
+}
+
+function bmFillColSelect(sel, cols, preferred) {
+    if (!sel) return;
+    sel.innerHTML = '<option value="">Select column</option>';
+    (cols || []).forEach(c => sel.appendChild(new Option(c, c)));
+    const match = preferred ? (cols || []).find(c => c.toLowerCase() === preferred.toLowerCase()) : null;
+    if (match) sel.value = match;
+    else if (cols?.length) sel.value = cols[0];
+}
+
+async function bmConnect(opts = {}) {
+    bm.server = document.getElementById('bmServer').value.trim();
+    bm.driver = document.getElementById('bmDriver').value;
+    if (!bm.server) { bmSetAlert('bmConnectionStatus', 'error', 'Enter a server name.'); return null; }
+
+    const result = await bmPost('/Biomedical/GetDatabases', { server: bm.server, driver: bm.driver });
+    if (!result.success) { bmSetAlert('bmConnectionStatus', 'error', `Error: ${bmEsc(result.error)}`); return null; }
+
+    const dbSel = document.getElementById('bmDatabase');
+    dbSel.innerHTML = '<option value="">Select database</option>';
+    (result.databases || []).forEach(db => dbSel.appendChild(new Option(db, db)));
+    document.getElementById('bmDbFieldGroup').style.display = 'block';
+
+    if (opts.preferredDatabase && (result.databases || []).includes(opts.preferredDatabase)) {
+        dbSel.value = opts.preferredDatabase;
+        bm.database = opts.preferredDatabase;
+    }
+
+    bmSetAlert('bmConnectionStatus', 'success', opts.statusMessage || `Connected. Found ${result.databases?.length || 0} database(s). Select one below.`);
+    return result;
+}
+
+async function bmLoadTables(opts = {}) {
+    bm.database = document.getElementById('bmDatabase').value;
+    if (!bm.database) return null;
+
+    const result = await bmPost('/Biomedical/GetTables', { server: bm.server, database: bm.database, driver: bm.driver });
+    if (!result.success) { bmSetAlert('bmConnectionStatus', 'error', `Error: ${bmEsc(result.error)}`); return null; }
+
+    bmSetAlert('bmConnectionStatus', 'success', `Connected to <strong>${bmEsc(bm.database)}</strong>. Found ${result.tables?.length || 0} tables.`);
+
+    bmFillSelect(document.getElementById('bmBmTable'), result.tables || [], opts.preferredBm || result.autoBiomedicalTable || '');
+    bmFillSelect(document.getElementById('bmProdTable'), result.tables || [], opts.preferredProd || result.autoProductionTable || '');
+
+    bm.bmTable = document.getElementById('bmBmTable').value;
+    bm.prodTable = document.getElementById('bmProdTable').value;
+
+    document.getElementById('bmBmAutoTag').style.display = bm.bmTable && bm.bmTable === result.autoBiomedicalTable ? 'inline' : 'none';
+    document.getElementById('bmProdAutoTag').style.display = bm.prodTable && bm.prodTable === result.autoProductionTable ? 'inline' : 'none';
+
+    document.getElementById('bm-body-tables').style.display = 'block';
+    document.querySelector('#bm-acc-tables .acc-chevron').textContent = '^';
+
+    if (bm.bmTable || bm.prodTable)
+        await bmLoadColumns(opts);
+
+    return result;
+}
+
+async function bmLoadColumns(opts = {}) {
+    const bmTable = document.getElementById('bmBmTable').value;
+    const prodTable = document.getElementById('bmProdTable').value;
+    if (!bm.server || !bm.database) return;
+
+    const bmColsRes = bmTable ? await bmPost('/Biomedical/GetColumns', {
+        server: bm.server, database: bm.database, driver: bm.driver, tableName: bmTable
+    }) : { success: false, columns: [] };
+
+    const prodColsRes = prodTable ? await bmPost('/Biomedical/GetColumns', {
+        server: bm.server, database: bm.database, driver: bm.driver, tableName: prodTable
+    }) : { success: false, columns: [] };
+
+    bm.bmCols = bmColsRes.columns || [];
+    bm.prodCols = prodColsRes.columns || [];
+
+    const allCols = [...new Set([...bm.bmCols, ...bm.prodCols])];
+
+    bmFillColSelect(document.getElementById('bmQualCol'), allCols, opts.preferredQual || 'QUALIFICATION');
+    bmFillColSelect(document.getElementById('bmSurnameCol'), allCols, opts.preferredSurname || 'Surname');
+
+    bm.qualCol = document.getElementById('bmQualCol').value;
+    bm.surnameCol = document.getElementById('bmSurnameCol').value;
+
+    const qualAuto = allCols.find(c => c.toLowerCase() === 'qualification');
+    const surnameAuto = allCols.find(c => c.toLowerCase() === 'surname');
+    document.getElementById('bmQualAutoTag').style.display = qualAuto ? 'inline' : 'none';
+    document.getElementById('bmSurnameAutoTag').style.display = surnameAuto ? 'inline' : 'none';
+
+    document.getElementById('bm-body-columns').style.display = 'block';
+    document.querySelector('#bm-acc-columns .acc-chevron').textContent = '^';
+
+    bmUpdatePreview();
+}
+
+function bmColChanged() {
+    bm.qualCol = document.getElementById('bmQualCol').value;
+    bm.surnameCol = document.getElementById('bmSurnameCol').value;
+    bmUpdatePreview();
+}
+
+function bmUpdatePreview() {
+    bm.qualCol = document.getElementById('bmQualCol').value;
+    bm.surnameCol = document.getElementById('bmSurnameCol').value;
+    bm.bmTable = document.getElementById('bmBmTable').value;
+    bm.prodTable = document.getElementById('bmProdTable').value;
+
+    const preview = document.getElementById('bmColumnPreview');
+    if (!bm.qualCol || !bm.surnameCol || !bm.bmTable || !bm.prodTable) {
+        preview.style.display = 'none';
+        return;
+    }
+    preview.style.display = 'block';
+    preview.innerHTML = `
+        <div class="preview-inner">
+            <strong>Validation Logic:</strong><br>
+            PASS: <code>[${bmEsc(bm.bmTable)}].[${bmEsc(bm.qualCol)}]</code> found in <code>[${bmEsc(bm.prodTable)}].[${bmEsc(bm.qualCol)}]</code><br>
+            Then confirm <code>[${bmEsc(bm.bmTable)}].[${bmEsc(bm.surnameCol)}]</code> matches <code>[${bmEsc(bm.prodTable)}].[${bmEsc(bm.surnameCol)}]</code><br>
+            FAIL: QUALIFICATION not found in production table.
+        </div>`;
+}
+
+async function bmAutoDetect() {
+    const bmTable = document.getElementById('bmBmTable').value;
+    const prodTable = document.getElementById('bmProdTable').value;
+
+    if (!bmTable && !prodTable) {
+        bmSetAlert('bmColumnPreview', 'warning', 'Select at least one table first.');
+        document.getElementById('bmColumnPreview').style.display = 'block';
+        return;
+    }
+
+    await bmLoadColumns({ preferredQual: 'QUALIFICATION', preferredSurname: 'Surname' });
+    bmSetAlert('bmColumnPreview', 'success', 'Column detection complete. You can change the selected columns using the dropdowns above.');
+    document.getElementById('bmColumnPreview').style.display = 'block';
+}
+
+async function bmVerify() {
+    if (!bmValidate()) return;
+    const result = await bmPost('/Biomedical/VerifyTables', bmBuildRequest());
+    if (!result.success) { bmSetAlert('bmTableStatus', 'error', `Error: ${bmEsc(result.error)}`); return; }
+    bmSetAlert('bmTableStatus', 'success',
+        `<strong>Verification Complete</strong><br>
+        ${bmEsc(bm.bmTable)}: <strong>${(result.biomedicalRecordCount || 0).toLocaleString()}</strong> records<br>
+        ${bmEsc(bm.prodTable)}: <strong>${(result.productionRecordCount || 0).toLocaleString()}</strong> records<br>
+        QUALIFICATION matches: <strong class="${result.matchedCount > 0 ? 'text-success' : 'text-danger'}">${(result.matchedCount || 0).toLocaleString()}</strong> |
+        Missing: <strong class="${result.missingCount > 0 ? 'text-danger' : 'text-success'}">${(result.missingCount || 0).toLocaleString()}</strong>`);
+    document.getElementById('bm-body-tables').style.display = 'block';
+}
+
+async function bmRun() {
+    if (bmRole !== 'DataAnalyst') { bmSetWsInfo('Only the assigned data analyst can run Rule 74.', 'error'); return; }
+    if (!bmValidate()) return;
+
+    const result = await bmPost('/Biomedical/RunValidation', {
+        ...bmBuildRequest(), clientId: bm.clientId
+    });
+
+    if (!result.success) {
+        const el = document.getElementById('bmValidationContent');
+        el.classList.remove('empty-state');
+        el.innerHTML = `<div class="alert alert--error">Error: ${bmEsc(result.error)}</div>`;
+        bmTab('validation');
+        return;
+    }
+
+    bmApplyResult(result);
+}
+
+function bmApplyResult(result, opts = {}) {
+    bm.result = result;
+    bm.view = { filter: 'ALL', page: 1, pageSize: bmPreviewLimit };
+    if (!opts.fromWorkspace) bm.runId = result.savedRunId || bm.runId;
+    bm.signedOff = opts.fromWorkspace ? !!bm.signedOff : false;
+    bm.daSignoff = opts.fromWorkspace ? !!bm.daSignoff : false;
+    if (!opts.fromWorkspace) bm.editAccepted = false;
+    bm.dirty = false;
+
+    bmUpdateBadge(result.status);
+    bmRenderValidation(result);
+    bmRenderExceptions(result);
+    if (opts.switchToValidation !== false) bmTab('validation');
+    bmRenderState();
+}
+
+function bmUpdateBadge(status) {
+    const b = document.getElementById('bmStatusBadge');
+    if (!b) return;
+    if (!status) { b.style.display = 'none'; return; }
+    b.style.display = 'inline-block';
+    b.className = `rule-header__badge ${status === 'PASS' ? 'badge--pass' : 'badge--fail'}`;
+    b.textContent = status.toUpperCase();
+}
+
+function bmFilterRows(rows, f) {
+    return f === 'PASS' || f === 'FAIL' ? rows.filter(r => r.status === f) : rows;
+}
+
+function bmRenderValidation(r) {
+    const rate = parseFloat(r.exceptionRate);
+    const rateColor = rate > 5 ? '#C62828' : rate > 1 ? '#E65100' : '#2E7D32';
+    const allRows = r.reviewRows || [];
+    const filtered = bmFilterRows(allRows, bm.view.filter);
+    const pageSize = bmPreviewLimit;
+    const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+    const page = Math.min(Math.max(bm.view.page || 1, 1), totalPages);
+    bm.view.page = page;
+    const start = (page - 1) * pageSize;
+    const pageRows = filtered.slice(start, start + pageSize);
+
+    const rowsHtml = pageRows.length === 0
+        ? `<div class="alert alert--info">No rows match the selected filter.</div>`
+        : `<div class="results-table-shell"><div class="table-wrapper">
+            <table class="data-table">
+                <thead><tr><th>#</th><th>Result</th><th>BM QUAL</th><th>BM Surname</th><th>Production QUAL</th><th>Production Surname</th></tr></thead>
+                <tbody>${pageRows.map((row, i) => `
+                    <tr class="${i % 2 === 0 ? 'row-even' : 'row-odd'}">
+                        <td>${start + i + 1}</td>
+                        <td><span class="badge badge--${row.status === 'PASS' ? 'pass' : 'fail'}">${bmEsc(row.status)}</span></td>
+                        <td>${bmEsc(row.biomedicalQualification)}</td>
+                        <td>${bmEsc(row.biomedicalSurname)}</td>
+                        <td>${bmEsc(row.productionQualification)}</td>
+                        <td>${bmEsc(row.productionSurname)}</td>
+                    </tr>`).join('')}
+                </tbody>
+            </table></div>
+            <div class="table-footer">${filtered.length.toLocaleString()} row(s) after filter. Showing ${start + 1}–${start + pageRows.length}.</div>
+        </div>`;
+
+    document.getElementById('bmValidationContent').classList.remove('empty-state');
+    document.getElementById('bmValidationContent').innerHTML = `
+        <div class="stats-grid">
+            <div class="stat-card"><div class="stat-card__label">Records Validated</div><div class="stat-card__value">${r.totalValidated.toLocaleString()}</div></div>
+            <div class="stat-card stat-card--pass"><div class="stat-card__label">PASS</div><div class="stat-card__value">${r.passCount.toLocaleString()}</div></div>
+            <div class="stat-card stat-card--fail"><div class="stat-card__label">FAIL</div><div class="stat-card__value">${r.failCount.toLocaleString()}</div></div>
+            <div class="stat-card"><div class="stat-card__label">Exception Rate</div><div class="stat-card__value" style="color:${rateColor}">${rate.toFixed(2)}%</div></div>
+        </div>
+        <div class="overall-status ${r.status === 'PASS' ? 'status--pass' : 'status--fail'}">
+            ${r.status === 'PASS'
+                ? 'VALIDATION PASSED — All Biomedical QUALIFICATION codes found in Clinical Production'
+                : `VALIDATION FAILED — ${r.failCount.toLocaleString()} QUALIFICATION code(s) missing from Clinical Production`}
+        </div>
+        ${r.warning ? `<div class="alert alert--warning" style="margin-top:10px">${bmEsc(r.warning)}</div>` : ''}
+        <div class="results-table-panel" style="margin-top:16px">
+            <div class="panel-title-row">
+                <h4>Validation Rows</h4>
+                <span class="panel-title-badge">${filtered.length.toLocaleString()} rows (preview)</span>
+            </div>
+            <div class="validation-toolbar">
+                <div class="validation-toolbar__group">
+                    <label>Filter</label>
+                    <select onchange="bmSetFilter(this.value)">
+                        <option value="ALL" ${bm.view.filter === 'ALL' ? 'selected' : ''}>All</option>
+                        <option value="PASS" ${bm.view.filter === 'PASS' ? 'selected' : ''}>PASS</option>
+                        <option value="FAIL" ${bm.view.filter === 'FAIL' ? 'selected' : ''}>FAIL</option>
+                    </select>
+                </div>
+                <div class="validation-pager">
+                    <button class="btn btn-sm btn-info" onclick="bmSetPage(-1)" ${page <= 1 ? 'disabled' : ''}>Prev</button>
+                    <span class="validation-pager__status">Page ${page} of ${totalPages}</span>
+                    <button class="btn btn-sm btn-info" onclick="bmSetPage(1)" ${page >= totalPages ? 'disabled' : ''}>Next</button>
+                </div>
+            </div>
+            ${rowsHtml}
+        </div>`;
+}
+
+function bmRenderExceptions(r) {
+    const el = document.getElementById('bmExceptionsContent');
+    el.classList.remove('empty-state');
+    if (r.failCount === 0) {
+        el.innerHTML = '<div class="alert alert--success">No exceptions — all QUALIFICATION codes found in Clinical Production.</div>';
+        return;
+    }
+    const rows = (r.reviewRows || []).filter(x => x.status === 'FAIL').slice(0, 50);
+    el.innerHTML = `
+        <div class="results-table-shell"><div class="table-wrapper">
+        <table class="data-table">
+            <thead><tr><th>#</th><th>BM QUAL</th><th>BM Surname</th><th>Result</th></tr></thead>
+            <tbody>${rows.map((row, i) => `
+                <tr class="${i % 2 === 0 ? 'row-even' : 'row-odd'}">
+                    <td>${i + 1}</td>
+                    <td><strong>${bmEsc(row.biomedicalQualification)}</strong></td>
+                    <td>${bmEsc(row.biomedicalSurname)}</td>
+                    <td><span class="badge badge--fail">FAIL</span></td>
+                </tr>`).join('')}
+            </tbody>
+        </table></div>
+        <div class="table-footer">${r.failCount.toLocaleString()} exception(s) total. Showing up to 50.</div>
+        </div>`;
+}
+
+function bmSetFilter(f) {
+    bm.view.filter = f; bm.view.page = 1;
+    if (bm.result) bmRenderValidation(bm.result);
+}
+
+function bmSetPage(delta) {
+    if (!bm.result) return;
+    bm.view.page = Math.max(1, (bm.view.page || 1) + delta);
+    bmRenderValidation(bm.result);
+}
+
+async function bmGenerateSql() {
+    if (bmRole !== 'DataAnalyst') { bmSetWsInfo('Only the assigned data analyst can generate SQL.', 'error'); return; }
+    if (!bmValidate()) return;
+    const result = await bmPost('/Biomedical/GenerateSql', {
+        ...bmBuildRequest(), clientId: bm.clientId
+    });
+    if (!result.success) return;
+    const el = document.getElementById('bmSqlContent');
+    el.classList.remove('empty-state');
+    el.innerHTML = `
+        <div class="sql-toolbar">
+            <button class="btn btn-sm btn-primary" onclick="bmCopy('bmSqlCode')">Copy</button>
+        </div>
+        <div class="sql-panel"><pre id="bmSqlCode" class="sql-block">${bmEsc(result.sql)}</pre></div>`;
+    bmTab('sql');
+}
+
+function bmCopy(id) {
+    const text = document.getElementById(id)?.textContent || '';
+    navigator.clipboard.writeText(text).then(() => alert('Copied to clipboard!'));
+}
+
+async function bmSaveWorkspace() {
+    if (bmRole !== 'DataAnalyst') { bmSetWsInfo('Only the assigned data analyst can save this workspace.', 'error'); return; }
+    if (!bm.clientId) { bmSetWsInfo('Select an engagement first.', 'error'); return; }
+    const result = await bmPost('/Biomedical/SaveWorkspace', { ...bmBuildRequest(), clientId: bm.clientId });
+    if (!result.success) { bmSetWsInfo(`Error: ${bmEsc(result.error || 'Failed to save.')}`, 'error'); return; }
+    bm.workspaceSaved = true;
+    bm.dirty = false;
+    bmSetWsInfo(result.message || 'Workspace saved successfully.', 'success');
+    bmRenderState();
+}
+
+async function bmSignOff() {
+    if (!bm.runId) { bmSetWsInfo('Run validation first so the workspace can be signed off.', 'warning'); return; }
+    if (!bm.workspaceSaved) { bmSetWsInfo('Save the workspace first before signing off.', 'warning'); return; }
+    const result = await bmPost('/Biomedical/AddSignoff', {
+        runId: bm.runId,
+        comment: document.getElementById('bmSignoffComment').value.trim()
+    });
+    if (!result.success) { bmSetWsInfo(`Error: ${bmEsc(result.error || 'Failed to sign off.')}`, 'error'); return; }
+    bm.signedOff = true;
+    bmSetWsInfo('Workspace signoff saved. Other assigned users can now review this signed run.', 'success');
+    bmRenderState();
+}
+
+async function bmRemoveSignoff() {
+    if (!bm.runId) { bmSetWsInfo('No active run to remove signoff from.', 'warning'); return; }
+    const result = await bmPost('/Biomedical/RemoveSignoff', { runId: bm.runId, comment: '' });
+    if (!result.success) { bmSetWsInfo(`Error: ${bmEsc(result.error || 'Failed to remove signoff.')}`, 'error'); return; }
+    bm.signedOff = false;
+    bmSetWsInfo('Signoff removed.', 'warning');
+    bmRenderState();
+}
+
+async function bmDownloadExcel() {
+    if (!bm.result) { bmSetWsInfo('Run validation first before downloading.', 'warning'); return; }
+    await bmPostFile('/Biomedical/DownloadExcel', bm.result, 'Rule74_Biomedical.xlsx');
+}
+
+async function bmDownloadSql() {
+    if (!bm.clientId) { bmSetWsInfo('Select an engagement first.', 'warning'); return; }
+    const result = await bmPost('/Biomedical/DownloadSql', bmBuildRequest());
+    if (!result.success) { bmSetWsInfo(`Error: ${bmEsc(result.error || 'Failed.')}`, 'error'); return; }
+    const blob = new Blob([result.sql], { type: 'text/plain' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+    a.download = 'Rule74_Biomedical.sql'; a.click(); URL.revokeObjectURL(a.href);
+}
+
+async function bmPostFile(url, body, filename) {
+    const token = document.querySelector('[name=__RequestVerificationToken]')?.value || '';
+    const resp = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token }, body: JSON.stringify(body) });
+    if (!resp.ok) { bmSetWsInfo('Download failed.', 'error'); return; }
+    const blob = await resp.blob();
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+    a.download = filename; a.click(); URL.revokeObjectURL(a.href);
+}
+
+function bmSetWsRunState(text, type) {
+    const el = document.getElementById('bmWorkspaceRunState');
+    if (!el) return;
+    el.className = `badge badge--${type} badge--sm`;
+    el.textContent = text;
+}
+
+function bmSetWsInfo(msg, type) {
+    const el = document.getElementById('bmWorkspaceInfo');
+    if (!el) return;
+    el.className = `alert alert--${type}`;
+    el.innerHTML = msg;
+}
+
+function bmRenderState() {
+    const canEdit = bmRole === 'DataAnalyst';
+    const saveBtn = document.getElementById('bmSaveWorkspaceBtn');
+    const signBtn = document.getElementById('bmSignOffBtn');
+    const removeBtn = document.getElementById('bmRemoveSignoffBtn');
+    const verifyBtn = document.getElementById('bmVerifyBtn');
+    const runBtn = document.getElementById('bmRunBtn');
+    const sqlBtn = document.getElementById('bmSqlBtn');
+    if (saveBtn) saveBtn.disabled = !canEdit || bm.signedOff;
+    if (signBtn) {
+        signBtn.style.display = canEdit && bm.runId ? 'inline-flex' : 'none';
+        signBtn.disabled = !bm.workspaceSaved || bm.dirty || bm.signedOff;
+        signBtn.textContent = bm.signedOff ? 'Signed Off' : 'Sign Off';
+    }
+    if (removeBtn) removeBtn.style.display = canEdit && bm.signedOff ? 'inline-flex' : 'none';
+    const dlExcelBtn = document.getElementById('bmDownloadExcelBtn');
+    const dlSqlBtn = document.getElementById('bmDownloadSqlBtn');
+    if (dlExcelBtn) dlExcelBtn.style.display = bm.result ? 'inline-flex' : 'none';
+    if (dlSqlBtn) dlSqlBtn.style.display = bm.clientId ? 'inline-flex' : 'none';
+    if (verifyBtn) verifyBtn.disabled = bm.signedOff;
+    if (runBtn) runBtn.disabled = bm.signedOff;
+    if (sqlBtn) sqlBtn.disabled = bm.signedOff;
+
+    if (!bm.clientId) { bmSetWsRunState('No engagement selected', 'neutral'); bmSetWsInfo('Select an engagement to load the last saved Rule 74 workspace.', 'info'); return; }
+    if (!bm.runId) { bmSetWsRunState('No saved run loaded', 'neutral'); bmSetWsInfo(canEdit ? 'No saved workspace yet. Connect, configure, run validation, then save.' : 'No saved workspace for this engagement yet.', 'info'); return; }
+    if (bm.dirty) { bmSetWsRunState(`Run #${bm.runId} — unsaved changes`, 'warning'); bmSetWsInfo(`Saved run <strong>#${bm.runId}</strong> is loaded but the current screen has unsaved changes.`, 'warning'); return; }
+    if (bm.signedOff) { bmSetWsRunState(`Run #${bm.runId} signed off`, 'success'); bmSetWsInfo(`Saved run <strong>#${bm.runId}</strong> is signed off and available for review.`, 'success'); return; }
+    bmSetWsRunState(`Run #${bm.runId} saved`, 'info');
+    bmSetWsInfo(canEdit ? `Saved run <strong>#${bm.runId}</strong> is loaded. Save and sign off to make results visible to other roles.` : `Saved run <strong>#${bm.runId}</strong> is awaiting analyst signoff.`, 'info');
+}
+
+function bmReset(clearClient) {
+    bm.server = ''; bm.database = ''; bm.driver = 'ODBC Driver 17 for SQL Server';
+    bm.bmTable = ''; bm.prodTable = ''; bm.qualCol = ''; bm.surnameCol = '';
+    bm.runId = null; bm.result = null;
+    bm.view = { filter: 'ALL', page: 1, pageSize: bmPreviewLimit };
+    bm.engRole = ''; bm.status = ''; bm.signedOff = false; bm.workspaceSaved = false;
+    bm.daSignoff = false; bm.resultsVisible = false; bm.dirty = false;
+    bm.editAccepted = false; bm.bmCols = []; bm.prodCols = [];
+    if (clearClient) bm.clientId = 0;
+
+    ['bmServer','bmSignoffComment'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+    document.getElementById('bmDriver').value = 'ODBC Driver 17 for SQL Server';
+    document.getElementById('bmDatabase').innerHTML = '<option value="">Select database</option>';
+    document.getElementById('bmDbFieldGroup').style.display = 'none';
+    ['bmBmTable','bmProdTable','bmQualCol','bmSurnameCol'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.innerHTML = '<option value="">Select table</option>';
+    });
+    ['bmBmAutoTag','bmProdAutoTag','bmQualAutoTag','bmSurnameAutoTag'].forEach(id => {
+        const el = document.getElementById(id); if (el) el.style.display = 'none';
+    });
+    document.getElementById('bmColumnPreview').style.display = 'none';
+    document.getElementById('bmConnectionStatus').innerHTML = '';
+    document.getElementById('bmTableStatus').innerHTML = '';
+    document.getElementById('bmValidationContent').className = 'empty-state';
+    document.getElementById('bmValidationContent').innerHTML = '<p>Run validation to see results here.</p>';
+    document.getElementById('bmExceptionsContent').className = 'empty-state';
+    document.getElementById('bmExceptionsContent').innerHTML = '<p>No exceptions data yet. Run validation first.</p>';
+    document.getElementById('bmSqlContent').className = 'empty-state';
+    document.getElementById('bmSqlContent').innerHTML = '<p>Click "Generate SQL" or run validation to generate the SQL script.</p>';
+    bmUpdateBadge('');
+    bmRenderState();
+}
+
+async function bmHandleClientChange(value) {
+    bm.clientId = parseInt(value || '0') || 0;
+    bmReset();
+    if (!bm.clientId) return;
+    await bmLoadWorkspace();
+}
+
+async function bmLoadWorkspace() {
+    if (!bm.clientId) { bmRenderState(); return; }
+    try {
+        const result = await bmGet(`/Biomedical/GetWorkspaceState?clientId=${bm.clientId}`);
+        if (!result.success) { bmSetWsInfo(`Error: ${bmEsc(result.error || 'Failed to load workspace.')}`, 'error'); return; }
+        if (!result.hasWorkspace || !result.workspace) { bmRenderState(); return; }
+        await bmHydrate(result.workspace);
+    } catch (err) { bmSetWsInfo(`Error: ${bmEsc(err?.message || 'Failed.')}`, 'error'); }
+}
+
+async function bmHydrate(ws) {
+    bm.hydrating = true;
+    try {
+        bm.runId = ws.lastRunId || null;
+        bm.engRole = ws.currentUserEngagementRole || '';
+        bm.status = ws.currentStatus || '';
+        bm.signedOff = !!ws.currentUserHasSignedOff;
+        bm.workspaceSaved = !!ws.isWorkspaceSaved;
+        bm.daSignoff = !!ws.hasDataAnalystSignoff;
+        bm.resultsVisible = !!ws.resultsVisible;
+
+        document.getElementById('bmServer').value = ws.server || '';
+        document.getElementById('bmDriver').value = ws.driver || 'ODBC Driver 17 for SQL Server';
+        document.getElementById('bmSignoffComment').value = ws.currentUserSignoffComment || '';
+        bm.server = ws.server || '';
+        bm.driver = ws.driver || 'ODBC Driver 17 for SQL Server';
+
+        if (ws.summary && bm.resultsVisible) bmApplyResult(ws.summary, { switchToValidation: false, fromWorkspace: true });
+        else if (ws.summary) bmUpdateBadge(ws.summary.status || '');
+
+        if (ws.server) {
+            await bmConnect({ preferredDatabase: ws.database || '', silent: true,
+                statusMessage: ws.database ? `Connected to <strong>${bmEsc(ws.database)}</strong>. Restored from saved workspace.` : 'Reconnected.' });
+        }
+        if (ws.database) {
+            await bmLoadTables({
+                preferredBm: ws.biomedicalTable || 'Biomedical',
+                preferredProd: ws.productionTable || 'Clinical_Production',
+                preferredQual: ws.qualificationColumn || 'QUALIFICATION',
+                preferredSurname: ws.surnameColumn || 'Surname',
+                silent: true
+            });
+        }
+    } finally {
+        bm.hydrating = false;
+        bm.dirty = false;
+        bmRenderState();
+    }
+}
+
+function bmValidate() {
+    const missing = [];
+    if (!bm.clientId) missing.push('engagement');
+    if (!bm.server) missing.push('server');
+    if (!bm.database) missing.push('database');
+    if (!bm.bmTable) missing.push('Biomedical table');
+    if (!bm.prodTable) missing.push('Production table');
+    if (!bm.qualCol) missing.push('QUALIFICATION column');
+    if (!bm.surnameCol) missing.push('Surname column');
+    if (missing.length) {
+        bmSetWsInfo(`Please select: ${missing.join(', ')}.`, 'warning');
+        return false;
+    }
+    return true;
+}
+
+function bmBuildRequest() {
+    return {
+        server: bm.server,
+        database: bm.database,
+        driver: bm.driver,
+        biomedicalTable: document.getElementById('bmBmTable').value || bm.bmTable,
+        productionTable: document.getElementById('bmProdTable').value || bm.prodTable,
+        qualificationColumn: document.getElementById('bmQualCol').value || bm.qualCol,
+        surnameColumn: document.getElementById('bmSurnameCol').value || bm.surnameCol
+    };
+}
+
+document.addEventListener('DOMContentLoaded', async () => {
+    document.getElementById('bmServer').addEventListener('input', () => { bm.server = document.getElementById('bmServer').value.trim(); });
+    document.getElementById('bmDriver').addEventListener('change', () => { bm.driver = document.getElementById('bmDriver').value; });
+
+    document.getElementById('bmDatabase').addEventListener('change', async e => {
+        bm.database = e.target.value;
+        if (bm.database) await bmLoadTables();
+    });
+
+    document.getElementById('bmBmTable').addEventListener('change', async e => {
+        bm.bmTable = e.target.value;
+        if (bm.bmTable) {
+            const r = await bmPost('/Biomedical/GetColumns', { server: bm.server, database: bm.database, driver: bm.driver, tableName: bm.bmTable });
+            bm.bmCols = r.columns || [];
+            const allCols = [...new Set([...bm.bmCols, ...bm.prodCols])];
+            bmFillColSelect(document.getElementById('bmQualCol'), allCols, 'QUALIFICATION');
+            bmFillColSelect(document.getElementById('bmSurnameCol'), allCols, 'Surname');
+            bm.qualCol = document.getElementById('bmQualCol').value;
+            bm.surnameCol = document.getElementById('bmSurnameCol').value;
+            document.getElementById('bm-body-columns').style.display = 'block';
+            document.querySelector('#bm-acc-columns .acc-chevron').textContent = '^';
+            bmUpdatePreview();
+        }
+    });
+
+    document.getElementById('bmProdTable').addEventListener('change', async e => {
+        bm.prodTable = e.target.value;
+        if (bm.prodTable) {
+            const r = await bmPost('/Biomedical/GetColumns', { server: bm.server, database: bm.database, driver: bm.driver, tableName: bm.prodTable });
+            bm.prodCols = r.columns || [];
+            const allCols = [...new Set([...bm.bmCols, ...bm.prodCols])];
+            bmFillColSelect(document.getElementById('bmQualCol'), allCols, 'QUALIFICATION');
+            bmFillColSelect(document.getElementById('bmSurnameCol'), allCols, 'Surname');
+            bm.qualCol = document.getElementById('bmQualCol').value;
+            bm.surnameCol = document.getElementById('bmSurnameCol').value;
+            bmUpdatePreview();
+        }
+    });
+
+    document.getElementById('bmQualCol').addEventListener('change', bmColChanged);
+    document.getElementById('bmSurnameCol').addEventListener('change', bmColChanged);
+
+    bmRenderState();
+    if (bm.clientId > 0) await bmLoadWorkspace();
+});
+</script>

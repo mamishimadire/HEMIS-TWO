@@ -12,5 +12,9 @@ namespace HemisAudit.Services
         Task<string> GenerateSqlAsync(PharmacyValidationRequest request);
         Task<PharmacyWorkspaceState?> GetCurrentWorkspaceStateAsync(int clientId, string? userEmail = null);
         Task<bool> SaveWorkspaceStateAsync(int clientId, PharmacyValidationRequest config, string? userEmail = null);
+
+        // Signoff
+        Task AddOrUpdateSignoffAsync(int runId, string email, string comment);
+        Task RemoveSignoffAsync(int runId, string email);
     }
 }

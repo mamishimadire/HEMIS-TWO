@@ -117,8 +117,9 @@ namespace HemisAudit.Controllers
         [HttpPost]
         public async Task<IActionResult> GetColumns([FromBody] ClinicalTechVerifyRequest request)
         {
+            var tableName = !string.IsNullOrWhiteSpace(request.TableName) ? request.TableName : request.ClinicaltechTable;
             var result = await RequireDataAnalystAsync(
-                async () => await _clinicalTech.GetColumnsAsync(request.Server, request.Database, request.Driver, request.ClinicaltechTable));
+                async () => await _clinicalTech.GetColumnsAsync(request.Server, request.Database, request.Driver, tableName));
             return Json(result);
         }
 
@@ -156,6 +157,17 @@ namespace HemisAudit.Controllers
         }
 
         [HttpPost]
+        public async Task<IActionResult> GenerateSql([FromBody] ClinicalTechValidationRequest request)
+        {
+            var result = await RequireDataAnalystAsync(async () =>
+            {
+                var sql = await _clinicalTech.GenerateSqlAsync(request);
+                return new { success = true, sql } as object;
+            });
+            return Json(result);
+        }
+
+        [HttpPost]
         public async Task<IActionResult> SaveWorkspace([FromBody] ClinicalTechValidationRequest request)
         {
             var user = await _users.GetUserAsync(User);
@@ -173,6 +185,49 @@ namespace HemisAudit.Controllers
                 await _audit.LogAsync("save_validation_workspace", $"DataAnalyst saved ClinicalTech workspace for client {request.ClientId}.", user?.Id, user?.Email);
 
             return Json(new { success = result, message = result ? "Workspace saved successfully." : "Failed to save workspace." });
+        }
+
+        [HttpPost]
+        public async Task<IActionResult> AddSignoff([FromBody] QualSurnameSignoffInput model)
+        {
+            var user = await _users.GetUserAsync(User);
+            if (user == null) return Json(new { success = false, error = "Not authenticated." });
+            try
+            {
+                await _clinicalTech.AddOrUpdateSignoffAsync(model.RunId, user.Email!, model.Comment);
+                await _audit.LogAsync("add_signoff", $"ClinicalTech signoff added for run {model.RunId}.", user.Id, user.Email);
+                return Json(new { success = true });
+            }
+            catch (Exception ex) { return Json(new { success = false, error = ex.Message }); }
+        }
+
+        [HttpPost]
+        public async Task<IActionResult> RemoveSignoff([FromBody] QualSurnameSignoffInput model)
+        {
+            var user = await _users.GetUserAsync(User);
+            if (user == null) return Json(new { success = false, error = "Not authenticated." });
+            try
+            {
+                await _clinicalTech.RemoveSignoffAsync(model.RunId, user.Email!);
+                await _audit.LogAsync("remove_signoff", $"ClinicalTech signoff removed for run {model.RunId}.", user.Id, user.Email);
+                return Json(new { success = true });
+            }
+            catch (Exception ex) { return Json(new { success = false, error = ex.Message }); }
+        }
+
+        [HttpPost]
+        public IActionResult DownloadExcel([FromBody] ClinicalTechValidationSummary summary)
+        {
+            var rows = (summary.ReviewRows ?? new()).Select(r => (r.ClinicaltechQualification, r.ClinicaltechSurname, r.Status, r.ProductionQualification, r.ProductionSurname));
+            var bytes = _export.ExportQualSurnameExcel("ClinicalTech", 69, summary.TotalValidated, summary.PassCount, summary.FailCount, summary.ExceptionRate, summary.Status ?? "", "ClinicalTech", "Clinical_Production", "QUALIFICATION", "Surname", rows);
+            return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "Rule69_ClinicalTech.xlsx");
+        }
+
+        [HttpPost]
+        public async Task<IActionResult> DownloadSql([FromBody] ClinicalTechValidationRequest request)
+        {
+            var sql = await _clinicalTech.GenerateSqlAsync(request);
+            return Json(new { success = true, sql });
         }
 
         // ── Helper methods ─────────────────────────────────────────────────────
@@ -196,11 +251,12 @@ namespace HemisAudit.Controllers
             return roles.FirstOrDefault() ?? "";
         }
 
-        private bool CanViewWorkspaceResults(string role, ClinicalTechWorkspaceState? workspace)
+        private static bool CanViewWorkspaceResults(string role, ClinicalTechWorkspaceState? workspace)
         {
             if (workspace == null) return false;
-            return string.Equals(role, "DataAnalyst", StringComparison.OrdinalIgnoreCase) ||
-                   string.Equals(role, "Admin", StringComparison.OrdinalIgnoreCase);
+            if (string.Equals(role, "DataAnalyst", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(role, "Admin", StringComparison.OrdinalIgnoreCase)) return true;
+            return workspace.IsWorkspaceSaved && workspace.HasDataAnalystSignoff;
         }
     }
 }

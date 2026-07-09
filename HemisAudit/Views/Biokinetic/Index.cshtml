@@ -1,10 +1,10 @@
 @using HemisAudit.Models
 @using HemisAudit.ViewModels
 @{
-    ViewData["Title"] = "Biokinetic Module - Qualification & Surname Validation";
+    ViewData["Title"] = "Rule 70 - Biokinetic Module";
     Layout = "~/Views/Shared/_Layout.cshtml";
-    var clients = ViewBag.Clients as List<Client> ?? new();
-    var selectedClientId = ViewBag.ClientId is int clientId ? clientId : 0;
+    var clients = ViewBag.Clients as List<Client> ?? new List<Client>();
+    var selectedClientId = (int)(ViewBag.ClientId ?? 0);
     var currentSystemRole = ViewBag.CurrentSystemRole as string ?? "";
     var isResultsOnlyRole =
         string.Equals(currentSystemRole, "Manager", StringComparison.OrdinalIgnoreCase) ||
@@ -13,457 +13,834 @@
     var moduleNavigation = ViewBag.ModuleNavigation as ModuleSequenceNavigationViewModel;
 }
 
-<style>
-    .bk-results-grid { display: grid; gap: 16px; }
-    .bk-metric-card { background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 8px; padding: 16px; }
-    .bk-metric-value { font-size: 24px; font-weight: 700; color: var(--primary); }
-    .bk-metric-label { font-size: 12px; text-transform: uppercase; color: var(--text-muted); margin-top: 4px; }
-    .bk-table { width: 100%; border-collapse: collapse; font-size: 12px; }
-    .bk-table th { background: var(--primary); color: white; padding: 8px; text-align: left; }
-    .bk-table td { padding: 6px 8px; border-bottom: 1px solid var(--border-color); }
-    .bk-table tr:hover { background: var(--hover-bg); }
-    .bk-pass { color: #28a745; font-weight: 700; }
-    .bk-fail { color: #dc3545; font-weight: 700; }
-</style>
+@if (isResultsOnlyRole)
+{
+    <style>
+        #bkApp > .accordion-stack,
+        #bkApp > .action-bar { display: none !important; }
+    </style>
+}
 
-<div id="app" class="rule-page-shell">
+<div id="bkApp" class="rule-page-shell">
     @if (moduleNavigation != null)
     {
         @await Html.PartialAsync("_ModuleSequenceNav", moduleNavigation)
     }
 
     <div class="engagement-selector">
-        <label for="bkClientId">Engagement</label>
-        <select id="bkClientId">
-            <option value="">Select engagement</option>
-            @foreach (var client in clients)
+        <label>Engagement</label>
+        <select id="bkClientId" onchange="bkHandleClientChange(this.value)">
+            <option value="0">Select engagement (results saved here)</option>
+            @foreach (var c in clients)
             {
-                <option value="@client.Id" selected="@(client.Id == selectedClientId ? "selected" : null)">
-                    @client.Name (@client.FiscalYear)
-                </option>
+                <option value="@c.Id" selected="@(c.Id == selectedClientId ? "selected" : null)">@c.Name - @c.FiscalYear</option>
             }
         </select>
-        <small>Biokinetic validates QUALIFICATION values from Biokinetic table against Clinical Production table and confirms Surname matching.</small>
+        <small>Biokinetic validates QUALIFICATION values from the Biokinetic table against Clinical Production and confirms Surname matching.</small>
     </div>
 
     <div class="rule-header">
         <div class="rule-header__icon">BK</div>
         <div>
-            <h1 class="rule-header__title">Biokinetic Module: Qualification & Surname Validation</h1>
-            <p class="rule-header__sub">
-                Checks that QUALIFICATION values from Biokinetic table exist in Clinical Production table.
-                When QUALIFICATION is found, confirms matching Surname records.
-            </p>
+            <h1 class="rule-header__title">HEMIS RULE 70: Biokinetic Qualification &amp; Surname Validation</h1>
+            <p class="rule-header__sub">Cross-table validation | QUALIFICATION lookup | Surname confirmation | 100% population test</p>
         </div>
         <div class="rule-header__badge" id="bkStatusBadge" style="display:none"></div>
     </div>
 
-    @if (!isResultsOnlyRole)
-    {
-        <div class="accordion-stack">
-            <div class="accordion-item">
-                <button class="accordion-toggle" type="button" onclick="window.toggleAccordion('bk-conn')">
-                    <span class="acc-icon">DB</span><span>Database Connection</span><span class="acc-chevron">v</span>
-                </button>
-                <div class="accordion-body" id="body-bk-conn">
-                    <div class="form-grid">
-                        <div class="field-group">
-                            <label for="bkServer">Server Name</label>
-                            <input id="bkServer" type="text" placeholder="e.g. MYSERVER\INSTANCE or (localdb)\MSSQLLocalDB" />
-                        </div>
-                        <div class="field-group">
-                            <label for="bkDriver">Driver</label>
-                            <select id="bkDriver">
-                                <option value="ODBC Driver 17 for SQL Server">ODBC Driver 17 for SQL Server</option>
-                                <option value="ODBC Driver 18 for SQL Server">ODBC Driver 18 for SQL Server</option>
-                                <option value="SQL Server">SQL Server</option>
-                            </select>
-                        </div>
-                        <div class="field-group">
-                            <label for="bkDatabase">Database</label>
-                            <select id="bkDatabase"></select>
-                        </div>
-                    </div>
-                    <div class="action-bar" style="justify-content:flex-start; margin:12px 0 0">
-                        <button type="button" class="btn btn-primary" id="bkConnectBtn">Connect</button>
-                    </div>
-                    <div id="bkConnectionOutput" class="status-output"></div>
-                </div>
-            </div>
+    <div class="accordion-stack">
 
-            <div class="accordion-item">
-                <button class="accordion-toggle" type="button" onclick="window.toggleAccordion('bk-config')">
-                    <span class="acc-icon">CF</span><span>Table & Column Configuration</span><span class="acc-chevron">v</span>
-                </button>
-                <div class="accordion-body" id="body-bk-config" style="display:none">
-                    <div class="info-box info-box--blue">
-                        <strong>Biokinetic Module Logic:</strong><br />
-                        Compare QUALIFICATION and Surname columns from Biokinetic table against Clinical Production table.
-                        Records PASS when the QUALIFICATION exists in the production table; FAIL when missing.
+        <div class="accordion-item" id="bk-acc-connection">
+            <button class="accordion-toggle" onclick="bkToggle('connection')">
+                <span class="acc-icon">DB</span>
+                <span>Database Connection</span>
+                <span class="acc-chevron">v</span>
+            </button>
+            <div class="accordion-body" id="bk-body-connection">
+                <div class="form-grid">
+                    <div class="field-group">
+                        <label>Server Name</label>
+                        <input type="text" id="bkServer" placeholder="e.g. MYSERVER or MYSERVER\INSTANCE" />
                     </div>
-                    <div class="form-grid">
-                        <div class="field-group">
-                            <label for="bkBiokinieticTable">Biokinetic Table</label>
-                            <select id="bkBiokinieticTable" onchange="window.bkLoadColumns('biokinetic', this.value)"></select>
-                        </div>
-                        <div class="field-group">
-                            <label for="bkProductionTable">Clinical Production Table</label>
-                            <select id="bkProductionTable" onchange="window.bkLoadColumns('production', this.value)"></select>
-                        </div>
+                    <div class="field-group">
+                        <label>Driver</label>
+                        <select id="bkDriver">
+                            <option value="ODBC Driver 17 for SQL Server">ODBC Driver 17 for SQL Server</option>
+                            <option value="ODBC Driver 18 for SQL Server">ODBC Driver 18 for SQL Server</option>
+                            <option value="SQL Server">SQL Server</option>
+                        </select>
                     </div>
-                    <div class="form-grid" style="margin-top:12px">
-                        <div class="field-group">
-                            <label for="bkQualificationColumn">QUALIFICATION Column</label>
-                            <select id="bkQualificationColumn"></select>
-                        </div>
-                        <div class="field-group">
-                            <label for="bkSurnameColumn">Surname Column</label>
-                            <select id="bkSurnameColumn"></select>
-                        </div>
+                    <div class="field-group" id="bkDbFieldGroup" style="display:none">
+                        <label>Database</label>
+                        <select id="bkDatabase">
+                            <option value="">Select database</option>
+                        </select>
                     </div>
-                    <div class="action-bar" style="justify-content:flex-start; margin:10px 0 0">
-                        <button type="button" class="btn btn-secondary" onclick="window.bkAutoDetectColumns()">Auto-Detect Columns</button>
-                    </div>
-                    <div id="bkConfigOutput" class="status-output"></div>
                 </div>
+                <button class="btn btn-primary" onclick="bkConnect()">Connect</button>
+                <div class="status-output" id="bkConnectionStatus"></div>
             </div>
         </div>
-    }
+
+        <div class="accordion-item" id="bk-acc-tables">
+            <button class="accordion-toggle" onclick="bkToggle('tables')">
+                <span class="acc-icon">TB</span>
+                <span>Table Configuration</span>
+                <span class="acc-chevron">v</span>
+            </button>
+            <div class="accordion-body" id="bk-body-tables" style="display:none">
+                <div class="info-box info-box--blue">
+                    <strong>Biokinetic Module Logic:</strong> Check that each QUALIFICATION from the Biokinetic table exists in
+                    Clinical Production. When found, confirm the Surname matches.
+                    PASS = QUALIFICATION found in production; FAIL = missing.
+                </div>
+                <div class="form-grid">
+                    <div class="field-group">
+                        <label>Biokinetic Table <span class="auto-tag" id="bkBkAutoTag" style="display:none">auto-detected</span></label>
+                        <select id="bkBkTable">
+                            <option value="">Select table</option>
+                        </select>
+                    </div>
+                    <div class="field-group">
+                        <label>Clinical Production Table <span class="auto-tag" id="bkProdAutoTag" style="display:none">auto-detected</span></label>
+                        <select id="bkProdTable">
+                            <option value="">Select table</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="status-output" id="bkTableStatus"></div>
+            </div>
+        </div>
+
+        <div class="accordion-item" id="bk-acc-columns">
+            <button class="accordion-toggle" onclick="bkToggle('columns')">
+                <span class="acc-icon">CL</span>
+                <span>Column Configuration</span>
+                <span class="acc-chevron">v</span>
+            </button>
+            <div class="accordion-body" id="bk-body-columns" style="display:none">
+                <div class="info-box info-box--dark">
+                    <strong>Column Selection:</strong> Choose the <code>QUALIFICATION</code> column (used for matching across both tables)
+                    and the <code>Surname</code> column (confirmed when QUALIFICATION is found in production).
+                </div>
+                <div class="form-grid">
+                    <div class="field-group">
+                        <label>QUALIFICATION Column <span class="auto-tag" id="bkQualAutoTag" style="display:none">auto-detected</span></label>
+                        <select id="bkQualCol" onchange="bkColChanged()">
+                            <option value="">Select column</option>
+                        </select>
+                    </div>
+                    <div class="field-group">
+                        <label>Surname Column <span class="auto-tag" id="bkSurnameAutoTag" style="display:none">auto-detected</span></label>
+                        <select id="bkSurnameCol" onchange="bkColChanged()">
+                            <option value="">Select column</option>
+                        </select>
+                    </div>
+                </div>
+                <div style="margin-top:10px">
+                    <button class="btn btn-secondary" onclick="bkAutoDetect()">Auto-Detect Columns</button>
+                </div>
+                <div id="bkColumnPreview" class="validation-preview" style="display:none;margin-top:12px"></div>
+            </div>
+        </div>
+
+    </div>
 
     <div class="workspace-signoff-card">
         <div class="workspace-signoff-card__header">
             <div>
                 <div class="workspace-signoff-card__title">Saved Workspace</div>
-                <div class="workspace-signoff-card__subtitle">Biokinetic connection and validation results auto-load for this engagement.</div>
+                <div class="workspace-signoff-card__subtitle">The last saved Rule 70 connection, configuration, results, and signoffs reload here automatically.</div>
             </div>
-            <div id="bkWorkspaceRunState" class="badge badge--neutral badge--sm">No saved run</div>
+            <div id="bkWorkspaceRunState" class="badge badge--neutral badge--sm">No saved run loaded</div>
         </div>
-        <div id="bkWorkspaceInfo" class="alert alert--info">Select an engagement to load the Biokinetic workspace.</div>
+        <div id="bkWorkspaceInfo" class="alert alert--info">
+            Select an engagement to load the last saved Rule 70 workspace.
+        </div>
         <div class="workspace-signoff-grid">
-            <div>
-                <div style="color:var(--text-muted);font-size:12px;text-transform:uppercase;font-weight:700">Current Run</div>
-                <div id="bkWorkspaceRunLabel">No saved run yet</div>
-            </div>
-            <div>
-                <div style="color:var(--text-muted);font-size:12px;text-transform:uppercase;font-weight:700">Status</div>
-                <div id="bkWorkspaceStatusLabel">-</div>
-            </div>
-            <div>
-                <div style="color:var(--text-muted);font-size:12px;text-transform:uppercase;font-weight:700">Last Run</div>
-                <div id="bkWorkspaceLastRunLabel">-</div>
-            </div>
-            <div class="field-group" style="grid-column:1 / -1">
-                <label for="bkWorkspaceComment">Notes</label>
-                <textarea id="bkWorkspaceComment" rows="2" placeholder="Add validation notes"></textarea>
+            <div class="field-group">
+                <label id="bkSignoffLabel">Signoff Comment</label>
+                <textarea id="bkSignoffComment" placeholder="Add the final review note that confirms this validation is complete."></textarea>
             </div>
         </div>
         <div class="workspace-signoff-actions">
-            @if (!isResultsOnlyRole)
-            {
-                <button type="button" class="btn btn-success" id="bkSaveWorkspaceBtn">Save Workspace</button>
-            }
+            <button class="btn btn-success" id="bkSaveWorkspaceBtn" onclick="bkSaveWorkspace()">Save Workspace</button>
+            <button class="btn btn-primary" id="bkSignOffBtn" onclick="bkSignOff()" style="display:none">Sign Off</button>
+            <button class="btn btn-warning" id="bkRemoveSignoffBtn" onclick="bkRemoveSignoff()" style="display:none">Remove Signoff</button>
+            <button class="btn btn-secondary" id="bkDownloadExcelBtn" onclick="bkDownloadExcel()" style="display:none">Download Excel</button>
+            <button class="btn btn-secondary" id="bkDownloadSqlBtn" onclick="bkDownloadSql()" style="display:none">Download SQL</button>
         </div>
     </div>
 
-    @if (!isResultsOnlyRole)
-    {
-        <div class="action-bar">
-            <button type="button" class="btn btn-info" id="bkVerifyBtn">Verify Tables</button>
-            <button type="button" class="btn btn-success" id="bkRunBtn">Run Biokinetic</button>
-            <button type="button" class="btn btn-primary" id="bkSqlBtn">Generate SQL</button>
-        </div>
-    }
+    <div class="action-bar">
+        <button class="btn btn-info" id="bkVerifyBtn" onclick="bkVerify()">Verify Tables</button>
+        <button class="btn btn-success" id="bkRunBtn" onclick="bkRun()">Run Validation</button>
+        <button class="btn btn-primary" id="bkSqlBtn" onclick="bkGenerateSql()">Generate SQL</button>
+    </div>
 
     <div class="results-panel">
         <div class="results-tabs">
-            <button class="tab-btn active" type="button" data-tab="analysis">Analysis</button>
-            <button class="tab-btn" type="button" data-tab="results">Results</button>
-            <button class="tab-btn" type="button" data-tab="sql">SQL</button>
+            <button class="tab-btn active" type="button" data-tab="validation" onclick="bkTab('validation')">Validation Results</button>
+            <button class="tab-btn" type="button" data-tab="exceptions" onclick="bkTab('exceptions')">Exceptions</button>
+            <button class="tab-btn" type="button" data-tab="sql" onclick="bkTab('sql')">SQL Code</button>
         </div>
-        <div class="tab-pane active" data-tab-panel="analysis" id="bkAnalysisPane"></div>
-        <div class="tab-pane" data-tab-panel="results" id="bkResultsPane"></div>
-        <div class="tab-pane" data-tab-panel="sql">
-            <textarea id="bkSqlText" rows="20" readonly></textarea>
+        <div class="tab-pane active" id="bk-tab-validation">
+            <div id="bkValidationContent" class="empty-state"><p>Run validation to see results here.</p></div>
         </div>
-    </div>
-
-    <div id="bkSpinner" class="spinner-overlay" style="display:none">
-        <div class="spinner-box">
-            <div class="spinner-ring"></div>
-            <p id="bkSpinnerMsg">Processing...</p>
+        <div class="tab-pane" id="bk-tab-exceptions">
+            <div id="bkExceptionsContent" class="empty-state"><p>No exceptions data yet. Run validation first.</p></div>
+        </div>
+        <div class="tab-pane" id="bk-tab-sql">
+            <div id="bkSqlContent" class="empty-state"><p>Click "Generate SQL" or run validation to generate the SQL script.</p></div>
         </div>
     </div>
 </div>
 
-<form id="bkAntiForgeryForm" method="post" style="display:none">@Html.AntiForgeryToken()</form>
-
 <script>
-window.toggleAccordion = function(id) {
-    const body = document.getElementById(`body-${id}`);
-    if (body) body.style.display = body.style.display === 'none' ? '' : 'none';
+const bkRole = @Html.Raw(Newtonsoft.Json.JsonConvert.SerializeObject(currentSystemRole));
+const bkPreviewLimit = 10;
+const bk = {
+    server: '', database: '', driver: 'ODBC Driver 17 for SQL Server',
+    bkTable: '', prodTable: '',
+    qualCol: '', surnameCol: '',
+    clientId: parseInt(document.getElementById('bkClientId')?.value || '0') || 0,
+    runId: null, result: null,
+    view: { filter: 'ALL', page: 1, pageSize: bkPreviewLimit },
+    engRole: '', status: '', signedOff: false, workspaceSaved: false,
+    daSignoff: false, resultsVisible: false, dirty: false, hydrating: false,
+    editAccepted: false, bkCols: [], prodCols: []
 };
 
-window.bkLoadColumns = async function(role, tableName) {
-    const server = document.getElementById('bkServer')?.value?.trim();
-    const db = document.getElementById('bkDatabase')?.value;
-    if (!server || !db || !tableName) return;
+function bkToggle(name) {
+    const body = document.getElementById(`bk-body-${name}`);
+    const chevron = document.querySelector(`#bk-acc-${name} .acc-chevron`);
+    if (!body) return;
+    const open = body.style.display !== 'none';
+    body.style.display = open ? 'none' : 'block';
+    if (chevron) chevron.textContent = open ? 'v' : '^';
+}
 
-    try {
-        const data = await postJson('/Biokinetic/GetColumns', {
-            server, database: db, driver: document.getElementById('bkDriver')?.value || 'ODBC Driver 17 for SQL Server',
-            biokinieticTable: tableName
-        });
-        if (!data.success || !data.columns) return;
+function bkTab(name) {
+    document.querySelectorAll('#bkApp .tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('#bkApp .tab-pane').forEach(p => p.classList.remove('active'));
+    document.querySelector(`#bkApp [data-tab="${name}"]`)?.classList.add('active');
+    document.getElementById(`bk-tab-${name}`)?.classList.add('active');
+}
 
-        const cols = data.columns || [];
-        if (role === 'biokinetic') {
-            fillColSel(document.getElementById('bkQualificationColumn'), cols, 'QUALIFICATION');
-            fillColSel(document.getElementById('bkSurnameColumn'), cols, 'Surname');
-        }
-    } catch (err) { console.error('Column load failed:', err); }
-};
+function bkSetAlert(elId, type, msg) {
+    const el = document.getElementById(elId);
+    if (el) el.innerHTML = `<div class="alert alert--${type}">${msg}</div>`;
+}
 
-window.bkAutoDetectColumns = function() {
-    const qCol = document.getElementById('bkQualificationColumn');
-    const sCol = document.getElementById('bkSurnameColumn');
-    if (qCol?.options.length > 0 && !qCol.value) qCol.value = qCol.options[0].value;
-    if (sCol?.options.length > 0 && !sCol.value) sCol.value = sCol.options[0].value;
-    document.getElementById('bkConfigOutput').innerHTML = '<div class="alert alert--success">Column detection complete.</div>';
-};
+function bkEsc(v) {
+    return String(v ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
 
-const bkToken = document.querySelector('#bkAntiForgeryForm input[name="__RequestVerificationToken"]')?.value || '';
-
-async function postJson(url, data) {
-    const resp = await fetch(url, {
+async function bkPost(url, data) {
+    return await window.fetchJsonWithProgress(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': bkToken },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data)
     });
-    return await resp.json();
 }
 
-function showSpinner(msg) {
-    document.getElementById('bkSpinnerMsg').textContent = msg || 'Processing...';
-    document.getElementById('bkSpinner').style.display = 'flex';
+async function bkGet(url) {
+    return await window.fetchJsonWithProgress(url, { method: 'GET' });
 }
 
-function hideSpinner() {
-    document.getElementById('bkSpinner').style.display = 'none';
-}
-
-function setAlert(target, type, message) {
-    if (target) target.innerHTML = `<div class="alert alert--${type}">${message}</div>`;
-}
-
-function populateSelect(sel, values, selected) {
+function bkFillSelect(sel, items, preferred) {
     if (!sel) return;
     sel.innerHTML = '<option value="">Select table</option>';
-    values.forEach(v => {
-        const o = document.createElement('option');
-        o.value = o.textContent = v;
-        sel.appendChild(o);
-    });
-    if (selected) sel.value = selected;
+    (items || []).forEach(v => sel.appendChild(new Option(v, v)));
+    if (preferred && items.includes(preferred)) sel.value = preferred;
 }
 
-function fillColSel(sel, cols, preferred) {
+function bkFillColSelect(sel, cols, preferred) {
     if (!sel) return;
-    sel.innerHTML = '';
-    (cols || []).forEach(c => {
-        const o = document.createElement('option');
-        o.value = o.textContent = c;
-        if (c === preferred) o.selected = true;
-        sel.appendChild(o);
-    });
+    sel.innerHTML = '<option value="">Select column</option>';
+    (cols || []).forEach(c => sel.appendChild(new Option(c, c)));
+    const match = preferred ? (cols || []).find(c => c.toLowerCase() === preferred.toLowerCase()) : null;
+    if (match) sel.value = match;
+    else if (cols?.length) sel.value = cols[0];
 }
 
-// Tab switching
-document.querySelectorAll('.tab-btn').forEach(btn => {
-    btn.addEventListener('click', function() {
-        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-        document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
-        this.classList.add('active');
-        const tab = this.dataset.tab;
-        document.querySelector(`[data-tab-panel="${tab}"]`)?.classList.add('active');
+async function bkConnect(opts = {}) {
+    bk.server = document.getElementById('bkServer').value.trim();
+    bk.driver = document.getElementById('bkDriver').value;
+    if (!bk.server) { bkSetAlert('bkConnectionStatus', 'error', 'Enter a server name.'); return null; }
+
+    const result = await bkPost('/Biokinetic/GetDatabases', { server: bk.server, driver: bk.driver });
+    if (!result.success) { bkSetAlert('bkConnectionStatus', 'error', `Error: ${bkEsc(result.error)}`); return null; }
+
+    const dbSel = document.getElementById('bkDatabase');
+    dbSel.innerHTML = '<option value="">Select database</option>';
+    (result.databases || []).forEach(db => dbSel.appendChild(new Option(db, db)));
+    document.getElementById('bkDbFieldGroup').style.display = 'block';
+
+    if (opts.preferredDatabase && (result.databases || []).includes(opts.preferredDatabase)) {
+        dbSel.value = opts.preferredDatabase;
+        bk.database = opts.preferredDatabase;
+    }
+
+    bkSetAlert('bkConnectionStatus', 'success', opts.statusMessage || `Connected. Found ${result.databases?.length || 0} database(s). Select one below.`);
+    return result;
+}
+
+async function bkLoadTables(opts = {}) {
+    bk.database = document.getElementById('bkDatabase').value;
+    if (!bk.database) return null;
+
+    const result = await bkPost('/Biokinetic/GetTables', { server: bk.server, database: bk.database, driver: bk.driver });
+    if (!result.success) { bkSetAlert('bkConnectionStatus', 'error', `Error: ${bkEsc(result.error)}`); return null; }
+
+    bkSetAlert('bkConnectionStatus', 'success', `Connected to <strong>${bkEsc(bk.database)}</strong>. Found ${result.tables?.length || 0} tables.`);
+
+    bkFillSelect(document.getElementById('bkBkTable'), result.tables || [], opts.preferredBk || result.autoBiokinieticTable || '');
+    bkFillSelect(document.getElementById('bkProdTable'), result.tables || [], opts.preferredProd || result.autoProductionTable || '');
+
+    bk.bkTable = document.getElementById('bkBkTable').value;
+    bk.prodTable = document.getElementById('bkProdTable').value;
+
+    document.getElementById('bkBkAutoTag').style.display = bk.bkTable && bk.bkTable === result.autoBiokinieticTable ? 'inline' : 'none';
+    document.getElementById('bkProdAutoTag').style.display = bk.prodTable && bk.prodTable === result.autoProductionTable ? 'inline' : 'none';
+
+    document.getElementById('bk-body-tables').style.display = 'block';
+    document.querySelector('#bk-acc-tables .acc-chevron').textContent = '^';
+
+    if (bk.bkTable || bk.prodTable)
+        await bkLoadColumns(opts);
+
+    return result;
+}
+
+async function bkLoadColumns(opts = {}) {
+    const bkTable = document.getElementById('bkBkTable').value;
+    const prodTable = document.getElementById('bkProdTable').value;
+    if (!bk.server || !bk.database) return;
+
+    const bkColsRes = bkTable ? await bkPost('/Biokinetic/GetColumns', {
+        server: bk.server, database: bk.database, driver: bk.driver, tableName: bkTable
+    }) : { success: false, columns: [] };
+
+    const prodColsRes = prodTable ? await bkPost('/Biokinetic/GetColumns', {
+        server: bk.server, database: bk.database, driver: bk.driver, tableName: prodTable
+    }) : { success: false, columns: [] };
+
+    bk.bkCols = bkColsRes.columns || [];
+    bk.prodCols = prodColsRes.columns || [];
+
+    const allCols = [...new Set([...bk.bkCols, ...bk.prodCols])];
+
+    bkFillColSelect(document.getElementById('bkQualCol'), allCols, opts.preferredQual || 'QUALIFICATION');
+    bkFillColSelect(document.getElementById('bkSurnameCol'), allCols, opts.preferredSurname || 'Surname');
+
+    bk.qualCol = document.getElementById('bkQualCol').value;
+    bk.surnameCol = document.getElementById('bkSurnameCol').value;
+
+    const qualAuto = allCols.find(c => c.toLowerCase() === 'qualification');
+    const surnameAuto = allCols.find(c => c.toLowerCase() === 'surname');
+    document.getElementById('bkQualAutoTag').style.display = qualAuto ? 'inline' : 'none';
+    document.getElementById('bkSurnameAutoTag').style.display = surnameAuto ? 'inline' : 'none';
+
+    document.getElementById('bk-body-columns').style.display = 'block';
+    document.querySelector('#bk-acc-columns .acc-chevron').textContent = '^';
+
+    bkUpdatePreview();
+}
+
+function bkColChanged() {
+    bk.qualCol = document.getElementById('bkQualCol').value;
+    bk.surnameCol = document.getElementById('bkSurnameCol').value;
+    bkUpdatePreview();
+}
+
+function bkUpdatePreview() {
+    bk.qualCol = document.getElementById('bkQualCol').value;
+    bk.surnameCol = document.getElementById('bkSurnameCol').value;
+    bk.bkTable = document.getElementById('bkBkTable').value;
+    bk.prodTable = document.getElementById('bkProdTable').value;
+
+    const preview = document.getElementById('bkColumnPreview');
+    if (!bk.qualCol || !bk.surnameCol || !bk.bkTable || !bk.prodTable) {
+        preview.style.display = 'none';
+        return;
+    }
+    preview.style.display = 'block';
+    preview.innerHTML = `
+        <div class="preview-inner">
+            <strong>Validation Logic:</strong><br>
+            PASS: <code>[${bkEsc(bk.bkTable)}].[${bkEsc(bk.qualCol)}]</code> found in <code>[${bkEsc(bk.prodTable)}].[${bkEsc(bk.qualCol)}]</code><br>
+            Then confirm <code>[${bkEsc(bk.bkTable)}].[${bkEsc(bk.surnameCol)}]</code> matches <code>[${bkEsc(bk.prodTable)}].[${bkEsc(bk.surnameCol)}]</code><br>
+            FAIL: QUALIFICATION not found in production table.
+        </div>`;
+}
+
+async function bkAutoDetect() {
+    const bkTable = document.getElementById('bkBkTable').value;
+    const prodTable = document.getElementById('bkProdTable').value;
+
+    if (!bkTable && !prodTable) {
+        bkSetAlert('bkColumnPreview', 'warning', 'Select at least one table first.');
+        document.getElementById('bkColumnPreview').style.display = 'block';
+        return;
+    }
+
+    await bkLoadColumns({ preferredQual: 'QUALIFICATION', preferredSurname: 'Surname' });
+    bkSetAlert('bkColumnPreview', 'success', 'Column detection complete. You can change the selected columns using the dropdowns above.');
+    document.getElementById('bkColumnPreview').style.display = 'block';
+}
+
+async function bkVerify() {
+    if (!bkValidate()) return;
+    const result = await bkPost('/Biokinetic/VerifyTables', bkBuildRequest());
+    if (!result.success) { bkSetAlert('bkTableStatus', 'error', `Error: ${bkEsc(result.error)}`); return; }
+    bkSetAlert('bkTableStatus', 'success',
+        `<strong>Verification Complete</strong><br>
+        ${bkEsc(bk.bkTable)}: <strong>${(result.biokinieticRecordCount || 0).toLocaleString()}</strong> records<br>
+        ${bkEsc(bk.prodTable)}: <strong>${(result.productionRecordCount || 0).toLocaleString()}</strong> records<br>
+        QUALIFICATION matches: <strong class="${result.matchedCount > 0 ? 'text-success' : 'text-danger'}">${(result.matchedCount || 0).toLocaleString()}</strong> |
+        Missing: <strong class="${result.missingCount > 0 ? 'text-danger' : 'text-success'}">${(result.missingCount || 0).toLocaleString()}</strong>`);
+    document.getElementById('bk-body-tables').style.display = 'block';
+}
+
+async function bkRun() {
+    if (bkRole !== 'DataAnalyst') { bkSetWsInfo('Only the assigned data analyst can run Rule 70.', 'error'); return; }
+    if (!bkValidate()) return;
+
+    const result = await bkPost('/Biokinetic/RunValidation', {
+        ...bkBuildRequest(), clientId: bk.clientId
     });
-});
 
-document.getElementById('bkConnectBtn')?.addEventListener('click', async function() {
-    const server = document.getElementById('bkServer')?.value?.trim();
-    const driver = document.getElementById('bkDriver')?.value;
-    if (!server) return setAlert(document.getElementById('bkConnectionOutput'), 'error', 'Enter server name');
-
-    showSpinner('Connecting...');
-    try {
-        const data = await postJson('/Biokinetic/GetDatabases', { server, driver });
-        hideSpinner();
-        if (data.success) {
-            populateSelect(document.getElementById('bkDatabase'), data.databases || []);
-            setAlert(document.getElementById('bkConnectionOutput'), 'success', `Connected. Found ${data.databases?.length || 0} databases.`);
-            document.getElementById('bkDatabase').addEventListener('change', async function() {
-                if (!this.value) return;
-                showSpinner('Loading tables...');
-                const tableData = await postJson('/Biokinetic/GetTables', { server, database: this.value, driver });
-                hideSpinner();
-                if (tableData.success) {
-                    populateSelect(document.getElementById('bkBiokinieticTable'), tableData.tables || [], tableData.autoBiokinieticTable);
-                    populateSelect(document.getElementById('bkProductionTable'), tableData.tables || [], tableData.autoProductionTable);
-                }
-            });
-        } else {
-            setAlert(document.getElementById('bkConnectionOutput'), 'error', data.error || 'Connection failed');
-        }
-    } catch (err) {
-        hideSpinner();
-        setAlert(document.getElementById('bkConnectionOutput'), 'error', err.message);
+    if (!result.success) {
+        const el = document.getElementById('bkValidationContent');
+        el.classList.remove('empty-state');
+        el.innerHTML = `<div class="alert alert--error">Error: ${bkEsc(result.error)}</div>`;
+        bkTab('validation');
+        return;
     }
-});
 
-document.getElementById('bkRunBtn')?.addEventListener('click', async function() {
-    const clientId = parseInt(document.getElementById('bkClientId')?.value || '0');
-    if (!clientId) return setAlert(document.getElementById('bkAnalysisPane'), 'error', 'Select an engagement');
+    bkApplyResult(result);
+}
 
-    showSpinner('Running validation...');
-    try {
-        const data = await postJson('/Biokinetic/RunValidation', {
-            clientId,
-            server: document.getElementById('bkServer')?.value?.trim(),
-            database: document.getElementById('bkDatabase')?.value,
-            driver: document.getElementById('bkDriver')?.value,
-            biokinieticTable: document.getElementById('bkBiokinieticTable')?.value,
-            productionTable: document.getElementById('bkProductionTable')?.value,
-            qualificationColumn: document.getElementById('bkQualificationColumn')?.value,
-            surnameColumn: document.getElementById('bkSurnameColumn')?.value
-        });
-        hideSpinner();
-        if (data.success) {
-            const html = `<div class="bk-results-grid">
-                <div class="bk-metric-card"><div class="bk-metric-value">${data.totalValidated}</div><div class="bk-metric-label">Records Validated</div></div>
-                <div class="bk-metric-card"><div class="bk-metric-value" style="color: #28a745">${data.passCount}</div><div class="bk-metric-label">Pass</div></div>
-                <div class="bk-metric-card"><div class="bk-metric-value" style="color: #dc3545">${data.failCount}</div><div class="bk-metric-label">Fail</div></div>
-                <div class="bk-metric-card"><div class="bk-metric-value">${data.exceptionRate}%</div><div class="bk-metric-label">Exception Rate</div></div>
-            </div>`;
-            document.getElementById('bkAnalysisPane').innerHTML = html;
+function bkApplyResult(result, opts = {}) {
+    bk.result = result;
+    bk.view = { filter: 'ALL', page: 1, pageSize: bkPreviewLimit };
+    if (!opts.fromWorkspace) bk.runId = result.savedRunId || bk.runId;
+    bk.signedOff = opts.fromWorkspace ? !!bk.signedOff : false;
+    bk.daSignoff = opts.fromWorkspace ? !!bk.daSignoff : false;
+    if (!opts.fromWorkspace) bk.editAccepted = false;
+    bk.dirty = false;
 
-            if (data.reviewRows?.length > 0) {
-                let rows = data.reviewRows.map(r =>
-                    `<tr><td>${r.biokinieticQualification}</td><td>${r.biokinieticSurname}</td>
-                     <td class="${r.status === 'PASS' ? 'bk-pass' : 'bk-fail'}">${r.status}</td>
-                     <td>${r.productionQualification}</td><td>${r.productionSurname}</td></tr>`
-                ).join('');
-                document.getElementById('bkResultsPane').innerHTML =
-                    `<table class="bk-table"><thead><tr>
-                        <th>Biokinetic QUALIFICATION</th><th>Biokinetic Surname</th>
-                        <th>Status</th><th>Production QUALIFICATION</th><th>Production Surname</th>
-                    </tr></thead><tbody>${rows}</tbody></table>`;
-            }
+    bkUpdateBadge(result.status);
+    bkRenderValidation(result);
+    bkRenderExceptions(result);
+    if (opts.switchToValidation !== false) bkTab('validation');
+    bkRenderState();
+}
 
-            document.getElementById('bkStatusBadge').style.display = 'inline-block';
-            document.getElementById('bkStatusBadge').textContent = data.status;
-            document.getElementById('bkStatusBadge').className = data.status === 'PASS' ? 'badge--pass' : 'badge--fail';
+function bkUpdateBadge(status) {
+    const b = document.getElementById('bkStatusBadge');
+    if (!b) return;
+    if (!status) { b.style.display = 'none'; return; }
+    b.style.display = 'inline-block';
+    b.className = `rule-header__badge ${status === 'PASS' ? 'badge--pass' : 'badge--fail'}`;
+    b.textContent = status.toUpperCase();
+}
 
-            if (data.warning) {
-                document.getElementById('bkWorkspaceInfo').innerHTML = `<div class="alert alert--warning">${data.warning}</div>`;
-            }
-        } else {
-            setAlert(document.getElementById('bkAnalysisPane'), 'error', data.error || 'Validation failed');
-        }
-    } catch (err) {
-        hideSpinner();
-        setAlert(document.getElementById('bkAnalysisPane'), 'error', err.message);
+function bkFilterRows(rows, f) {
+    return f === 'PASS' || f === 'FAIL' ? rows.filter(r => r.status === f) : rows;
+}
+
+function bkRenderValidation(r) {
+    const rate = parseFloat(r.exceptionRate);
+    const rateColor = rate > 5 ? '#C62828' : rate > 1 ? '#E65100' : '#2E7D32';
+    const allRows = r.reviewRows || [];
+    const filtered = bkFilterRows(allRows, bk.view.filter);
+    const pageSize = bkPreviewLimit;
+    const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+    const page = Math.min(Math.max(bk.view.page || 1, 1), totalPages);
+    bk.view.page = page;
+    const start = (page - 1) * pageSize;
+    const pageRows = filtered.slice(start, start + pageSize);
+
+    const rowsHtml = pageRows.length === 0
+        ? `<div class="alert alert--info">No rows match the selected filter.</div>`
+        : `<div class="results-table-shell"><div class="table-wrapper">
+            <table class="data-table">
+                <thead><tr><th>#</th><th>Result</th><th>BK QUAL</th><th>BK Surname</th><th>Production QUAL</th><th>Production Surname</th></tr></thead>
+                <tbody>${pageRows.map((row, i) => `
+                    <tr class="${i % 2 === 0 ? 'row-even' : 'row-odd'}">
+                        <td>${start + i + 1}</td>
+                        <td><span class="badge badge--${row.status === 'PASS' ? 'pass' : 'fail'}">${bkEsc(row.status)}</span></td>
+                        <td>${bkEsc(row.biokinieticQualification)}</td>
+                        <td>${bkEsc(row.biokinieticSurname)}</td>
+                        <td>${bkEsc(row.productionQualification)}</td>
+                        <td>${bkEsc(row.productionSurname)}</td>
+                    </tr>`).join('')}
+                </tbody>
+            </table></div>
+            <div class="table-footer">${filtered.length.toLocaleString()} row(s) after filter. Showing ${start + 1}–${start + pageRows.length}.</div>
+        </div>`;
+
+    document.getElementById('bkValidationContent').classList.remove('empty-state');
+    document.getElementById('bkValidationContent').innerHTML = `
+        <div class="stats-grid">
+            <div class="stat-card"><div class="stat-card__label">Records Validated</div><div class="stat-card__value">${r.totalValidated.toLocaleString()}</div></div>
+            <div class="stat-card stat-card--pass"><div class="stat-card__label">PASS</div><div class="stat-card__value">${r.passCount.toLocaleString()}</div></div>
+            <div class="stat-card stat-card--fail"><div class="stat-card__label">FAIL</div><div class="stat-card__value">${r.failCount.toLocaleString()}</div></div>
+            <div class="stat-card"><div class="stat-card__label">Exception Rate</div><div class="stat-card__value" style="color:${rateColor}">${rate.toFixed(2)}%</div></div>
+        </div>
+        <div class="overall-status ${r.status === 'PASS' ? 'status--pass' : 'status--fail'}">
+            ${r.status === 'PASS'
+                ? 'VALIDATION PASSED — All Biokinetic QUALIFICATION codes found in Clinical Production'
+                : `VALIDATION FAILED — ${r.failCount.toLocaleString()} QUALIFICATION code(s) missing from Clinical Production`}
+        </div>
+        ${r.warning ? `<div class="alert alert--warning" style="margin-top:10px">${bkEsc(r.warning)}</div>` : ''}
+        <div class="results-table-panel" style="margin-top:16px">
+            <div class="panel-title-row">
+                <h4>Validation Rows</h4>
+                <span class="panel-title-badge">${filtered.length.toLocaleString()} rows (preview)</span>
+            </div>
+            <div class="validation-toolbar">
+                <div class="validation-toolbar__group">
+                    <label>Filter</label>
+                    <select onchange="bkSetFilter(this.value)">
+                        <option value="ALL" ${bk.view.filter === 'ALL' ? 'selected' : ''}>All</option>
+                        <option value="PASS" ${bk.view.filter === 'PASS' ? 'selected' : ''}>PASS</option>
+                        <option value="FAIL" ${bk.view.filter === 'FAIL' ? 'selected' : ''}>FAIL</option>
+                    </select>
+                </div>
+                <div class="validation-pager">
+                    <button class="btn btn-sm btn-info" onclick="bkSetPage(-1)" ${page <= 1 ? 'disabled' : ''}>Prev</button>
+                    <span class="validation-pager__status">Page ${page} of ${totalPages}</span>
+                    <button class="btn btn-sm btn-info" onclick="bkSetPage(1)" ${page >= totalPages ? 'disabled' : ''}>Next</button>
+                </div>
+            </div>
+            ${rowsHtml}
+        </div>`;
+}
+
+function bkRenderExceptions(r) {
+    const el = document.getElementById('bkExceptionsContent');
+    el.classList.remove('empty-state');
+    if (r.failCount === 0) {
+        el.innerHTML = '<div class="alert alert--success">No exceptions — all QUALIFICATION codes found in Clinical Production.</div>';
+        return;
     }
-});
+    const rows = (r.reviewRows || []).filter(x => x.status === 'FAIL').slice(0, 50);
+    el.innerHTML = `
+        <div class="results-table-shell"><div class="table-wrapper">
+        <table class="data-table">
+            <thead><tr><th>#</th><th>BK QUAL</th><th>BK Surname</th><th>Result</th></tr></thead>
+            <tbody>${rows.map((row, i) => `
+                <tr class="${i % 2 === 0 ? 'row-even' : 'row-odd'}">
+                    <td>${i + 1}</td>
+                    <td><strong>${bkEsc(row.biokinieticQualification)}</strong></td>
+                    <td>${bkEsc(row.biokinieticSurname)}</td>
+                    <td><span class="badge badge--fail">FAIL</span></td>
+                </tr>`).join('')}
+            </tbody>
+        </table></div>
+        <div class="table-footer">${r.failCount.toLocaleString()} exception(s) total. Showing up to 50.</div>
+        </div>`;
+}
 
-document.getElementById('bkVerifyBtn')?.addEventListener('click', async function() {
-    showSpinner('Verifying tables...');
-    try {
-        const data = await postJson('/Biokinetic/VerifyTables', {
-            server: document.getElementById('bkServer')?.value?.trim(),
-            database: document.getElementById('bkDatabase')?.value,
-            driver: document.getElementById('bkDriver')?.value,
-            biokinieticTable: document.getElementById('bkBiokinieticTable')?.value,
-            productionTable: document.getElementById('bkProductionTable')?.value,
-            qualificationColumn: document.getElementById('bkQualificationColumn')?.value,
-            surnameColumn: document.getElementById('bkSurnameColumn')?.value
-        });
-        hideSpinner();
-        if (data.success) {
-            setAlert(document.getElementById('bkConfigOutput'), 'success',
-                `Biokinetic: ${data.biokinieticRecordCount} records | Production: ${data.productionRecordCount} records | Matched: ${data.matchedCount} | Missing: ${data.missingCount}`);
-        } else {
-            setAlert(document.getElementById('bkConfigOutput'), 'error', data.error);
-        }
-    } catch (err) {
-        hideSpinner();
-        setAlert(document.getElementById('bkConfigOutput'), 'error', err.message);
+function bkSetFilter(f) {
+    bk.view.filter = f; bk.view.page = 1;
+    if (bk.result) bkRenderValidation(bk.result);
+}
+
+function bkSetPage(delta) {
+    if (!bk.result) return;
+    bk.view.page = Math.max(1, (bk.view.page || 1) + delta);
+    bkRenderValidation(bk.result);
+}
+
+async function bkGenerateSql() {
+    if (bkRole !== 'DataAnalyst') { bkSetWsInfo('Only the assigned data analyst can generate SQL.', 'error'); return; }
+    if (!bkValidate()) return;
+    const result = await bkPost('/Biokinetic/GenerateSql', {
+        ...bkBuildRequest(), clientId: bk.clientId
+    });
+    if (!result.success) return;
+    const el = document.getElementById('bkSqlContent');
+    el.classList.remove('empty-state');
+    el.innerHTML = `
+        <div class="sql-toolbar">
+            <button class="btn btn-sm btn-primary" onclick="bkCopy('bkSqlCode')">Copy</button>
+        </div>
+        <div class="sql-panel"><pre id="bkSqlCode" class="sql-block">${bkEsc(result.sql)}</pre></div>`;
+    bkTab('sql');
+}
+
+function bkCopy(id) {
+    const text = document.getElementById(id)?.textContent || '';
+    navigator.clipboard.writeText(text).then(() => alert('Copied to clipboard!'));
+}
+
+async function bkSaveWorkspace() {
+    if (bkRole !== 'DataAnalyst') { bkSetWsInfo('Only the assigned data analyst can save this workspace.', 'error'); return; }
+    if (!bk.clientId) { bkSetWsInfo('Select an engagement first.', 'error'); return; }
+    const result = await bkPost('/Biokinetic/SaveWorkspace', { ...bkBuildRequest(), clientId: bk.clientId });
+    if (!result.success) { bkSetWsInfo(`Error: ${bkEsc(result.error || 'Failed to save.')}`, 'error'); return; }
+    bk.workspaceSaved = true;
+    bk.dirty = false;
+    bkSetWsInfo(result.message || 'Workspace saved successfully.', 'success');
+    bkRenderState();
+}
+
+async function bkSignOff() {
+    if (!bk.runId) { bkSetWsInfo('Run validation first so the workspace can be signed off.', 'warning'); return; }
+    if (!bk.workspaceSaved) { bkSetWsInfo('Save the workspace first before signing off.', 'warning'); return; }
+    const result = await bkPost('/Biokinetic/AddSignoff', {
+        runId: bk.runId,
+        comment: document.getElementById('bkSignoffComment').value.trim()
+    });
+    if (!result.success) { bkSetWsInfo(`Error: ${bkEsc(result.error || 'Failed to sign off.')}`, 'error'); return; }
+    bk.signedOff = true;
+    bkSetWsInfo('Workspace signoff saved. Other assigned users can now review this signed run.', 'success');
+    bkRenderState();
+}
+
+async function bkRemoveSignoff() {
+    if (!bk.runId) { bkSetWsInfo('No active run to remove signoff from.', 'warning'); return; }
+    const result = await bkPost('/Biokinetic/RemoveSignoff', { runId: bk.runId, comment: '' });
+    if (!result.success) { bkSetWsInfo(`Error: ${bkEsc(result.error || 'Failed to remove signoff.')}`, 'error'); return; }
+    bk.signedOff = false;
+    bkSetWsInfo('Signoff removed.', 'warning');
+    bkRenderState();
+}
+
+async function bkDownloadExcel() {
+    if (!bk.result) { bkSetWsInfo('Run validation first before downloading.', 'warning'); return; }
+    await bkPostFile('/Biokinetic/DownloadExcel', bk.result, 'Rule70_Biokinetic.xlsx');
+}
+
+async function bkDownloadSql() {
+    if (!bk.clientId) { bkSetWsInfo('Select an engagement first.', 'warning'); return; }
+    const result = await bkPost('/Biokinetic/DownloadSql', bkBuildRequest());
+    if (!result.success) { bkSetWsInfo(`Error: ${bkEsc(result.error || 'Failed.')}`, 'error'); return; }
+    const blob = new Blob([result.sql], { type: 'text/plain' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+    a.download = 'Rule70_Biokinetic.sql'; a.click(); URL.revokeObjectURL(a.href);
+}
+
+async function bkPostFile(url, body, filename) {
+    const token = document.querySelector('[name=__RequestVerificationToken]')?.value || '';
+    const resp = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token }, body: JSON.stringify(body) });
+    if (!resp.ok) { bkSetWsInfo('Download failed.', 'error'); return; }
+    const blob = await resp.blob();
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+    a.download = filename; a.click(); URL.revokeObjectURL(a.href);
+}
+
+function bkSetWsRunState(text, type) {
+    const el = document.getElementById('bkWorkspaceRunState');
+    if (!el) return;
+    el.className = `badge badge--${type} badge--sm`;
+    el.textContent = text;
+}
+
+function bkSetWsInfo(msg, type) {
+    const el = document.getElementById('bkWorkspaceInfo');
+    if (!el) return;
+    el.className = `alert alert--${type}`;
+    el.innerHTML = msg;
+}
+
+function bkRenderState() {
+    const canEdit = bkRole === 'DataAnalyst';
+    const saveBtn = document.getElementById('bkSaveWorkspaceBtn');
+    const signBtn = document.getElementById('bkSignOffBtn');
+    const removeBtn = document.getElementById('bkRemoveSignoffBtn');
+    const verifyBtn = document.getElementById('bkVerifyBtn');
+    const runBtn = document.getElementById('bkRunBtn');
+    const sqlBtn = document.getElementById('bkSqlBtn');
+    if (saveBtn) saveBtn.disabled = !canEdit || bk.signedOff;
+    if (signBtn) {
+        signBtn.style.display = canEdit && bk.runId ? 'inline-flex' : 'none';
+        signBtn.disabled = !bk.workspaceSaved || bk.dirty || bk.signedOff;
+        signBtn.textContent = bk.signedOff ? 'Signed Off' : 'Sign Off';
     }
-});
+    if (removeBtn) removeBtn.style.display = canEdit && bk.signedOff ? 'inline-flex' : 'none';
+    const dlExcelBtn = document.getElementById('bkDownloadExcelBtn');
+    const dlSqlBtn = document.getElementById('bkDownloadSqlBtn');
+    if (dlExcelBtn) dlExcelBtn.style.display = bk.result ? 'inline-flex' : 'none';
+    if (dlSqlBtn) dlSqlBtn.style.display = bk.clientId ? 'inline-flex' : 'none';
+    if (verifyBtn) verifyBtn.disabled = bk.signedOff;
+    if (runBtn) runBtn.disabled = bk.signedOff;
+    if (sqlBtn) sqlBtn.disabled = bk.signedOff;
 
-document.getElementById('bkSqlBtn')?.addEventListener('click', async function() {
-    showSpinner('Generating SQL...');
+    if (!bk.clientId) { bkSetWsRunState('No engagement selected', 'neutral'); bkSetWsInfo('Select an engagement to load the last saved Rule 70 workspace.', 'info'); return; }
+    if (!bk.runId) { bkSetWsRunState('No saved run loaded', 'neutral'); bkSetWsInfo(canEdit ? 'No saved workspace yet. Connect, configure, run validation, then save.' : 'No saved workspace for this engagement yet.', 'info'); return; }
+    if (bk.dirty) { bkSetWsRunState(`Run #${bk.runId} — unsaved changes`, 'warning'); bkSetWsInfo(`Saved run <strong>#${bk.runId}</strong> is loaded but the current screen has unsaved changes.`, 'warning'); return; }
+    if (bk.signedOff) { bkSetWsRunState(`Run #${bk.runId} signed off`, 'success'); bkSetWsInfo(`Saved run <strong>#${bk.runId}</strong> is signed off and available for review.`, 'success'); return; }
+    bkSetWsRunState(`Run #${bk.runId} saved`, 'info');
+    bkSetWsInfo(canEdit ? `Saved run <strong>#${bk.runId}</strong> is loaded. Save and sign off to make results visible to other roles.` : `Saved run <strong>#${bk.runId}</strong> is awaiting analyst signoff.`, 'info');
+}
+
+function bkReset(clearClient) {
+    bk.server = ''; bk.database = ''; bk.driver = 'ODBC Driver 17 for SQL Server';
+    bk.bkTable = ''; bk.prodTable = ''; bk.qualCol = ''; bk.surnameCol = '';
+    bk.runId = null; bk.result = null;
+    bk.view = { filter: 'ALL', page: 1, pageSize: bkPreviewLimit };
+    bk.engRole = ''; bk.status = ''; bk.signedOff = false; bk.workspaceSaved = false;
+    bk.daSignoff = false; bk.resultsVisible = false; bk.dirty = false;
+    bk.editAccepted = false; bk.bkCols = []; bk.prodCols = [];
+    if (clearClient) bk.clientId = 0;
+
+    ['bkServer','bkSignoffComment'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+    document.getElementById('bkDriver').value = 'ODBC Driver 17 for SQL Server';
+    document.getElementById('bkDatabase').innerHTML = '<option value="">Select database</option>';
+    document.getElementById('bkDbFieldGroup').style.display = 'none';
+    ['bkBkTable','bkProdTable','bkQualCol','bkSurnameCol'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.innerHTML = '<option value="">Select table</option>';
+    });
+    ['bkBkAutoTag','bkProdAutoTag','bkQualAutoTag','bkSurnameAutoTag'].forEach(id => {
+        const el = document.getElementById(id); if (el) el.style.display = 'none';
+    });
+    document.getElementById('bkColumnPreview').style.display = 'none';
+    document.getElementById('bkConnectionStatus').innerHTML = '';
+    document.getElementById('bkTableStatus').innerHTML = '';
+    document.getElementById('bkValidationContent').className = 'empty-state';
+    document.getElementById('bkValidationContent').innerHTML = '<p>Run validation to see results here.</p>';
+    document.getElementById('bkExceptionsContent').className = 'empty-state';
+    document.getElementById('bkExceptionsContent').innerHTML = '<p>No exceptions data yet. Run validation first.</p>';
+    document.getElementById('bkSqlContent').className = 'empty-state';
+    document.getElementById('bkSqlContent').innerHTML = '<p>Click "Generate SQL" or run validation to generate the SQL script.</p>';
+    bkUpdateBadge('');
+    bkRenderState();
+}
+
+async function bkHandleClientChange(value) {
+    bk.clientId = parseInt(value || '0') || 0;
+    bkReset();
+    if (!bk.clientId) return;
+    await bkLoadWorkspace();
+}
+
+async function bkLoadWorkspace() {
+    if (!bk.clientId) { bkRenderState(); return; }
     try {
-        const data = await postJson('/Biokinetic/GenerateSql', {
-            clientId: parseInt(document.getElementById('bkClientId')?.value || '0'),
-            server: document.getElementById('bkServer')?.value?.trim(),
-            database: document.getElementById('bkDatabase')?.value,
-            driver: document.getElementById('bkDriver')?.value,
-            biokinieticTable: document.getElementById('bkBiokinieticTable')?.value,
-            productionTable: document.getElementById('bkProductionTable')?.value,
-            qualificationColumn: document.getElementById('bkQualificationColumn')?.value,
-            surnameColumn: document.getElementById('bkSurnameColumn')?.value
-        });
-        hideSpinner();
-        if (data.success) {
-            document.getElementById('bkSqlText').value = data.sql;
-            document.querySelector('[data-tab="sql"]')?.click();
-        } else {
-            setAlert(document.getElementById('bkAnalysisPane'), 'error', data.error || 'SQL generation failed');
-        }
-    } catch (err) {
-        hideSpinner();
-        setAlert(document.getElementById('bkAnalysisPane'), 'error', err.message);
-    }
-});
+        const result = await bkGet(`/Biokinetic/GetWorkspaceState?clientId=${bk.clientId}`);
+        if (!result.success) { bkSetWsInfo(`Error: ${bkEsc(result.error || 'Failed to load workspace.')}`, 'error'); return; }
+        if (!result.hasWorkspace || !result.workspace) { bkRenderState(); return; }
+        await bkHydrate(result.workspace);
+    } catch (err) { bkSetWsInfo(`Error: ${bkEsc(err?.message || 'Failed.')}`, 'error'); }
+}
 
-document.getElementById('bkSaveWorkspaceBtn')?.addEventListener('click', async function() {
-    const clientId = parseInt(document.getElementById('bkClientId')?.value || '0');
-    if (!clientId) return setAlert(document.getElementById('bkWorkspaceInfo'), 'error', 'Select an engagement');
-
-    showSpinner('Saving workspace...');
+async function bkHydrate(ws) {
+    bk.hydrating = true;
     try {
-        await postJson('/Biokinetic/SaveWorkspace', {
-            clientId,
-            server: document.getElementById('bkServer')?.value?.trim(),
-            database: document.getElementById('bkDatabase')?.value,
-            driver: document.getElementById('bkDriver')?.value,
-            biokinieticTable: document.getElementById('bkBiokinieticTable')?.value,
-            productionTable: document.getElementById('bkProductionTable')?.value,
-            qualificationColumn: document.getElementById('bkQualificationColumn')?.value,
-            surnameColumn: document.getElementById('bkSurnameColumn')?.value
-        });
-        hideSpinner();
-        setAlert(document.getElementById('bkWorkspaceInfo'), 'success', 'Workspace saved successfully');
-    } catch (err) {
-        hideSpinner();
-        setAlert(document.getElementById('bkWorkspaceInfo'), 'error', err.message);
-    }
-});
+        bk.runId = ws.lastRunId || null;
+        bk.engRole = ws.currentUserEngagementRole || '';
+        bk.status = ws.currentStatus || '';
+        bk.signedOff = !!ws.currentUserHasSignedOff;
+        bk.workspaceSaved = !!ws.isWorkspaceSaved;
+        bk.daSignoff = !!ws.hasDataAnalystSignoff;
+        bk.resultsVisible = !!ws.resultsVisible;
 
-document.getElementById('bkClientId')?.addEventListener('change', async function() {
-    if (!this.value) return;
-    const data = await postJson('/Biokinetic/GetWorkspaceState', { clientId: parseInt(this.value) });
-    if (data.success && data.workspace) {
-        const ws = data.workspace;
-        document.getElementById('bkBiokinieticTable').value = ws.biokinieticTable || '';
-        document.getElementById('bkProductionTable').value = ws.productionTable || '';
-        document.getElementById('bkQualificationColumn').value = ws.qualificationColumn || '';
-        document.getElementById('bkSurnameColumn').value = ws.surnameColumn || '';
         document.getElementById('bkServer').value = ws.server || '';
-        document.getElementById('bkDatabase').value = ws.database || '';
-        if (ws.summary) {
-            document.getElementById('bkWorkspaceRunState').textContent = ws.summary.status || '-';
-            document.getElementById('bkWorkspaceStatusLabel').textContent = ws.summary.status || '-';
+        document.getElementById('bkDriver').value = ws.driver || 'ODBC Driver 17 for SQL Server';
+        document.getElementById('bkSignoffComment').value = ws.currentUserSignoffComment || '';
+        bk.server = ws.server || '';
+        bk.driver = ws.driver || 'ODBC Driver 17 for SQL Server';
+
+        if (ws.summary && bk.resultsVisible) bkApplyResult(ws.summary, { switchToValidation: false, fromWorkspace: true });
+        else if (ws.summary) bkUpdateBadge(ws.summary.status || '');
+
+        if (ws.server) {
+            await bkConnect({ preferredDatabase: ws.database || '', silent: true,
+                statusMessage: ws.database ? `Connected to <strong>${bkEsc(ws.database)}</strong>. Restored from saved workspace.` : 'Reconnected.' });
         }
+        if (ws.database) {
+            await bkLoadTables({
+                preferredBk: ws.biokinieticTable || ws.bkTable || 'Biokinetic',
+                preferredProd: ws.productionTable || 'Clinical_Production',
+                preferredQual: ws.qualificationColumn || 'QUALIFICATION',
+                preferredSurname: ws.surnameColumn || 'Surname',
+                silent: true
+            });
+        }
+    } finally {
+        bk.hydrating = false;
+        bk.dirty = false;
+        bkRenderState();
     }
+}
+
+function bkValidate() {
+    const missing = [];
+    if (!bk.clientId) missing.push('engagement');
+    if (!bk.server) missing.push('server');
+    if (!bk.database) missing.push('database');
+    if (!bk.bkTable) missing.push('Biokinetic table');
+    if (!bk.prodTable) missing.push('Production table');
+    if (!bk.qualCol) missing.push('QUALIFICATION column');
+    if (!bk.surnameCol) missing.push('Surname column');
+    if (missing.length) {
+        bkSetWsInfo(`Please select: ${missing.join(', ')}.`, 'warning');
+        return false;
+    }
+    return true;
+}
+
+function bkBuildRequest() {
+    return {
+        server: bk.server,
+        database: bk.database,
+        driver: bk.driver,
+        biokinieticTable: document.getElementById('bkBkTable').value || bk.bkTable,
+        productionTable: document.getElementById('bkProdTable').value || bk.prodTable,
+        qualificationColumn: document.getElementById('bkQualCol').value || bk.qualCol,
+        surnameColumn: document.getElementById('bkSurnameCol').value || bk.surnameCol
+    };
+}
+
+document.addEventListener('DOMContentLoaded', async () => {
+    document.getElementById('bkServer').addEventListener('input', () => { bk.server = document.getElementById('bkServer').value.trim(); });
+    document.getElementById('bkDriver').addEventListener('change', () => { bk.driver = document.getElementById('bkDriver').value; });
+
+    document.getElementById('bkDatabase').addEventListener('change', async e => {
+        bk.database = e.target.value;
+        if (bk.database) await bkLoadTables();
+    });
+
+    document.getElementById('bkBkTable').addEventListener('change', async e => {
+        bk.bkTable = e.target.value;
+        if (bk.bkTable) {
+            const r = await bkPost('/Biokinetic/GetColumns', { server: bk.server, database: bk.database, driver: bk.driver, tableName: bk.bkTable });
+            bk.bkCols = r.columns || [];
+            const allCols = [...new Set([...bk.bkCols, ...bk.prodCols])];
+            bkFillColSelect(document.getElementById('bkQualCol'), allCols, 'QUALIFICATION');
+            bkFillColSelect(document.getElementById('bkSurnameCol'), allCols, 'Surname');
+            bk.qualCol = document.getElementById('bkQualCol').value;
+            bk.surnameCol = document.getElementById('bkSurnameCol').value;
+            document.getElementById('bk-body-columns').style.display = 'block';
+            document.querySelector('#bk-acc-columns .acc-chevron').textContent = '^';
+            bkUpdatePreview();
+        }
+    });
+
+    document.getElementById('bkProdTable').addEventListener('change', async e => {
+        bk.prodTable = e.target.value;
+        if (bk.prodTable) {
+            const r = await bkPost('/Biokinetic/GetColumns', { server: bk.server, database: bk.database, driver: bk.driver, tableName: bk.prodTable });
+            bk.prodCols = r.columns || [];
+            const allCols = [...new Set([...bk.bkCols, ...bk.prodCols])];
+            bkFillColSelect(document.getElementById('bkQualCol'), allCols, 'QUALIFICATION');
+            bkFillColSelect(document.getElementById('bkSurnameCol'), allCols, 'Surname');
+            bk.qualCol = document.getElementById('bkQualCol').value;
+            bk.surnameCol = document.getElementById('bkSurnameCol').value;
+            bkUpdatePreview();
+        }
+    });
+
+    document.getElementById('bkQualCol').addEventListener('change', bkColChanged);
+    document.getElementById('bkSurnameCol').addEventListener('change', bkColChanged);
+
+    bkRenderState();
+    if (bk.clientId > 0) await bkLoadWorkspace();
 });
 </script>

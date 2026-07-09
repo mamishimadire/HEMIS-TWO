@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using HemisAudit.Helpers;
 using HemisAudit.ViewModels;
 using Microsoft.Data.SqlClient;
 using Newtonsoft.Json;
@@ -272,6 +274,63 @@ DROP TABLE #ProdQualifications;";
             {
                 if (clientId <= 0) return null;
 
+                try
+                {
+                    await using var connection = await OpenSystemConnectionAsync();
+                    await using var command = connection.CreateConfiguredCommand();
+                    command.CommandText = @"
+SELECT TOP 1
+    vr.RunID,
+    ISNULL(vr.HemisServer, '') AS HemisServer,
+    ISNULL(vr.AuditDatabase, '') AS AuditDatabase,
+    ISNULL(vr.StudTable, '') AS StudTable,
+    ISNULL(vr.DeceasedTable, '') AS DeceasedTable,
+    ISNULL(vr.StudColumn, '') AS StudColumn,
+    ISNULL(vr.DeceasedColumn, '') AS DeceasedColumn,
+    ISNULL(vr.Status, '') AS Status,
+    vr.ResultsJSON,
+    vr.WorkspaceSavedAt
+FROM dbo.ValidationRuns vr
+WHERE vr.ClientID = @ClientID
+  AND vr.RuleNumber = 70
+ORDER BY vr.IsCurrent DESC, vr.RunTimestamp DESC, vr.RunID DESC;";
+                    command.Parameters.AddWithValue("@ClientID", clientId);
+
+                    await using var reader = await command.ExecuteReaderAsync();
+                    if (await reader.ReadAsync())
+                    {
+                        var runId = reader.GetInt32(0);
+                        var summaryJson = reader.IsDBNull(8) ? null : reader.GetString(8);
+                        BiokinieticValidationSummary? summary = null;
+                        if (summaryJson != null)
+                        {
+                            try { summary = JsonConvert.DeserializeObject<BiokinieticValidationSummary>(ValidationPayloadCodec.Decode(summaryJson)); }
+                            catch { }
+                        }
+                        if (summary != null && summary.ReviewRows.Count > BrowserPreviewRowLimit)
+                            summary.ReviewRows = summary.ReviewRows.Take(BrowserPreviewRowLimit).ToList();
+
+                        return new BiokinieticWorkspaceState
+                        {
+                            ClientId = clientId,
+                            Server = reader.GetString(1),
+                            Database = reader.GetString(2),
+                            Driver = "ODBC Driver 17 for SQL Server",
+                            BiokinieticTable = reader.GetString(3),
+                            ProductionTable = reader.GetString(4),
+                            QualificationColumn = reader.GetString(5),
+                            SurnameColumn = reader.GetString(6),
+                            LastRunId = runId,
+                            LastRunStatus = reader.GetString(7),
+                            CurrentStatus = reader.GetString(7),
+                            Summary = summary,
+                            IsWorkspaceSaved = !reader.IsDBNull(9),
+                            LastRunAt = DateTime.UtcNow
+                        };
+                    }
+                }
+                catch { }
+
                 var cached = _pendingValidationCache.GetPending<BiokinieticValidationRequest, BiokinieticValidationSummary>(70, clientId, userEmail ?? "");
                 if (cached?.Request is not null && cached.Summary is not null)
                 {
@@ -416,8 +475,145 @@ LEFT JOIN (
 
         private async Task<int> SaveValidationRunAsync(BiokinieticValidationRequest request, BiokinieticValidationSummary summary, string? userEmail, string? userName, bool markWorkspaceSaved)
         {
-            await Task.Delay(100);
-            return 1;
+            await using var connection = await OpenSystemConnectionAsync();
+            await EnsureClientNotArchivedAsync(connection, request.ClientId);
+            await MarkPreviousRunsHistoricalAsync(connection, request.ClientId, 70);
+
+            var systemUserId = await GetSystemUserIdByEmailAsync(connection, userEmail);
+            if (!systemUserId.HasValue)
+                throw new InvalidOperationException("The current analyst could not be resolved in the system database.");
+
+            var previousHash = await GetLatestValidationHashAsync(connection, request.ClientId, 70);
+
+            await using var command = connection.CreateConfiguredCommand();
+            command.CommandText = @"
+INSERT INTO dbo.ValidationRuns
+(ClientID, UserID, RuleNumber, RuleName, Status, TotalRecords, PassCount, FailCount, ExceptionRate, RunTimestamp,
+ HemisServer, AuditDatabase, StudTable, DeceasedTable, StudColumn, DeceasedColumn,
+ ExceptionsJSON, ResultsJSON, RunByUserName, LastEditedByUserName, LastEditedAt, PreviousHash, RecordHash, IsCurrent)
+VALUES
+(@ClientID, @UserID, 70, @RuleName, @Status, @TotalRecords, @PassCount, @FailCount, @ExceptionRate, GETDATE(),
+ @HemisServer, @AuditDatabase, @StudTable, @DeceasedTable, @StudColumn, @DeceasedColumn,
+ @ExceptionsJSON, @ResultsJSON, @RunByUserName, NULL, NULL, @PreviousHash, NULL, 1);
+SELECT CAST(SCOPE_IDENTITY() AS int);";
+            command.Parameters.AddWithValue("@ClientID", request.ClientId);
+            command.Parameters.AddWithValue("@UserID", systemUserId.Value);
+            command.Parameters.AddWithValue("@RuleName", "Biokinetic Qualification Validation");
+            command.Parameters.AddWithValue("@Status", summary.Status ?? "");
+            command.Parameters.AddWithValue("@TotalRecords", summary.TotalValidated);
+            command.Parameters.AddWithValue("@PassCount", summary.PassCount);
+            command.Parameters.AddWithValue("@FailCount", summary.FailCount);
+            command.Parameters.AddWithValue("@ExceptionRate", summary.ExceptionRate);
+            command.Parameters.AddWithValue("@HemisServer", request.Server);
+            command.Parameters.AddWithValue("@AuditDatabase", request.Database);
+            command.Parameters.AddWithValue("@StudTable", request.BiokinieticTable);
+            command.Parameters.AddWithValue("@DeceasedTable", request.ProductionTable);
+            command.Parameters.AddWithValue("@StudColumn", request.QualificationColumn);
+            command.Parameters.AddWithValue("@DeceasedColumn", request.SurnameColumn);
+            command.Parameters.AddWithValue("@ExceptionsJSON", ValidationPayloadCodec.Encode(
+                JsonConvert.SerializeObject(summary.ReviewRows.Where(r => r.Status == "FAIL").ToList())));
+            command.Parameters.AddWithValue("@ResultsJSON", ValidationPayloadCodec.Encode(JsonConvert.SerializeObject(summary)));
+            command.Parameters.AddWithValue("@RunByUserName", (object?)userName ?? DBNull.Value);
+            command.Parameters.AddWithValue("@PreviousHash", (object?)previousHash ?? DBNull.Value);
+
+            var value = await command.ExecuteScalarAsync();
+            var runId = Convert.ToInt32(value);
+
+            await using var hashCommand = connection.CreateConfiguredCommand();
+            hashCommand.CommandText = "UPDATE dbo.ValidationRuns SET RecordHash = @RecordHash WHERE RunID = @RunID;";
+            hashCommand.Parameters.AddWithValue("@RunID", runId);
+            hashCommand.Parameters.AddWithValue("@RecordHash", ComputeHash(
+                $"Biokinetic|{runId}|{request.ClientId}|{systemUserId.Value}|{summary.Status}|{summary.TotalValidated}|{summary.PassCount}|{summary.FailCount}|{summary.ExceptionRate}|{previousHash}"));
+            await hashCommand.ExecuteNonQueryAsync();
+
+            return runId;
+        }
+
+        private async Task<SqlConnection> OpenSystemConnectionAsync()
+        {
+            var server = _configuration["SystemDatabase:Server"] ?? @"(localdb)\MSSQLLocalDB";
+            var database = _configuration["SystemDatabase:Name"] ?? "HEMISBaseSystem";
+            var trust = _configuration.GetValue("SystemDatabase:TrustServerCertificate", true);
+            var builder = new SqlConnectionStringBuilder
+            {
+                DataSource = server, InitialCatalog = database, IntegratedSecurity = true,
+                TrustServerCertificate = trust, Encrypt = false, ConnectTimeout = 180
+            };
+            var connection = new SqlConnection(builder.ConnectionString);
+            await connection.OpenAsync();
+            return connection;
+        }
+
+        private static async Task<int?> GetSystemUserIdByEmailAsync(SqlConnection connection, string? email)
+        {
+            if (string.IsNullOrWhiteSpace(email)) return null;
+            await using var command = connection.CreateConfiguredCommand();
+            command.CommandText = "SELECT TOP 1 UserID FROM dbo.Users WHERE Email = @Email;";
+            command.Parameters.AddWithValue("@Email", email);
+            var value = await command.ExecuteScalarAsync();
+            return value == null || value == DBNull.Value ? null : Convert.ToInt32(value);
+        }
+
+        private static async Task EnsureClientNotArchivedAsync(SqlConnection connection, int clientId)
+        {
+            await using var command = connection.CreateConfiguredCommand();
+            command.CommandText = "SELECT TOP 1 Status FROM dbo.Clients WHERE ClientID = @ClientID;";
+            command.Parameters.AddWithValue("@ClientID", clientId);
+            var status = Convert.ToString(await command.ExecuteScalarAsync());
+            if (string.Equals(status, "Archived", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("Archived engagements are read-only.");
+        }
+
+        private static async Task MarkPreviousRunsHistoricalAsync(SqlConnection connection, int clientId, int ruleNumber)
+        {
+            await using var command = connection.CreateConfiguredCommand();
+            command.CommandText = @"UPDATE dbo.ValidationRuns SET IsCurrent = 0
+WHERE ClientID = @ClientID AND RuleNumber = @RuleNumber AND IsCurrent = 1;";
+            command.Parameters.AddWithValue("@ClientID", clientId);
+            command.Parameters.AddWithValue("@RuleNumber", ruleNumber);
+            await command.ExecuteNonQueryAsync();
+        }
+
+        private static async Task<string?> GetLatestValidationHashAsync(SqlConnection connection, int clientId, int ruleNumber)
+        {
+            await using var command = connection.CreateConfiguredCommand();
+            command.CommandText = @"SELECT TOP 1 RecordHash FROM dbo.ValidationRuns
+WHERE ClientID = @ClientID AND RuleNumber = @RuleNumber AND RecordHash IS NOT NULL
+ORDER BY RunTimestamp DESC, RunID DESC;";
+            command.Parameters.AddWithValue("@ClientID", clientId);
+            command.Parameters.AddWithValue("@RuleNumber", ruleNumber);
+            var value = await command.ExecuteScalarAsync();
+            return value == null || value == DBNull.Value ? null : Convert.ToString(value);
+        }
+
+        public async Task AddOrUpdateSignoffAsync(int runId, string email, string comment)
+        {
+            await using var connection = await OpenSystemConnectionAsync();
+            var clientId = await QualSurnameModuleHelper.GetClientIdForRunAsync(connection, runId)
+                ?? throw new InvalidOperationException("Validation run was not found.");
+            var userId = await GetSystemUserIdByEmailAsync(connection, email)
+                ?? throw new InvalidOperationException("Reviewer could not be resolved in the system database.");
+            var role = await QualSurnameModuleHelper.GetEngagementRoleAsync(connection, clientId, userId)
+                ?? throw new InvalidOperationException("User is not assigned to this engagement.");
+            await QualSurnameModuleHelper.AddOrUpdateSignoffAsync(connection, runId, clientId, userId, role, comment);
+        }
+
+        public async Task RemoveSignoffAsync(int runId, string email)
+        {
+            await using var connection = await OpenSystemConnectionAsync();
+            var clientId = await QualSurnameModuleHelper.GetClientIdForRunAsync(connection, runId)
+                ?? throw new InvalidOperationException("Validation run was not found.");
+            var userId = await GetSystemUserIdByEmailAsync(connection, email)
+                ?? throw new InvalidOperationException("Reviewer could not be resolved in the system database.");
+            var role = await QualSurnameModuleHelper.GetEngagementRoleAsync(connection, clientId, userId)
+                ?? throw new InvalidOperationException("User is not assigned to this engagement.");
+            await QualSurnameModuleHelper.RemoveSignoffAsync(connection, runId, role);
+        }
+
+        private static string ComputeHash(string input)
+        {
+            using var sha = SHA256.Create();
+            return Convert.ToHexString(sha.ComputeHash(System.Text.Encoding.UTF8.GetBytes(input)));
         }
     }
 }

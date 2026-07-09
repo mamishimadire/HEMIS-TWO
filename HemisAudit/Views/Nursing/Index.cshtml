@@ -1,0 +1,846 @@
+@using HemisAudit.Models
+@using HemisAudit.ViewModels
+@{
+    ViewData["Title"] = "Rule 73 - Nursing Module";
+    Layout = "~/Views/Shared/_Layout.cshtml";
+    var clients = ViewBag.Clients as List<Client> ?? new List<Client>();
+    var selectedClientId = (int)(ViewBag.ClientId ?? 0);
+    var currentSystemRole = ViewBag.CurrentSystemRole as string ?? "";
+    var isResultsOnlyRole =
+        string.Equals(currentSystemRole, "Manager", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(currentSystemRole, "Director", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(currentSystemRole, "Trainee", StringComparison.OrdinalIgnoreCase);
+    var moduleNavigation = ViewBag.ModuleNavigation as ModuleSequenceNavigationViewModel;
+}
+
+@if (isResultsOnlyRole)
+{
+    <style>
+        #nuApp > .accordion-stack,
+        #nuApp > .action-bar { display: none !important; }
+    </style>
+}
+
+<div id="nuApp" class="rule-page-shell">
+    @if (moduleNavigation != null)
+    {
+        @await Html.PartialAsync("_ModuleSequenceNav", moduleNavigation)
+    }
+
+    <div class="engagement-selector">
+        <label>Engagement</label>
+        <select id="nuClientId" onchange="nuHandleClientChange(this.value)">
+            <option value="0">Select engagement (results saved here)</option>
+            @foreach (var c in clients)
+            {
+                <option value="@c.Id" selected="@(c.Id == selectedClientId ? "selected" : null)">@c.Name - @c.FiscalYear</option>
+            }
+        </select>
+        <small>Nursing validates QUALIFICATION values from the Nursing table against Clinical Production and confirms Surname matching.</small>
+    </div>
+
+    <div class="rule-header">
+        <div class="rule-header__icon">NU</div>
+        <div>
+            <h1 class="rule-header__title">HEMIS RULE 73: Nursing Qualification &amp; Surname Validation</h1>
+            <p class="rule-header__sub">Cross-table validation | QUALIFICATION lookup | Surname confirmation | 100% population test</p>
+        </div>
+        <div class="rule-header__badge" id="nuStatusBadge" style="display:none"></div>
+    </div>
+
+    <div class="accordion-stack">
+
+        <div class="accordion-item" id="nu-acc-connection">
+            <button class="accordion-toggle" onclick="nuToggle('connection')">
+                <span class="acc-icon">DB</span>
+                <span>Database Connection</span>
+                <span class="acc-chevron">v</span>
+            </button>
+            <div class="accordion-body" id="nu-body-connection">
+                <div class="form-grid">
+                    <div class="field-group">
+                        <label>Server Name</label>
+                        <input type="text" id="nuServer" placeholder="e.g. MYSERVER or MYSERVER\INSTANCE" />
+                    </div>
+                    <div class="field-group">
+                        <label>Driver</label>
+                        <select id="nuDriver">
+                            <option value="ODBC Driver 17 for SQL Server">ODBC Driver 17 for SQL Server</option>
+                            <option value="ODBC Driver 18 for SQL Server">ODBC Driver 18 for SQL Server</option>
+                            <option value="SQL Server">SQL Server</option>
+                        </select>
+                    </div>
+                    <div class="field-group" id="nuDbFieldGroup" style="display:none">
+                        <label>Database</label>
+                        <select id="nuDatabase">
+                            <option value="">Select database</option>
+                        </select>
+                    </div>
+                </div>
+                <button class="btn btn-primary" onclick="nuConnect()">Connect</button>
+                <div class="status-output" id="nuConnectionStatus"></div>
+            </div>
+        </div>
+
+        <div class="accordion-item" id="nu-acc-tables">
+            <button class="accordion-toggle" onclick="nuToggle('tables')">
+                <span class="acc-icon">TB</span>
+                <span>Table Configuration</span>
+                <span class="acc-chevron">v</span>
+            </button>
+            <div class="accordion-body" id="nu-body-tables" style="display:none">
+                <div class="info-box info-box--blue">
+                    <strong>Nursing Module Logic:</strong> Check that each QUALIFICATION from the Nursing table exists in
+                    Clinical Production. When found, confirm the Surname matches.
+                    PASS = QUALIFICATION found in production; FAIL = missing.
+                </div>
+                <div class="form-grid">
+                    <div class="field-group">
+                        <label>Nursing Table <span class="auto-tag" id="nuNuAutoTag" style="display:none">auto-detected</span></label>
+                        <select id="nuNuTable">
+                            <option value="">Select table</option>
+                        </select>
+                    </div>
+                    <div class="field-group">
+                        <label>Clinical Production Table <span class="auto-tag" id="nuProdAutoTag" style="display:none">auto-detected</span></label>
+                        <select id="nuProdTable">
+                            <option value="">Select table</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="status-output" id="nuTableStatus"></div>
+            </div>
+        </div>
+
+        <div class="accordion-item" id="nu-acc-columns">
+            <button class="accordion-toggle" onclick="nuToggle('columns')">
+                <span class="acc-icon">CL</span>
+                <span>Column Configuration</span>
+                <span class="acc-chevron">v</span>
+            </button>
+            <div class="accordion-body" id="nu-body-columns" style="display:none">
+                <div class="info-box info-box--dark">
+                    <strong>Column Selection:</strong> Choose the <code>QUALIFICATION</code> column (used for matching across both tables)
+                    and the <code>Surname</code> column (confirmed when QUALIFICATION is found in production).
+                </div>
+                <div class="form-grid">
+                    <div class="field-group">
+                        <label>QUALIFICATION Column <span class="auto-tag" id="nuQualAutoTag" style="display:none">auto-detected</span></label>
+                        <select id="nuQualCol" onchange="nuColChanged()">
+                            <option value="">Select column</option>
+                        </select>
+                    </div>
+                    <div class="field-group">
+                        <label>Surname Column <span class="auto-tag" id="nuSurnameAutoTag" style="display:none">auto-detected</span></label>
+                        <select id="nuSurnameCol" onchange="nuColChanged()">
+                            <option value="">Select column</option>
+                        </select>
+                    </div>
+                </div>
+                <div style="margin-top:10px">
+                    <button class="btn btn-secondary" onclick="nuAutoDetect()">Auto-Detect Columns</button>
+                </div>
+                <div id="nuColumnPreview" class="validation-preview" style="display:none;margin-top:12px"></div>
+            </div>
+        </div>
+
+    </div>
+
+    <div class="workspace-signoff-card">
+        <div class="workspace-signoff-card__header">
+            <div>
+                <div class="workspace-signoff-card__title">Saved Workspace</div>
+                <div class="workspace-signoff-card__subtitle">The last saved Rule 73 connection, configuration, results, and signoffs reload here automatically.</div>
+            </div>
+            <div id="nuWorkspaceRunState" class="badge badge--neutral badge--sm">No saved run loaded</div>
+        </div>
+        <div id="nuWorkspaceInfo" class="alert alert--info">
+            Select an engagement to load the last saved Rule 73 workspace.
+        </div>
+        <div class="workspace-signoff-grid">
+            <div class="field-group">
+                <label id="nuSignoffLabel">Signoff Comment</label>
+                <textarea id="nuSignoffComment" placeholder="Add the final review note that confirms this validation is complete."></textarea>
+            </div>
+        </div>
+        <div class="workspace-signoff-actions">
+            <button class="btn btn-success" id="nuSaveWorkspaceBtn" onclick="nuSaveWorkspace()">Save Workspace</button>
+            <button class="btn btn-primary" id="nuSignOffBtn" onclick="nuSignOff()" style="display:none">Sign Off</button>
+            <button class="btn btn-warning" id="nuRemoveSignoffBtn" onclick="nuRemoveSignoff()" style="display:none">Remove Signoff</button>
+            <button class="btn btn-secondary" id="nuDownloadExcelBtn" onclick="nuDownloadExcel()" style="display:none">Download Excel</button>
+            <button class="btn btn-secondary" id="nuDownloadSqlBtn" onclick="nuDownloadSql()" style="display:none">Download SQL</button>
+        </div>
+    </div>
+
+    <div class="action-bar">
+        <button class="btn btn-info" id="nuVerifyBtn" onclick="nuVerify()">Verify Tables</button>
+        <button class="btn btn-success" id="nuRunBtn" onclick="nuRun()">Run Validation</button>
+        <button class="btn btn-primary" id="nuSqlBtn" onclick="nuGenerateSql()">Generate SQL</button>
+    </div>
+
+    <div class="results-panel">
+        <div class="results-tabs">
+            <button class="tab-btn active" type="button" data-tab="validation" onclick="nuTab('validation')">Validation Results</button>
+            <button class="tab-btn" type="button" data-tab="exceptions" onclick="nuTab('exceptions')">Exceptions</button>
+            <button class="tab-btn" type="button" data-tab="sql" onclick="nuTab('sql')">SQL Code</button>
+        </div>
+        <div class="tab-pane active" id="nu-tab-validation">
+            <div id="nuValidationContent" class="empty-state"><p>Run validation to see results here.</p></div>
+        </div>
+        <div class="tab-pane" id="nu-tab-exceptions">
+            <div id="nuExceptionsContent" class="empty-state"><p>No exceptions data yet. Run validation first.</p></div>
+        </div>
+        <div class="tab-pane" id="nu-tab-sql">
+            <div id="nuSqlContent" class="empty-state"><p>Click "Generate SQL" or run validation to generate the SQL script.</p></div>
+        </div>
+    </div>
+</div>
+
+<script>
+const nuRole = @Html.Raw(Newtonsoft.Json.JsonConvert.SerializeObject(currentSystemRole));
+const nuPreviewLimit = 10;
+const nu = {
+    server: '', database: '', driver: 'ODBC Driver 17 for SQL Server',
+    nuTable: '', prodTable: '',
+    qualCol: '', surnameCol: '',
+    clientId: parseInt(document.getElementById('nuClientId')?.value || '0') || 0,
+    runId: null, result: null,
+    view: { filter: 'ALL', page: 1, pageSize: nuPreviewLimit },
+    engRole: '', status: '', signedOff: false, workspaceSaved: false,
+    daSignoff: false, resultsVisible: false, dirty: false, hydrating: false,
+    editAccepted: false, nuCols: [], prodCols: []
+};
+
+function nuToggle(name) {
+    const body = document.getElementById(`nu-body-${name}`);
+    const chevron = document.querySelector(`#nu-acc-${name} .acc-chevron`);
+    if (!body) return;
+    const open = body.style.display !== 'none';
+    body.style.display = open ? 'none' : 'block';
+    if (chevron) chevron.textContent = open ? 'v' : '^';
+}
+
+function nuTab(name) {
+    document.querySelectorAll('#nuApp .tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('#nuApp .tab-pane').forEach(p => p.classList.remove('active'));
+    document.querySelector(`#nuApp [data-tab="${name}"]`)?.classList.add('active');
+    document.getElementById(`nu-tab-${name}`)?.classList.add('active');
+}
+
+function nuSetAlert(elId, type, msg) {
+    const el = document.getElementById(elId);
+    if (el) el.innerHTML = `<div class="alert alert--${type}">${msg}</div>`;
+}
+
+function nuEsc(v) {
+    return String(v ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+async function nuPost(url, data) {
+    return await window.fetchJsonWithProgress(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+    });
+}
+
+async function nuGet(url) {
+    return await window.fetchJsonWithProgress(url, { method: 'GET' });
+}
+
+function nuFillSelect(sel, items, preferred) {
+    if (!sel) return;
+    sel.innerHTML = '<option value="">Select table</option>';
+    (items || []).forEach(v => sel.appendChild(new Option(v, v)));
+    if (preferred && items.includes(preferred)) sel.value = preferred;
+}
+
+function nuFillColSelect(sel, cols, preferred) {
+    if (!sel) return;
+    sel.innerHTML = '<option value="">Select column</option>';
+    (cols || []).forEach(c => sel.appendChild(new Option(c, c)));
+    const match = preferred ? (cols || []).find(c => c.toLowerCase() === preferred.toLowerCase()) : null;
+    if (match) sel.value = match;
+    else if (cols?.length) sel.value = cols[0];
+}
+
+async function nuConnect(opts = {}) {
+    nu.server = document.getElementById('nuServer').value.trim();
+    nu.driver = document.getElementById('nuDriver').value;
+    if (!nu.server) { nuSetAlert('nuConnectionStatus', 'error', 'Enter a server name.'); return null; }
+
+    const result = await nuPost('/Nursing/GetDatabases', { server: nu.server, driver: nu.driver });
+    if (!result.success) { nuSetAlert('nuConnectionStatus', 'error', `Error: ${nuEsc(result.error)}`); return null; }
+
+    const dbSel = document.getElementById('nuDatabase');
+    dbSel.innerHTML = '<option value="">Select database</option>';
+    (result.databases || []).forEach(db => dbSel.appendChild(new Option(db, db)));
+    document.getElementById('nuDbFieldGroup').style.display = 'block';
+
+    if (opts.preferredDatabase && (result.databases || []).includes(opts.preferredDatabase)) {
+        dbSel.value = opts.preferredDatabase;
+        nu.database = opts.preferredDatabase;
+    }
+
+    nuSetAlert('nuConnectionStatus', 'success', opts.statusMessage || `Connected. Found ${result.databases?.length || 0} database(s). Select one below.`);
+    return result;
+}
+
+async function nuLoadTables(opts = {}) {
+    nu.database = document.getElementById('nuDatabase').value;
+    if (!nu.database) return null;
+
+    const result = await nuPost('/Nursing/GetTables', { server: nu.server, database: nu.database, driver: nu.driver });
+    if (!result.success) { nuSetAlert('nuConnectionStatus', 'error', `Error: ${nuEsc(result.error)}`); return null; }
+
+    nuSetAlert('nuConnectionStatus', 'success', `Connected to <strong>${nuEsc(nu.database)}</strong>. Found ${result.tables?.length || 0} tables.`);
+
+    nuFillSelect(document.getElementById('nuNuTable'), result.tables || [], opts.preferredNu || result.autoNursingTable || '');
+    nuFillSelect(document.getElementById('nuProdTable'), result.tables || [], opts.preferredProd || result.autoProductionTable || '');
+
+    nu.nuTable = document.getElementById('nuNuTable').value;
+    nu.prodTable = document.getElementById('nuProdTable').value;
+
+    document.getElementById('nuNuAutoTag').style.display = nu.nuTable && nu.nuTable === result.autoNursingTable ? 'inline' : 'none';
+    document.getElementById('nuProdAutoTag').style.display = nu.prodTable && nu.prodTable === result.autoProductionTable ? 'inline' : 'none';
+
+    document.getElementById('nu-body-tables').style.display = 'block';
+    document.querySelector('#nu-acc-tables .acc-chevron').textContent = '^';
+
+    if (nu.nuTable || nu.prodTable)
+        await nuLoadColumns(opts);
+
+    return result;
+}
+
+async function nuLoadColumns(opts = {}) {
+    const nuTable = document.getElementById('nuNuTable').value;
+    const prodTable = document.getElementById('nuProdTable').value;
+    if (!nu.server || !nu.database) return;
+
+    const nuColsRes = nuTable ? await nuPost('/Nursing/GetColumns', {
+        server: nu.server, database: nu.database, driver: nu.driver, tableName: nuTable
+    }) : { success: false, columns: [] };
+
+    const prodColsRes = prodTable ? await nuPost('/Nursing/GetColumns', {
+        server: nu.server, database: nu.database, driver: nu.driver, tableName: prodTable
+    }) : { success: false, columns: [] };
+
+    nu.nuCols = nuColsRes.columns || [];
+    nu.prodCols = prodColsRes.columns || [];
+
+    const allCols = [...new Set([...nu.nuCols, ...nu.prodCols])];
+
+    nuFillColSelect(document.getElementById('nuQualCol'), allCols, opts.preferredQual || 'QUALIFICATION');
+    nuFillColSelect(document.getElementById('nuSurnameCol'), allCols, opts.preferredSurname || 'Surname');
+
+    nu.qualCol = document.getElementById('nuQualCol').value;
+    nu.surnameCol = document.getElementById('nuSurnameCol').value;
+
+    const qualAuto = allCols.find(c => c.toLowerCase() === 'qualification');
+    const surnameAuto = allCols.find(c => c.toLowerCase() === 'surname');
+    document.getElementById('nuQualAutoTag').style.display = qualAuto ? 'inline' : 'none';
+    document.getElementById('nuSurnameAutoTag').style.display = surnameAuto ? 'inline' : 'none';
+
+    document.getElementById('nu-body-columns').style.display = 'block';
+    document.querySelector('#nu-acc-columns .acc-chevron').textContent = '^';
+
+    nuUpdatePreview();
+}
+
+function nuColChanged() {
+    nu.qualCol = document.getElementById('nuQualCol').value;
+    nu.surnameCol = document.getElementById('nuSurnameCol').value;
+    nuUpdatePreview();
+}
+
+function nuUpdatePreview() {
+    nu.qualCol = document.getElementById('nuQualCol').value;
+    nu.surnameCol = document.getElementById('nuSurnameCol').value;
+    nu.nuTable = document.getElementById('nuNuTable').value;
+    nu.prodTable = document.getElementById('nuProdTable').value;
+
+    const preview = document.getElementById('nuColumnPreview');
+    if (!nu.qualCol || !nu.surnameCol || !nu.nuTable || !nu.prodTable) {
+        preview.style.display = 'none';
+        return;
+    }
+    preview.style.display = 'block';
+    preview.innerHTML = `
+        <div class="preview-inner">
+            <strong>Validation Logic:</strong><br>
+            PASS: <code>[${nuEsc(nu.nuTable)}].[${nuEsc(nu.qualCol)}]</code> found in <code>[${nuEsc(nu.prodTable)}].[${nuEsc(nu.qualCol)}]</code><br>
+            Then confirm <code>[${nuEsc(nu.nuTable)}].[${nuEsc(nu.surnameCol)}]</code> matches <code>[${nuEsc(nu.prodTable)}].[${nuEsc(nu.surnameCol)}]</code><br>
+            FAIL: QUALIFICATION not found in production table.
+        </div>`;
+}
+
+async function nuAutoDetect() {
+    const nuTable = document.getElementById('nuNuTable').value;
+    const prodTable = document.getElementById('nuProdTable').value;
+
+    if (!nuTable && !prodTable) {
+        nuSetAlert('nuColumnPreview', 'warning', 'Select at least one table first.');
+        document.getElementById('nuColumnPreview').style.display = 'block';
+        return;
+    }
+
+    await nuLoadColumns({ preferredQual: 'QUALIFICATION', preferredSurname: 'Surname' });
+    nuSetAlert('nuColumnPreview', 'success', 'Column detection complete. You can change the selected columns using the dropdowns above.');
+    document.getElementById('nuColumnPreview').style.display = 'block';
+}
+
+async function nuVerify() {
+    if (!nuValidate()) return;
+    const result = await nuPost('/Nursing/VerifyTables', nuBuildRequest());
+    if (!result.success) { nuSetAlert('nuTableStatus', 'error', `Error: ${nuEsc(result.error)}`); return; }
+    nuSetAlert('nuTableStatus', 'success',
+        `<strong>Verification Complete</strong><br>
+        ${nuEsc(nu.nuTable)}: <strong>${(result.nursingRecordCount || 0).toLocaleString()}</strong> records<br>
+        ${nuEsc(nu.prodTable)}: <strong>${(result.productionRecordCount || 0).toLocaleString()}</strong> records<br>
+        QUALIFICATION matches: <strong class="${result.matchedCount > 0 ? 'text-success' : 'text-danger'}">${(result.matchedCount || 0).toLocaleString()}</strong> |
+        Missing: <strong class="${result.missingCount > 0 ? 'text-danger' : 'text-success'}">${(result.missingCount || 0).toLocaleString()}</strong>`);
+    document.getElementById('nu-body-tables').style.display = 'block';
+}
+
+async function nuRun() {
+    if (nuRole !== 'DataAnalyst') { nuSetWsInfo('Only the assigned data analyst can run Rule 73.', 'error'); return; }
+    if (!nuValidate()) return;
+
+    const result = await nuPost('/Nursing/RunValidation', {
+        ...nuBuildRequest(), clientId: nu.clientId
+    });
+
+    if (!result.success) {
+        const el = document.getElementById('nuValidationContent');
+        el.classList.remove('empty-state');
+        el.innerHTML = `<div class="alert alert--error">Error: ${nuEsc(result.error)}</div>`;
+        nuTab('validation');
+        return;
+    }
+
+    nuApplyResult(result);
+}
+
+function nuApplyResult(result, opts = {}) {
+    nu.result = result;
+    nu.view = { filter: 'ALL', page: 1, pageSize: nuPreviewLimit };
+    if (!opts.fromWorkspace) nu.runId = result.savedRunId || nu.runId;
+    nu.signedOff = opts.fromWorkspace ? !!nu.signedOff : false;
+    nu.daSignoff = opts.fromWorkspace ? !!nu.daSignoff : false;
+    if (!opts.fromWorkspace) nu.editAccepted = false;
+    nu.dirty = false;
+
+    nuUpdateBadge(result.status);
+    nuRenderValidation(result);
+    nuRenderExceptions(result);
+    if (opts.switchToValidation !== false) nuTab('validation');
+    nuRenderState();
+}
+
+function nuUpdateBadge(status) {
+    const b = document.getElementById('nuStatusBadge');
+    if (!b) return;
+    if (!status) { b.style.display = 'none'; return; }
+    b.style.display = 'inline-block';
+    b.className = `rule-header__badge ${status === 'PASS' ? 'badge--pass' : 'badge--fail'}`;
+    b.textContent = status.toUpperCase();
+}
+
+function nuFilterRows(rows, f) {
+    return f === 'PASS' || f === 'FAIL' ? rows.filter(r => r.status === f) : rows;
+}
+
+function nuRenderValidation(r) {
+    const rate = parseFloat(r.exceptionRate);
+    const rateColor = rate > 5 ? '#C62828' : rate > 1 ? '#E65100' : '#2E7D32';
+    const allRows = r.reviewRows || [];
+    const filtered = nuFilterRows(allRows, nu.view.filter);
+    const pageSize = nuPreviewLimit;
+    const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+    const page = Math.min(Math.max(nu.view.page || 1, 1), totalPages);
+    nu.view.page = page;
+    const start = (page - 1) * pageSize;
+    const pageRows = filtered.slice(start, start + pageSize);
+
+    const rowsHtml = pageRows.length === 0
+        ? `<div class="alert alert--info">No rows match the selected filter.</div>`
+        : `<div class="results-table-shell"><div class="table-wrapper">
+            <table class="data-table">
+                <thead><tr><th>#</th><th>Result</th><th>NU QUAL</th><th>NU Surname</th><th>Production QUAL</th><th>Production Surname</th></tr></thead>
+                <tbody>${pageRows.map((row, i) => `
+                    <tr class="${i % 2 === 0 ? 'row-even' : 'row-odd'}">
+                        <td>${start + i + 1}</td>
+                        <td><span class="badge badge--${row.status === 'PASS' ? 'pass' : 'fail'}">${nuEsc(row.status)}</span></td>
+                        <td>${nuEsc(row.nursingQualification)}</td>
+                        <td>${nuEsc(row.nursingSurname)}</td>
+                        <td>${nuEsc(row.productionQualification)}</td>
+                        <td>${nuEsc(row.productionSurname)}</td>
+                    </tr>`).join('')}
+                </tbody>
+            </table></div>
+            <div class="table-footer">${filtered.length.toLocaleString()} row(s) after filter. Showing ${start + 1}–${start + pageRows.length}.</div>
+        </div>`;
+
+    document.getElementById('nuValidationContent').classList.remove('empty-state');
+    document.getElementById('nuValidationContent').innerHTML = `
+        <div class="stats-grid">
+            <div class="stat-card"><div class="stat-card__label">Records Validated</div><div class="stat-card__value">${r.totalValidated.toLocaleString()}</div></div>
+            <div class="stat-card stat-card--pass"><div class="stat-card__label">PASS</div><div class="stat-card__value">${r.passCount.toLocaleString()}</div></div>
+            <div class="stat-card stat-card--fail"><div class="stat-card__label">FAIL</div><div class="stat-card__value">${r.failCount.toLocaleString()}</div></div>
+            <div class="stat-card"><div class="stat-card__label">Exception Rate</div><div class="stat-card__value" style="color:${rateColor}">${rate.toFixed(2)}%</div></div>
+        </div>
+        <div class="overall-status ${r.status === 'PASS' ? 'status--pass' : 'status--fail'}">
+            ${r.status === 'PASS'
+                ? 'VALIDATION PASSED — All Nursing QUALIFICATION codes found in Clinical Production'
+                : `VALIDATION FAILED — ${r.failCount.toLocaleString()} QUALIFICATION code(s) missing from Clinical Production`}
+        </div>
+        ${r.warning ? `<div class="alert alert--warning" style="margin-top:10px">${nuEsc(r.warning)}</div>` : ''}
+        <div class="results-table-panel" style="margin-top:16px">
+            <div class="panel-title-row">
+                <h4>Validation Rows</h4>
+                <span class="panel-title-badge">${filtered.length.toLocaleString()} rows (preview)</span>
+            </div>
+            <div class="validation-toolbar">
+                <div class="validation-toolbar__group">
+                    <label>Filter</label>
+                    <select onchange="nuSetFilter(this.value)">
+                        <option value="ALL" ${nu.view.filter === 'ALL' ? 'selected' : ''}>All</option>
+                        <option value="PASS" ${nu.view.filter === 'PASS' ? 'selected' : ''}>PASS</option>
+                        <option value="FAIL" ${nu.view.filter === 'FAIL' ? 'selected' : ''}>FAIL</option>
+                    </select>
+                </div>
+                <div class="validation-pager">
+                    <button class="btn btn-sm btn-info" onclick="nuSetPage(-1)" ${page <= 1 ? 'disabled' : ''}>Prev</button>
+                    <span class="validation-pager__status">Page ${page} of ${totalPages}</span>
+                    <button class="btn btn-sm btn-info" onclick="nuSetPage(1)" ${page >= totalPages ? 'disabled' : ''}>Next</button>
+                </div>
+            </div>
+            ${rowsHtml}
+        </div>`;
+}
+
+function nuRenderExceptions(r) {
+    const el = document.getElementById('nuExceptionsContent');
+    el.classList.remove('empty-state');
+    if (r.failCount === 0) {
+        el.innerHTML = '<div class="alert alert--success">No exceptions — all QUALIFICATION codes found in Clinical Production.</div>';
+        return;
+    }
+    const rows = (r.reviewRows || []).filter(x => x.status === 'FAIL').slice(0, 50);
+    el.innerHTML = `
+        <div class="results-table-shell"><div class="table-wrapper">
+        <table class="data-table">
+            <thead><tr><th>#</th><th>NU QUAL</th><th>NU Surname</th><th>Result</th></tr></thead>
+            <tbody>${rows.map((row, i) => `
+                <tr class="${i % 2 === 0 ? 'row-even' : 'row-odd'}">
+                    <td>${i + 1}</td>
+                    <td><strong>${nuEsc(row.nursingQualification)}</strong></td>
+                    <td>${nuEsc(row.nursingSurname)}</td>
+                    <td><span class="badge badge--fail">FAIL</span></td>
+                </tr>`).join('')}
+            </tbody>
+        </table></div>
+        <div class="table-footer">${r.failCount.toLocaleString()} exception(s) total. Showing up to 50.</div>
+        </div>`;
+}
+
+function nuSetFilter(f) {
+    nu.view.filter = f; nu.view.page = 1;
+    if (nu.result) nuRenderValidation(nu.result);
+}
+
+function nuSetPage(delta) {
+    if (!nu.result) return;
+    nu.view.page = Math.max(1, (nu.view.page || 1) + delta);
+    nuRenderValidation(nu.result);
+}
+
+async function nuGenerateSql() {
+    if (nuRole !== 'DataAnalyst') { nuSetWsInfo('Only the assigned data analyst can generate SQL.', 'error'); return; }
+    if (!nuValidate()) return;
+    const result = await nuPost('/Nursing/GenerateSql', {
+        ...nuBuildRequest(), clientId: nu.clientId
+    });
+    if (!result.success) return;
+    const el = document.getElementById('nuSqlContent');
+    el.classList.remove('empty-state');
+    el.innerHTML = `
+        <div class="sql-toolbar">
+            <button class="btn btn-sm btn-primary" onclick="nuCopy('nuSqlCode')">Copy</button>
+        </div>
+        <div class="sql-panel"><pre id="nuSqlCode" class="sql-block">${nuEsc(result.sql)}</pre></div>`;
+    nuTab('sql');
+}
+
+function nuCopy(id) {
+    const text = document.getElementById(id)?.textContent || '';
+    navigator.clipboard.writeText(text).then(() => alert('Copied to clipboard!'));
+}
+
+async function nuSaveWorkspace() {
+    if (nuRole !== 'DataAnalyst') { nuSetWsInfo('Only the assigned data analyst can save this workspace.', 'error'); return; }
+    if (!nu.clientId) { nuSetWsInfo('Select an engagement first.', 'error'); return; }
+    const result = await nuPost('/Nursing/SaveWorkspace', { ...nuBuildRequest(), clientId: nu.clientId });
+    if (!result.success) { nuSetWsInfo(`Error: ${nuEsc(result.error || 'Failed to save.')}`, 'error'); return; }
+    nu.workspaceSaved = true;
+    nu.dirty = false;
+    nuSetWsInfo(result.message || 'Workspace saved successfully.', 'success');
+    nuRenderState();
+}
+
+async function nuSignOff() {
+    if (!nu.runId) { nuSetWsInfo('Run validation first so the workspace can be signed off.', 'warning'); return; }
+    if (!nu.workspaceSaved) { nuSetWsInfo('Save the workspace first before signing off.', 'warning'); return; }
+    const result = await nuPost('/Nursing/AddSignoff', {
+        runId: nu.runId,
+        comment: document.getElementById('nuSignoffComment').value.trim()
+    });
+    if (!result.success) { nuSetWsInfo(`Error: ${nuEsc(result.error || 'Failed to sign off.')}`, 'error'); return; }
+    nu.signedOff = true;
+    nuSetWsInfo('Workspace signoff saved. Other assigned users can now review this signed run.', 'success');
+    nuRenderState();
+}
+
+async function nuRemoveSignoff() {
+    if (!nu.runId) { nuSetWsInfo('No active run to remove signoff from.', 'warning'); return; }
+    const result = await nuPost('/Nursing/RemoveSignoff', { runId: nu.runId, comment: '' });
+    if (!result.success) { nuSetWsInfo(`Error: ${nuEsc(result.error || 'Failed to remove signoff.')}`, 'error'); return; }
+    nu.signedOff = false;
+    nuSetWsInfo('Signoff removed.', 'warning');
+    nuRenderState();
+}
+
+async function nuDownloadExcel() {
+    if (!nu.result) { nuSetWsInfo('Run validation first before downloading.', 'warning'); return; }
+    await nuPostFile('/Nursing/DownloadExcel', nu.result, 'Rule73_Nursing.xlsx');
+}
+
+async function nuDownloadSql() {
+    if (!nu.clientId) { nuSetWsInfo('Select an engagement first.', 'warning'); return; }
+    const result = await nuPost('/Nursing/DownloadSql', nuBuildRequest());
+    if (!result.success) { nuSetWsInfo(`Error: ${nuEsc(result.error || 'Failed.')}`, 'error'); return; }
+    const blob = new Blob([result.sql], { type: 'text/plain' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+    a.download = 'Rule73_Nursing.sql'; a.click(); URL.revokeObjectURL(a.href);
+}
+
+async function nuPostFile(url, body, filename) {
+    const token = document.querySelector('[name=__RequestVerificationToken]')?.value || '';
+    const resp = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token }, body: JSON.stringify(body) });
+    if (!resp.ok) { nuSetWsInfo('Download failed.', 'error'); return; }
+    const blob = await resp.blob();
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+    a.download = filename; a.click(); URL.revokeObjectURL(a.href);
+}
+
+function nuSetWsRunState(text, type) {
+    const el = document.getElementById('nuWorkspaceRunState');
+    if (!el) return;
+    el.className = `badge badge--${type} badge--sm`;
+    el.textContent = text;
+}
+
+function nuSetWsInfo(msg, type) {
+    const el = document.getElementById('nuWorkspaceInfo');
+    if (!el) return;
+    el.className = `alert alert--${type}`;
+    el.innerHTML = msg;
+}
+
+function nuRenderState() {
+    const canEdit = nuRole === 'DataAnalyst';
+    const saveBtn = document.getElementById('nuSaveWorkspaceBtn');
+    const signBtn = document.getElementById('nuSignOffBtn');
+    const removeBtn = document.getElementById('nuRemoveSignoffBtn');
+    const verifyBtn = document.getElementById('nuVerifyBtn');
+    const runBtn = document.getElementById('nuRunBtn');
+    const sqlBtn = document.getElementById('nuSqlBtn');
+    if (saveBtn) saveBtn.disabled = !canEdit || nu.signedOff;
+    if (signBtn) {
+        signBtn.style.display = canEdit && nu.runId ? 'inline-flex' : 'none';
+        signBtn.disabled = !nu.workspaceSaved || nu.dirty || nu.signedOff;
+        signBtn.textContent = nu.signedOff ? 'Signed Off' : 'Sign Off';
+    }
+    if (removeBtn) removeBtn.style.display = canEdit && nu.signedOff ? 'inline-flex' : 'none';
+    const dlExcelBtn = document.getElementById('nuDownloadExcelBtn');
+    const dlSqlBtn = document.getElementById('nuDownloadSqlBtn');
+    if (dlExcelBtn) dlExcelBtn.style.display = nu.result ? 'inline-flex' : 'none';
+    if (dlSqlBtn) dlSqlBtn.style.display = nu.clientId ? 'inline-flex' : 'none';
+    if (verifyBtn) verifyBtn.disabled = nu.signedOff;
+    if (runBtn) runBtn.disabled = nu.signedOff;
+    if (sqlBtn) sqlBtn.disabled = nu.signedOff;
+
+    if (!nu.clientId) { nuSetWsRunState('No engagement selected', 'neutral'); nuSetWsInfo('Select an engagement to load the last saved Rule 73 workspace.', 'info'); return; }
+    if (!nu.runId) { nuSetWsRunState('No saved run loaded', 'neutral'); nuSetWsInfo(canEdit ? 'No saved workspace yet. Connect, configure, run validation, then save.' : 'No saved workspace for this engagement yet.', 'info'); return; }
+    if (nu.dirty) { nuSetWsRunState(`Run #${nu.runId} — unsaved changes`, 'warning'); nuSetWsInfo(`Saved run <strong>#${nu.runId}</strong> is loaded but the current screen has unsaved changes.`, 'warning'); return; }
+    if (nu.signedOff) { nuSetWsRunState(`Run #${nu.runId} signed off`, 'success'); nuSetWsInfo(`Saved run <strong>#${nu.runId}</strong> is signed off and available for review.`, 'success'); return; }
+    nuSetWsRunState(`Run #${nu.runId} saved`, 'info');
+    nuSetWsInfo(canEdit ? `Saved run <strong>#${nu.runId}</strong> is loaded. Save and sign off to make results visible to other roles.` : `Saved run <strong>#${nu.runId}</strong> is awaiting analyst signoff.`, 'info');
+}
+
+function nuReset(clearClient) {
+    nu.server = ''; nu.database = ''; nu.driver = 'ODBC Driver 17 for SQL Server';
+    nu.nuTable = ''; nu.prodTable = ''; nu.qualCol = ''; nu.surnameCol = '';
+    nu.runId = null; nu.result = null;
+    nu.view = { filter: 'ALL', page: 1, pageSize: nuPreviewLimit };
+    nu.engRole = ''; nu.status = ''; nu.signedOff = false; nu.workspaceSaved = false;
+    nu.daSignoff = false; nu.resultsVisible = false; nu.dirty = false;
+    nu.editAccepted = false; nu.nuCols = []; nu.prodCols = [];
+    if (clearClient) nu.clientId = 0;
+
+    ['nuServer','nuSignoffComment'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+    document.getElementById('nuDriver').value = 'ODBC Driver 17 for SQL Server';
+    document.getElementById('nuDatabase').innerHTML = '<option value="">Select database</option>';
+    document.getElementById('nuDbFieldGroup').style.display = 'none';
+    ['nuNuTable','nuProdTable','nuQualCol','nuSurnameCol'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.innerHTML = '<option value="">Select table</option>';
+    });
+    ['nuNuAutoTag','nuProdAutoTag','nuQualAutoTag','nuSurnameAutoTag'].forEach(id => {
+        const el = document.getElementById(id); if (el) el.style.display = 'none';
+    });
+    document.getElementById('nuColumnPreview').style.display = 'none';
+    document.getElementById('nuConnectionStatus').innerHTML = '';
+    document.getElementById('nuTableStatus').innerHTML = '';
+    document.getElementById('nuValidationContent').className = 'empty-state';
+    document.getElementById('nuValidationContent').innerHTML = '<p>Run validation to see results here.</p>';
+    document.getElementById('nuExceptionsContent').className = 'empty-state';
+    document.getElementById('nuExceptionsContent').innerHTML = '<p>No exceptions data yet. Run validation first.</p>';
+    document.getElementById('nuSqlContent').className = 'empty-state';
+    document.getElementById('nuSqlContent').innerHTML = '<p>Click "Generate SQL" or run validation to generate the SQL script.</p>';
+    nuUpdateBadge('');
+    nuRenderState();
+}
+
+async function nuHandleClientChange(value) {
+    nu.clientId = parseInt(value || '0') || 0;
+    nuReset();
+    if (!nu.clientId) return;
+    await nuLoadWorkspace();
+}
+
+async function nuLoadWorkspace() {
+    if (!nu.clientId) { nuRenderState(); return; }
+    try {
+        const result = await nuGet(`/Nursing/GetWorkspaceState?clientId=${nu.clientId}`);
+        if (!result.success) { nuSetWsInfo(`Error: ${nuEsc(result.error || 'Failed to load workspace.')}`, 'error'); return; }
+        if (!result.hasWorkspace || !result.workspace) { nuRenderState(); return; }
+        await nuHydrate(result.workspace);
+    } catch (err) { nuSetWsInfo(`Error: ${nuEsc(err?.message || 'Failed.')}`, 'error'); }
+}
+
+async function nuHydrate(ws) {
+    nu.hydrating = true;
+    try {
+        nu.runId = ws.lastRunId || null;
+        nu.engRole = ws.currentUserEngagementRole || '';
+        nu.status = ws.currentStatus || '';
+        nu.signedOff = !!ws.currentUserHasSignedOff;
+        nu.workspaceSaved = !!ws.isWorkspaceSaved;
+        nu.daSignoff = !!ws.hasDataAnalystSignoff;
+        nu.resultsVisible = !!ws.resultsVisible;
+
+        document.getElementById('nuServer').value = ws.server || '';
+        document.getElementById('nuDriver').value = ws.driver || 'ODBC Driver 17 for SQL Server';
+        document.getElementById('nuSignoffComment').value = ws.currentUserSignoffComment || '';
+        nu.server = ws.server || '';
+        nu.driver = ws.driver || 'ODBC Driver 17 for SQL Server';
+
+        if (ws.summary && nu.resultsVisible) nuApplyResult(ws.summary, { switchToValidation: false, fromWorkspace: true });
+        else if (ws.summary) nuUpdateBadge(ws.summary.status || '');
+
+        if (ws.server) {
+            await nuConnect({ preferredDatabase: ws.database || '', silent: true,
+                statusMessage: ws.database ? `Connected to <strong>${nuEsc(ws.database)}</strong>. Restored from saved workspace.` : 'Reconnected.' });
+        }
+        if (ws.database) {
+            await nuLoadTables({
+                preferredNu: ws.nursingTable || 'Nursing',
+                preferredProd: ws.productionTable || 'Clinical_Production',
+                preferredQual: ws.qualificationColumn || 'QUALIFICATION',
+                preferredSurname: ws.surnameColumn || 'Surname',
+                silent: true
+            });
+        }
+    } finally {
+        nu.hydrating = false;
+        nu.dirty = false;
+        nuRenderState();
+    }
+}
+
+function nuValidate() {
+    const missing = [];
+    if (!nu.clientId) missing.push('engagement');
+    if (!nu.server) missing.push('server');
+    if (!nu.database) missing.push('database');
+    if (!nu.nuTable) missing.push('Nursing table');
+    if (!nu.prodTable) missing.push('Production table');
+    if (!nu.qualCol) missing.push('QUALIFICATION column');
+    if (!nu.surnameCol) missing.push('Surname column');
+    if (missing.length) {
+        nuSetWsInfo(`Please select: ${missing.join(', ')}.`, 'warning');
+        return false;
+    }
+    return true;
+}
+
+function nuBuildRequest() {
+    return {
+        server: nu.server,
+        database: nu.database,
+        driver: nu.driver,
+        nursingTable: document.getElementById('nuNuTable').value || nu.nuTable,
+        productionTable: document.getElementById('nuProdTable').value || nu.prodTable,
+        qualificationColumn: document.getElementById('nuQualCol').value || nu.qualCol,
+        surnameColumn: document.getElementById('nuSurnameCol').value || nu.surnameCol
+    };
+}
+
+document.addEventListener('DOMContentLoaded', async () => {
+    document.getElementById('nuServer').addEventListener('input', () => { nu.server = document.getElementById('nuServer').value.trim(); });
+    document.getElementById('nuDriver').addEventListener('change', () => { nu.driver = document.getElementById('nuDriver').value; });
+
+    document.getElementById('nuDatabase').addEventListener('change', async e => {
+        nu.database = e.target.value;
+        if (nu.database) await nuLoadTables();
+    });
+
+    document.getElementById('nuNuTable').addEventListener('change', async e => {
+        nu.nuTable = e.target.value;
+        if (nu.nuTable) {
+            const r = await nuPost('/Nursing/GetColumns', { server: nu.server, database: nu.database, driver: nu.driver, tableName: nu.nuTable });
+            nu.nuCols = r.columns || [];
+            const allCols = [...new Set([...nu.nuCols, ...nu.prodCols])];
+            nuFillColSelect(document.getElementById('nuQualCol'), allCols, 'QUALIFICATION');
+            nuFillColSelect(document.getElementById('nuSurnameCol'), allCols, 'Surname');
+            nu.qualCol = document.getElementById('nuQualCol').value;
+            nu.surnameCol = document.getElementById('nuSurnameCol').value;
+            document.getElementById('nu-body-columns').style.display = 'block';
+            document.querySelector('#nu-acc-columns .acc-chevron').textContent = '^';
+            nuUpdatePreview();
+        }
+    });
+
+    document.getElementById('nuProdTable').addEventListener('change', async e => {
+        nu.prodTable = e.target.value;
+        if (nu.prodTable) {
+            const r = await nuPost('/Nursing/GetColumns', { server: nu.server, database: nu.database, driver: nu.driver, tableName: nu.prodTable });
+            nu.prodCols = r.columns || [];
+            const allCols = [...new Set([...nu.nuCols, ...nu.prodCols])];
+            nuFillColSelect(document.getElementById('nuQualCol'), allCols, 'QUALIFICATION');
+            nuFillColSelect(document.getElementById('nuSurnameCol'), allCols, 'Surname');
+            nu.qualCol = document.getElementById('nuQualCol').value;
+            nu.surnameCol = document.getElementById('nuSurnameCol').value;
+            nuUpdatePreview();
+        }
+    });
+
+    document.getElementById('nuQualCol').addEventListener('change', nuColChanged);
+    document.getElementById('nuSurnameCol').addEventListener('change', nuColChanged);
+
+    nuRenderState();
+    if (nu.clientId > 0) await nuLoadWorkspace();
+});
+</script>

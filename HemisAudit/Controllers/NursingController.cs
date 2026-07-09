@@ -9,22 +9,22 @@ using Microsoft.AspNetCore.Mvc;
 namespace HemisAudit.Controllers
 {
     [Authorize]
-    public class BiokinieticController : Controller
+    public class NursingController : Controller
     {
-        private readonly IBiokinieticService _biokinetic;
+        private readonly INursingService _nursing;
         private readonly IExportService _export;
         private readonly IAuditLogService _audit;
         private readonly UserManager<ApplicationUser> _users;
         private readonly ISystemDatabaseService _systemDb;
 
-        public BiokinieticController(
-            IBiokinieticService biokinetic,
+        public NursingController(
+            INursingService nursing,
             IExportService export,
             IAuditLogService audit,
             UserManager<ApplicationUser> users,
             ISystemDatabaseService systemDb)
         {
-            _biokinetic = biokinetic;
+            _nursing = nursing;
             _export = export;
             _audit = audit;
             _users = users;
@@ -69,7 +69,7 @@ namespace HemisAudit.Controllers
                 .ToList();
             ViewBag.ClientId = clientId;
             ViewBag.CurrentSystemRole = role;
-            ViewBag.ModuleNavigation = ModuleSequenceNavigationHelper.BuildForWorkspace(70, clientId);
+            ViewBag.ModuleNavigation = ModuleSequenceNavigationHelper.BuildForWorkspace(73, clientId);
             return View();
         }
 
@@ -89,7 +89,7 @@ namespace HemisAudit.Controllers
                 return Json(new { success = false, error = "You cannot access this engagement." });
             }
 
-            var workspace = await _biokinetic.GetCurrentWorkspaceStateAsync(clientId, user?.Email);
+            var workspace = await _nursing.GetCurrentWorkspaceStateAsync(clientId, user?.Email);
             var resultsVisible = CanViewWorkspaceResults(role, workspace);
             if (workspace != null) workspace.ResultsVisible = resultsVisible;
 
@@ -102,7 +102,7 @@ namespace HemisAudit.Controllers
         public async Task<IActionResult> GetDatabases([FromBody] ConnectionViewModel model)
         {
             var result = await RequireDataAnalystAsync(
-                async () => await _biokinetic.GetDatabasesAsync(model.Server, model.Driver));
+                async () => await _nursing.GetDatabasesAsync(model.Server, model.Driver));
             return Json(result);
         }
 
@@ -110,54 +110,54 @@ namespace HemisAudit.Controllers
         public async Task<IActionResult> GetTables([FromBody] ConnectionViewModel model)
         {
             var result = await RequireDataAnalystAsync(
-                async () => await _biokinetic.GetTablesAsync(model.Server, model.Database, model.Driver));
+                async () => await _nursing.GetTablesAsync(model.Server, model.Database, model.Driver));
             return Json(result);
         }
 
         [HttpPost]
-        public async Task<IActionResult> GetColumns([FromBody] BiokinieticVerifyRequest request)
+        public async Task<IActionResult> GetColumns([FromBody] NursingVerifyRequest request)
         {
-            var tableName = !string.IsNullOrWhiteSpace(request.TableName) ? request.TableName : request.BiokinieticTable;
+            var tableName = !string.IsNullOrWhiteSpace(request.TableName) ? request.TableName : request.NursingTable;
             var result = await RequireDataAnalystAsync(
-                async () => await _biokinetic.GetColumnsAsync(request.Server, request.Database, request.Driver, tableName));
+                async () => await _nursing.GetColumnsAsync(request.Server, request.Database, request.Driver, tableName));
             return Json(result);
         }
 
         [HttpPost]
-        public async Task<IActionResult> VerifyTables([FromBody] BiokinieticVerifyRequest request)
+        public async Task<IActionResult> VerifyTables([FromBody] NursingVerifyRequest request)
         {
             var result = await RequireDataAnalystAsync(
-                async () => await _biokinetic.VerifyTablesAsync(request));
+                async () => await _nursing.VerifyTablesAsync(request));
             return Json(result);
         }
 
         [HttpPost]
-        public async Task<IActionResult> RunValidation([FromBody] BiokinieticValidationRequest request)
+        public async Task<IActionResult> RunValidation([FromBody] NursingValidationRequest request)
         {
             var user = await _users.GetUserAsync(User);
             var role = await GetCurrentSystemRoleAsync(user);
 
             if (request.ClientId <= 0)
-                return Json(new BiokinieticValidationSummary { Success = false, Error = "Select an approved engagement before running validation." });
+                return Json(new NursingValidationSummary { Success = false, Error = "Select an approved engagement before running validation." });
 
             if (!await _systemDb.CanAccessClientResultsAsync(request.ClientId, user, role))
-                return Json(new BiokinieticValidationSummary { Success = false, Error = "You cannot access this engagement." });
+                return Json(new NursingValidationSummary { Success = false, Error = "You cannot access this engagement." });
 
             var engagementRole = await _systemDb.GetEngagementRoleAsync(request.ClientId, user, role);
             if (!string.Equals(role, "DataAnalyst", StringComparison.OrdinalIgnoreCase) ||
                 !string.Equals(engagementRole, "DataAnalyst", StringComparison.OrdinalIgnoreCase))
-                return Json(new BiokinieticValidationSummary { Success = false, Error = "Only the assigned data analyst can run Biokinetic validation." });
+                return Json(new NursingValidationSummary { Success = false, Error = "Only the assigned data analyst can run Nursing validation." });
 
-            var result = await _biokinetic.RunValidationAsync(request, user?.Email, user?.FullName ?? user?.Email);
+            var result = await _nursing.RunValidationAsync(request, user?.Email, user?.FullName ?? user?.Email);
 
             if (result.Success)
-                await _audit.LogAsync("run_validation", $"Biokinetic on client {request.ClientId}: {result.Status} ({result.FailCount} fail rows).", user?.Id, user?.Email);
+                await _audit.LogAsync("run_validation", $"Nursing on client {request.ClientId}: {result.Status} ({result.FailCount} fail rows).", user?.Id, user?.Email);
 
             return Json(result);
         }
 
         [HttpPost]
-        public async Task<IActionResult> SaveWorkspace([FromBody] BiokinieticValidationRequest request)
+        public async Task<IActionResult> SaveWorkspace([FromBody] NursingValidationRequest request)
         {
             var user = await _users.GetUserAsync(User);
             var role = await GetCurrentSystemRoleAsync(user);
@@ -168,20 +168,20 @@ namespace HemisAudit.Controllers
             if (!await _systemDb.CanAccessClientResultsAsync(request.ClientId, user, role))
                 return Json(new { success = false, error = "You cannot access this engagement." });
 
-            var result = await _biokinetic.SaveWorkspaceStateAsync(request.ClientId, request, user?.Email);
+            var result = await _nursing.SaveWorkspaceStateAsync(request.ClientId, request, user?.Email);
 
             if (result)
-                await _audit.LogAsync("save_validation_workspace", $"DataAnalyst saved Biokinetic workspace for client {request.ClientId}.", user?.Id, user?.Email);
+                await _audit.LogAsync("save_validation_workspace", $"DataAnalyst saved Nursing workspace for client {request.ClientId}.", user?.Id, user?.Email);
 
             return Json(new { success = result, message = result ? "Workspace saved successfully." : "Failed to save workspace." });
         }
 
         [HttpPost]
-        public async Task<IActionResult> GenerateSql([FromBody] BiokinieticValidationRequest request)
+        public async Task<IActionResult> GenerateSql([FromBody] NursingValidationRequest request)
         {
             var result = await RequireDataAnalystAsync(async () =>
             {
-                var sql = await _biokinetic.GenerateSqlAsync(request);
+                var sql = await _nursing.GenerateSqlAsync(request);
                 return new { success = true, sql } as object;
             });
             return Json(result);
@@ -194,8 +194,8 @@ namespace HemisAudit.Controllers
             if (user == null) return Json(new { success = false, error = "Not authenticated." });
             try
             {
-                await _biokinetic.AddOrUpdateSignoffAsync(model.RunId, user.Email!, model.Comment);
-                await _audit.LogAsync("add_signoff", $"Biokinetic signoff added for run {model.RunId}.", user.Id, user.Email);
+                await _nursing.AddOrUpdateSignoffAsync(model.RunId, user.Email!, model.Comment);
+                await _audit.LogAsync("add_signoff", $"Nursing signoff added for run {model.RunId}.", user.Id, user.Email);
                 return Json(new { success = true });
             }
             catch (Exception ex) { return Json(new { success = false, error = ex.Message }); }
@@ -208,25 +208,25 @@ namespace HemisAudit.Controllers
             if (user == null) return Json(new { success = false, error = "Not authenticated." });
             try
             {
-                await _biokinetic.RemoveSignoffAsync(model.RunId, user.Email!);
-                await _audit.LogAsync("remove_signoff", $"Biokinetic signoff removed for run {model.RunId}.", user.Id, user.Email);
+                await _nursing.RemoveSignoffAsync(model.RunId, user.Email!);
+                await _audit.LogAsync("remove_signoff", $"Nursing signoff removed for run {model.RunId}.", user.Id, user.Email);
                 return Json(new { success = true });
             }
             catch (Exception ex) { return Json(new { success = false, error = ex.Message }); }
         }
 
         [HttpPost]
-        public IActionResult DownloadExcel([FromBody] BiokinieticValidationSummary summary)
+        public IActionResult DownloadExcel([FromBody] NursingValidationSummary summary)
         {
-            var rows = (summary.ReviewRows ?? new()).Select(r => (r.BiokinieticQualification, r.BiokinieticSurname, r.Status, r.ProductionQualification, r.ProductionSurname));
-            var bytes = _export.ExportQualSurnameExcel("Biokinetic", 70, summary.TotalValidated, summary.PassCount, summary.FailCount, summary.ExceptionRate, summary.Status ?? "", "Biokinetic", "Clinical_Production", "QUALIFICATION", "Surname", rows);
-            return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "Rule70_Biokinetic.xlsx");
+            var rows = (summary.ReviewRows ?? new()).Select(r => (r.NursingQualification, r.NursingSurname, r.Status, r.ProductionQualification, r.ProductionSurname));
+            var bytes = _export.ExportQualSurnameExcel("Nursing", 73, summary.TotalValidated, summary.PassCount, summary.FailCount, summary.ExceptionRate, summary.Status ?? "", "Nursing", "Clinical_Production", "QUALIFICATION", "Surname", rows);
+            return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "Rule73_Nursing.xlsx");
         }
 
         [HttpPost]
-        public async Task<IActionResult> DownloadSql([FromBody] BiokinieticValidationRequest request)
+        public async Task<IActionResult> DownloadSql([FromBody] NursingValidationRequest request)
         {
-            var sql = await _biokinetic.GenerateSqlAsync(request);
+            var sql = await _nursing.GenerateSqlAsync(request);
             return Json(new { success = true, sql });
         }
 
@@ -251,7 +251,7 @@ namespace HemisAudit.Controllers
             return roles.FirstOrDefault() ?? "";
         }
 
-        private static bool CanViewWorkspaceResults(string role, BiokinieticWorkspaceState? workspace)
+        private static bool CanViewWorkspaceResults(string role, NursingWorkspaceState? workspace)
         {
             if (workspace == null) return false;
             if (string.Equals(role, "DataAnalyst", StringComparison.OrdinalIgnoreCase) ||

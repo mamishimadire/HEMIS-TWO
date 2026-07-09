@@ -20,5 +20,9 @@ namespace HemisAudit.Services
         // Workspace state
         Task<RadiographyWorkspaceState?> GetCurrentWorkspaceStateAsync(int clientId, string? userEmail = null);
         Task<bool> SaveWorkspaceStateAsync(int clientId, RadiographyValidationRequest config, string? userEmail = null);
+
+        // Signoff
+        Task AddOrUpdateSignoffAsync(int runId, string email, string comment);
+        Task RemoveSignoffAsync(int runId, string email);
     }
 }
