@@ -1,0 +1,469 @@
+@using HemisAudit.Models
+@using HemisAudit.ViewModels
+@{
+    ViewData["Title"] = "Radiography Module - Qualification & Surname Validation";
+    Layout = "~/Views/Shared/_Layout.cshtml";
+    var clients = ViewBag.Clients as List<Client> ?? new();
+    var selectedClientId = ViewBag.ClientId is int clientId ? clientId : 0;
+    var currentSystemRole = ViewBag.CurrentSystemRole as string ?? "";
+    var isResultsOnlyRole =
+        string.Equals(currentSystemRole, "Manager", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(currentSystemRole, "Director", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(currentSystemRole, "Trainee", StringComparison.OrdinalIgnoreCase);
+    var moduleNavigation = ViewBag.ModuleNavigation as ModuleSequenceNavigationViewModel;
+}
+
+<style>
+    .rg-results-grid { display: grid; gap: 16px; }
+    .rg-metric-card { background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 8px; padding: 16px; }
+    .rg-metric-value { font-size: 24px; font-weight: 700; color: var(--primary); }
+    .rg-metric-label { font-size: 12px; text-transform: uppercase; color: var(--text-muted); margin-top: 4px; }
+    .rg-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    .rg-table th { background: var(--primary); color: white; padding: 8px; text-align: left; }
+    .rg-table td { padding: 6px 8px; border-bottom: 1px solid var(--border-color); }
+    .rg-table tr:hover { background: var(--hover-bg); }
+    .rg-pass { color: #28a745; font-weight: 700; }
+    .rg-fail { color: #dc3545; font-weight: 700; }
+</style>
+
+<div id="app" class="rule-page-shell">
+    @if (moduleNavigation != null)
+    {
+        @await Html.PartialAsync("_ModuleSequenceNav", moduleNavigation)
+    }
+
+    <div class="engagement-selector">
+        <label for="rgClientId">Engagement</label>
+        <select id="rgClientId">
+            <option value="">Select engagement</option>
+            @foreach (var client in clients)
+            {
+                <option value="@client.Id" selected="@(client.Id == selectedClientId ? "selected" : null)">
+                    @client.Name (@client.FiscalYear)
+                </option>
+            }
+        </select>
+        <small>Radiography validates QUALIFICATION values from Radiography table against Clinical Production table and confirms Surname matching.</small>
+    </div>
+
+    <div class="rule-header">
+        <div class="rule-header__icon">RG</div>
+        <div>
+            <h1 class="rule-header__title">Radiography Module: Qualification & Surname Validation</h1>
+            <p class="rule-header__sub">
+                Checks that QUALIFICATION values from Radiography table exist in Clinical Production table.
+                When QUALIFICATION is found, confirms matching Surname records.
+            </p>
+        </div>
+        <div class="rule-header__badge" id="rgStatusBadge" style="display:none"></div>
+    </div>
+
+    @if (!isResultsOnlyRole)
+    {
+        <div class="accordion-stack">
+            <div class="accordion-item">
+                <button class="accordion-toggle" type="button" onclick="window.toggleAccordion('rg-conn')">
+                    <span class="acc-icon">DB</span><span>Database Connection</span><span class="acc-chevron">v</span>
+                </button>
+                <div class="accordion-body" id="body-rg-conn">
+                    <div class="form-grid">
+                        <div class="field-group">
+                            <label for="rgServer">Server Name</label>
+                            <input id="rgServer" type="text" placeholder="e.g. MYSERVER\INSTANCE or (localdb)\MSSQLLocalDB" />
+                        </div>
+                        <div class="field-group">
+                            <label for="rgDriver">Driver</label>
+                            <select id="rgDriver">
+                                <option value="ODBC Driver 17 for SQL Server">ODBC Driver 17 for SQL Server</option>
+                                <option value="ODBC Driver 18 for SQL Server">ODBC Driver 18 for SQL Server</option>
+                                <option value="SQL Server">SQL Server</option>
+                            </select>
+                        </div>
+                        <div class="field-group">
+                            <label for="rgDatabase">Database</label>
+                            <select id="rgDatabase"></select>
+                        </div>
+                    </div>
+                    <div class="action-bar" style="justify-content:flex-start; margin:12px 0 0">
+                        <button type="button" class="btn btn-primary" id="rgConnectBtn">Connect</button>
+                    </div>
+                    <div id="rgConnectionOutput" class="status-output"></div>
+                </div>
+            </div>
+
+            <div class="accordion-item">
+                <button class="accordion-toggle" type="button" onclick="window.toggleAccordion('rg-config')">
+                    <span class="acc-icon">CF</span><span>Table & Column Configuration</span><span class="acc-chevron">v</span>
+                </button>
+                <div class="accordion-body" id="body-rg-config" style="display:none">
+                    <div class="info-box info-box--blue">
+                        <strong>Radiography Module Logic:</strong><br />
+                        Compare QUALIFICATION and Surname columns from Radiography table against Clinical Production table.
+                        Records PASS when the QUALIFICATION exists in the production table; FAIL when missing.
+                    </div>
+                    <div class="form-grid">
+                        <div class="field-group">
+                            <label for="rgRadiographyTable">Radiography Table</label>
+                            <select id="rgRadiographyTable" onchange="window.rgLoadColumns('radiography', this.value)"></select>
+                        </div>
+                        <div class="field-group">
+                            <label for="rgProductionTable">Clinical Production Table</label>
+                            <select id="rgProductionTable" onchange="window.rgLoadColumns('production', this.value)"></select>
+                        </div>
+                    </div>
+                    <div class="form-grid" style="margin-top:12px">
+                        <div class="field-group">
+                            <label for="rgQualificationColumn">QUALIFICATION Column</label>
+                            <select id="rgQualificationColumn"></select>
+                        </div>
+                        <div class="field-group">
+                            <label for="rgSurnameColumn">Surname Column</label>
+                            <select id="rgSurnameColumn"></select>
+                        </div>
+                    </div>
+                    <div class="action-bar" style="justify-content:flex-start; margin:10px 0 0">
+                        <button type="button" class="btn btn-secondary" onclick="window.rgAutoDetectColumns()">Auto-Detect Columns</button>
+                    </div>
+                    <div id="rgConfigOutput" class="status-output"></div>
+                </div>
+            </div>
+        </div>
+    }
+
+    <div class="workspace-signoff-card">
+        <div class="workspace-signoff-card__header">
+            <div>
+                <div class="workspace-signoff-card__title">Saved Workspace</div>
+                <div class="workspace-signoff-card__subtitle">Radiography connection and validation results auto-load for this engagement.</div>
+            </div>
+            <div id="rgWorkspaceRunState" class="badge badge--neutral badge--sm">No saved run</div>
+        </div>
+        <div id="rgWorkspaceInfo" class="alert alert--info">Select an engagement to load the Radiography workspace.</div>
+        <div class="workspace-signoff-grid">
+            <div>
+                <div style="color:var(--text-muted);font-size:12px;text-transform:uppercase;font-weight:700">Current Run</div>
+                <div id="rgWorkspaceRunLabel">No saved run yet</div>
+            </div>
+            <div>
+                <div style="color:var(--text-muted);font-size:12px;text-transform:uppercase;font-weight:700">Status</div>
+                <div id="rgWorkspaceStatusLabel">-</div>
+            </div>
+            <div>
+                <div style="color:var(--text-muted);font-size:12px;text-transform:uppercase;font-weight:700">Last Run</div>
+                <div id="rgWorkspaceLastRunLabel">-</div>
+            </div>
+            <div class="field-group" style="grid-column:1 / -1">
+                <label for="rgWorkspaceComment">Notes</label>
+                <textarea id="rgWorkspaceComment" rows="2" placeholder="Add validation notes"></textarea>
+            </div>
+        </div>
+        <div class="workspace-signoff-actions">
+            @if (!isResultsOnlyRole)
+            {
+                <button type="button" class="btn btn-success" id="rgSaveWorkspaceBtn">Save Workspace</button>
+            }
+        </div>
+    </div>
+
+    @if (!isResultsOnlyRole)
+    {
+        <div class="action-bar">
+            <button type="button" class="btn btn-info" id="rgVerifyBtn">Verify Tables</button>
+            <button type="button" class="btn btn-success" id="rgRunBtn">Run Radiography</button>
+            <button type="button" class="btn btn-primary" id="rgSqlBtn">Generate SQL</button>
+        </div>
+    }
+
+    <div class="results-panel">
+        <div class="results-tabs">
+            <button class="tab-btn active" type="button" data-tab="analysis">Analysis</button>
+            <button class="tab-btn" type="button" data-tab="results">Results</button>
+            <button class="tab-btn" type="button" data-tab="sql">SQL</button>
+        </div>
+        <div class="tab-pane active" data-tab-panel="analysis" id="rgAnalysisPane"></div>
+        <div class="tab-pane" data-tab-panel="results" id="rgResultsPane"></div>
+        <div class="tab-pane" data-tab-panel="sql">
+            <textarea id="rgSqlText" rows="20" readonly></textarea>
+        </div>
+    </div>
+
+    <div id="rgSpinner" class="spinner-overlay" style="display:none">
+        <div class="spinner-box">
+            <div class="spinner-ring"></div>
+            <p id="rgSpinnerMsg">Processing...</p>
+        </div>
+    </div>
+</div>
+
+<form id="rgAntiForgeryForm" method="post" style="display:none">@Html.AntiForgeryToken()</form>
+
+<script>
+window.toggleAccordion = function(id) {
+    const body = document.getElementById(`body-${id}`);
+    if (body) body.style.display = body.style.display === 'none' ? '' : 'none';
+};
+
+window.rgLoadColumns = async function(role, tableName) {
+    const server = document.getElementById('rgServer')?.value?.trim();
+    const db = document.getElementById('rgDatabase')?.value;
+    if (!server || !db || !tableName) return;
+
+    try {
+        const data = await postJson('/Radiography/GetColumns', {
+            server, database: db, driver: document.getElementById('rgDriver')?.value || 'ODBC Driver 17 for SQL Server',
+            radiographyTable: tableName
+        });
+        if (!data.success || !data.columns) return;
+
+        const cols = data.columns || [];
+        if (role === 'radiography') {
+            fillColSel(document.getElementById('rgQualificationColumn'), cols, 'QUALIFICATION');
+            fillColSel(document.getElementById('rgSurnameColumn'), cols, 'Surname');
+        }
+    } catch (err) { console.error('Column load failed:', err); }
+};
+
+window.rgAutoDetectColumns = function() {
+    const qCol = document.getElementById('rgQualificationColumn');
+    const sCol = document.getElementById('rgSurnameColumn');
+    if (qCol?.options.length > 0 && !qCol.value) qCol.value = qCol.options[0].value;
+    if (sCol?.options.length > 0 && !sCol.value) sCol.value = sCol.options[0].value;
+    document.getElementById('rgConfigOutput').innerHTML = '<div class="alert alert--success">Column detection complete.</div>';
+};
+
+const rgToken = document.querySelector('#rgAntiForgeryForm input[name="__RequestVerificationToken"]')?.value || '';
+
+async function postJson(url, data) {
+    const resp = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': rgToken },
+        body: JSON.stringify(data)
+    });
+    return await resp.json();
+}
+
+function showSpinner(msg) {
+    document.getElementById('rgSpinnerMsg').textContent = msg || 'Processing...';
+    document.getElementById('rgSpinner').style.display = 'flex';
+}
+
+function hideSpinner() {
+    document.getElementById('rgSpinner').style.display = 'none';
+}
+
+function setAlert(target, type, message) {
+    if (target) target.innerHTML = `<div class="alert alert--${type}">${message}</div>`;
+}
+
+function populateSelect(sel, values, selected) {
+    if (!sel) return;
+    sel.innerHTML = '<option value="">Select table</option>';
+    values.forEach(v => {
+        const o = document.createElement('option');
+        o.value = o.textContent = v;
+        sel.appendChild(o);
+    });
+    if (selected) sel.value = selected;
+}
+
+function fillColSel(sel, cols, preferred) {
+    if (!sel) return;
+    sel.innerHTML = '';
+    (cols || []).forEach(c => {
+        const o = document.createElement('option');
+        o.value = o.textContent = c;
+        if (c === preferred) o.selected = true;
+        sel.appendChild(o);
+    });
+}
+
+// Tab switching
+document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', function() {
+        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+        document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+        this.classList.add('active');
+        const tab = this.dataset.tab;
+        document.querySelector(`[data-tab-panel="${tab}"]`)?.classList.add('active');
+    });
+});
+
+document.getElementById('rgConnectBtn')?.addEventListener('click', async function() {
+    const server = document.getElementById('rgServer')?.value?.trim();
+    const driver = document.getElementById('rgDriver')?.value;
+    if (!server) return setAlert(document.getElementById('rgConnectionOutput'), 'error', 'Enter server name');
+
+    showSpinner('Connecting...');
+    try {
+        const data = await postJson('/Radiography/GetDatabases', { server, driver });
+        hideSpinner();
+        if (data.success) {
+            populateSelect(document.getElementById('rgDatabase'), data.databases || []);
+            setAlert(document.getElementById('rgConnectionOutput'), 'success', `Connected. Found ${data.databases?.length || 0} databases.`);
+            document.getElementById('rgDatabase').addEventListener('change', async function() {
+                if (!this.value) return;
+                showSpinner('Loading tables...');
+                const tableData = await postJson('/Radiography/GetTables', { server, database: this.value, driver });
+                hideSpinner();
+                if (tableData.success) {
+                    populateSelect(document.getElementById('rgRadiographyTable'), tableData.tables || [], tableData.autoRadiographyTable);
+                    populateSelect(document.getElementById('rgProductionTable'), tableData.tables || [], tableData.autoProductionTable);
+                }
+            });
+        } else {
+            setAlert(document.getElementById('rgConnectionOutput'), 'error', data.error || 'Connection failed');
+        }
+    } catch (err) {
+        hideSpinner();
+        setAlert(document.getElementById('rgConnectionOutput'), 'error', err.message);
+    }
+});
+
+document.getElementById('rgRunBtn')?.addEventListener('click', async function() {
+    const clientId = parseInt(document.getElementById('rgClientId')?.value || '0');
+    if (!clientId) return setAlert(document.getElementById('rgAnalysisPane'), 'error', 'Select an engagement');
+
+    showSpinner('Running validation...');
+    try {
+        const data = await postJson('/Radiography/RunValidation', {
+            clientId,
+            server: document.getElementById('rgServer')?.value?.trim(),
+            database: document.getElementById('rgDatabase')?.value,
+            driver: document.getElementById('rgDriver')?.value,
+            radiographyTable: document.getElementById('rgRadiographyTable')?.value,
+            productionTable: document.getElementById('rgProductionTable')?.value,
+            qualificationColumn: document.getElementById('rgQualificationColumn')?.value,
+            surnameColumn: document.getElementById('rgSurnameColumn')?.value
+        });
+        hideSpinner();
+        if (data.success) {
+            const html = `<div class="rg-results-grid">
+                <div class="rg-metric-card"><div class="rg-metric-value">${data.totalValidated}</div><div class="rg-metric-label">Records Validated</div></div>
+                <div class="rg-metric-card"><div class="rg-metric-value" style="color: #28a745">${data.passCount}</div><div class="rg-metric-label">Pass</div></div>
+                <div class="rg-metric-card"><div class="rg-metric-value" style="color: #dc3545">${data.failCount}</div><div class="rg-metric-label">Fail</div></div>
+                <div class="rg-metric-card"><div class="rg-metric-value">${data.exceptionRate}%</div><div class="rg-metric-label">Exception Rate</div></div>
+            </div>`;
+            document.getElementById('rgAnalysisPane').innerHTML = html;
+
+            if (data.reviewRows?.length > 0) {
+                let rows = data.reviewRows.map(r =>
+                    `<tr><td>${r.radiographyQualification}</td><td>${r.radiographySurname}</td>
+                     <td class="${r.status === 'PASS' ? 'rg-pass' : 'rg-fail'}">${r.status}</td>
+                     <td>${r.productionQualification}</td><td>${r.productionSurname}</td></tr>`
+                ).join('');
+                document.getElementById('rgResultsPane').innerHTML =
+                    `<table class="rg-table"><thead><tr>
+                        <th>Radiography QUALIFICATION</th><th>Radiography Surname</th>
+                        <th>Status</th><th>Production QUALIFICATION</th><th>Production Surname</th>
+                    </tr></thead><tbody>${rows}</tbody></table>`;
+            }
+
+            document.getElementById('rgStatusBadge').style.display = 'inline-block';
+            document.getElementById('rgStatusBadge').textContent = data.status;
+            document.getElementById('rgStatusBadge').className = data.status === 'PASS' ? 'badge--pass' : 'badge--fail';
+
+            if (data.warning) {
+                document.getElementById('rgWorkspaceInfo').innerHTML = `<div class="alert alert--warning">${data.warning}</div>`;
+            }
+        } else {
+            setAlert(document.getElementById('rgAnalysisPane'), 'error', data.error || 'Validation failed');
+        }
+    } catch (err) {
+        hideSpinner();
+        setAlert(document.getElementById('rgAnalysisPane'), 'error', err.message);
+    }
+});
+
+document.getElementById('rgVerifyBtn')?.addEventListener('click', async function() {
+    showSpinner('Verifying tables...');
+    try {
+        const data = await postJson('/Radiography/VerifyTables', {
+            server: document.getElementById('rgServer')?.value?.trim(),
+            database: document.getElementById('rgDatabase')?.value,
+            driver: document.getElementById('rgDriver')?.value,
+            radiographyTable: document.getElementById('rgRadiographyTable')?.value,
+            productionTable: document.getElementById('rgProductionTable')?.value,
+            qualificationColumn: document.getElementById('rgQualificationColumn')?.value,
+            surnameColumn: document.getElementById('rgSurnameColumn')?.value
+        });
+        hideSpinner();
+        if (data.success) {
+            setAlert(document.getElementById('rgConfigOutput'), 'success',
+                `Radiography: ${data.radiographyRecordCount} records | Production: ${data.productionRecordCount} records | Matched: ${data.matchedCount} | Missing: ${data.missingCount}`);
+        } else {
+            setAlert(document.getElementById('rgConfigOutput'), 'error', data.error);
+        }
+    } catch (err) {
+        hideSpinner();
+        setAlert(document.getElementById('rgConfigOutput'), 'error', err.message);
+    }
+});
+
+document.getElementById('rgSqlBtn')?.addEventListener('click', async function() {
+    showSpinner('Generating SQL...');
+    try {
+        const data = await postJson('/Radiography/GenerateSql', {
+            clientId: parseInt(document.getElementById('rgClientId')?.value || '0'),
+            server: document.getElementById('rgServer')?.value?.trim(),
+            database: document.getElementById('rgDatabase')?.value,
+            driver: document.getElementById('rgDriver')?.value,
+            radiographyTable: document.getElementById('rgRadiographyTable')?.value,
+            productionTable: document.getElementById('rgProductionTable')?.value,
+            qualificationColumn: document.getElementById('rgQualificationColumn')?.value,
+            surnameColumn: document.getElementById('rgSurnameColumn')?.value
+        });
+        hideSpinner();
+        if (data.success) {
+            document.getElementById('rgSqlText').value = data.sql;
+            document.querySelector('[data-tab="sql"]')?.click();
+        } else {
+            setAlert(document.getElementById('rgAnalysisPane'), 'error', data.error || 'SQL generation failed');
+        }
+    } catch (err) {
+        hideSpinner();
+        setAlert(document.getElementById('rgAnalysisPane'), 'error', err.message);
+    }
+});
+
+document.getElementById('rgSaveWorkspaceBtn')?.addEventListener('click', async function() {
+    const clientId = parseInt(document.getElementById('rgClientId')?.value || '0');
+    if (!clientId) return setAlert(document.getElementById('rgWorkspaceInfo'), 'error', 'Select an engagement');
+
+    showSpinner('Saving workspace...');
+    try {
+        await postJson('/Radiography/SaveWorkspace', {
+            clientId,
+            server: document.getElementById('rgServer')?.value?.trim(),
+            database: document.getElementById('rgDatabase')?.value,
+            driver: document.getElementById('rgDriver')?.value,
+            radiographyTable: document.getElementById('rgRadiographyTable')?.value,
+            productionTable: document.getElementById('rgProductionTable')?.value,
+            qualificationColumn: document.getElementById('rgQualificationColumn')?.value,
+            surnameColumn: document.getElementById('rgSurnameColumn')?.value
+        });
+        hideSpinner();
+        setAlert(document.getElementById('rgWorkspaceInfo'), 'success', 'Workspace saved successfully');
+    } catch (err) {
+        hideSpinner();
+        setAlert(document.getElementById('rgWorkspaceInfo'), 'error', err.message);
+    }
+});
+
+document.getElementById('rgClientId')?.addEventListener('change', async function() {
+    if (!this.value) return;
+    const data = await postJson('/Radiography/GetWorkspaceState', { clientId: parseInt(this.value) });
+    if (data.success && data.workspace) {
+        const ws = data.workspace;
+        document.getElementById('rgRadiographyTable').value = ws.radiographyTable || '';
+        document.getElementById('rgProductionTable').value = ws.productionTable || '';
+        document.getElementById('rgQualificationColumn').value = ws.qualificationColumn || '';
+        document.getElementById('rgSurnameColumn').value = ws.surnameColumn || '';
+        document.getElementById('rgServer').value = ws.server || '';
+        document.getElementById('rgDatabase').value = ws.database || '';
+        if (ws.summary) {
+            document.getElementById('rgWorkspaceRunState').textContent = ws.summary.status || '-';
+            document.getElementById('rgWorkspaceStatusLabel').textContent = ws.summary.status || '-';
+        }
+    }
+});
+</script>

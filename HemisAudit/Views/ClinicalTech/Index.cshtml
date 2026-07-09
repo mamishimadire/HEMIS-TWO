@@ -1,0 +1,410 @@
+@using HemisAudit.Models
+@using HemisAudit.ViewModels
+@{
+    ViewData["Title"] = "ClinicalTech Module - Qualification & Surname Validation";
+    Layout = "~/Views/Shared/_Layout.cshtml";
+    var clients = ViewBag.Clients as List<Client> ?? new();
+    var selectedClientId = ViewBag.ClientId is int clientId ? clientId : 0;
+    var currentSystemRole = ViewBag.CurrentSystemRole as string ?? "";
+    var isResultsOnlyRole =
+        string.Equals(currentSystemRole, "Manager", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(currentSystemRole, "Director", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(currentSystemRole, "Trainee", StringComparison.OrdinalIgnoreCase);
+    var moduleNavigation = ViewBag.ModuleNavigation as ModuleSequenceNavigationViewModel;
+}
+
+<style>
+    .ct-results-grid { display: grid; gap: 16px; }
+    .ct-metric-card { background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 8px; padding: 16px; }
+    .ct-metric-value { font-size: 24px; font-weight: 700; color: var(--primary); }
+    .ct-metric-label { font-size: 12px; text-transform: uppercase; color: var(--text-muted); margin-top: 4px; }
+    .ct-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    .ct-table th { background: var(--primary); color: white; padding: 8px; text-align: left; }
+    .ct-table td { padding: 6px 8px; border-bottom: 1px solid var(--border-color); }
+    .ct-table tr:hover { background: var(--hover-bg); }
+    .ct-pass { color: #28a745; font-weight: 700; }
+    .ct-fail { color: #dc3545; font-weight: 700; }
+</style>
+
+<div id="app" class="rule-page-shell">
+    @if (moduleNavigation != null)
+    {
+        @await Html.PartialAsync("_ModuleSequenceNav", moduleNavigation)
+    }
+
+    <div class="engagement-selector">
+        <label for="ctClientId">Engagement</label>
+        <select id="ctClientId">
+            <option value="">Select engagement</option>
+            @foreach (var client in clients)
+            {
+                <option value="@client.Id" selected="@(client.Id == selectedClientId ? "selected" : null)">
+                    @client.Name (@client.FiscalYear)
+                </option>
+            }
+        </select>
+        <small>ClinicalTech validates QUALIFICATION values from Clinicaltech table against Clinical Production table and confirms Surname matching.</small>
+    </div>
+
+    <div class="rule-header">
+        <div class="rule-header__icon">CT</div>
+        <div>
+            <h1 class="rule-header__title">ClinicalTech Module: Qualification & Surname Validation</h1>
+            <p class="rule-header__sub">
+                Checks that QUALIFICATION values from Clinicaltech table exist in Clinical Production table.
+                When QUALIFICATION is found, confirms matching Surname records.
+            </p>
+        </div>
+        <div class="rule-header__badge" id="ctStatusBadge" style="display:none"></div>
+    </div>
+
+    @if (!isResultsOnlyRole)
+    {
+        <div class="accordion-stack">
+            <div class="accordion-item">
+                <button class="accordion-toggle" type="button" onclick="window.toggleAccordion('ct-conn')">
+                    <span class="acc-icon">DB</span><span>Database Connection</span><span class="acc-chevron">v</span>
+                </button>
+                <div class="accordion-body" id="body-ct-conn">
+                    <div class="form-grid">
+                        <div class="field-group">
+                            <label for="ctServer">Server Name</label>
+                            <input id="ctServer" type="text" placeholder="e.g. MYSERVER\INSTANCE or (localdb)\MSSQLLocalDB" />
+                        </div>
+                        <div class="field-group">
+                            <label for="ctDriver">Driver</label>
+                            <select id="ctDriver">
+                                <option value="ODBC Driver 17 for SQL Server">ODBC Driver 17 for SQL Server</option>
+                                <option value="ODBC Driver 18 for SQL Server">ODBC Driver 18 for SQL Server</option>
+                                <option value="SQL Server">SQL Server</option>
+                            </select>
+                        </div>
+                        <div class="field-group">
+                            <label for="ctDatabase">Database</label>
+                            <select id="ctDatabase"></select>
+                        </div>
+                    </div>
+                    <div class="action-bar" style="justify-content:flex-start; margin:12px 0 0">
+                        <button type="button" class="btn btn-primary" id="ctConnectBtn">Connect</button>
+                    </div>
+                    <div id="ctConnectionOutput" class="status-output"></div>
+                </div>
+            </div>
+
+            <div class="accordion-item">
+                <button class="accordion-toggle" type="button" onclick="window.toggleAccordion('ct-config')">
+                    <span class="acc-icon">CF</span><span>Table & Column Configuration</span><span class="acc-chevron">v</span>
+                </button>
+                <div class="accordion-body" id="body-ct-config" style="display:none">
+                    <div class="info-box info-box--blue">
+                        <strong>ClinicalTech Module Logic:</strong><br />
+                        Compare QUALIFICATION and Surname columns from Clinicaltech table against Clinical Production table.
+                        Records PASS when the QUALIFICATION exists in the production table; FAIL when missing.
+                    </div>
+                    <div class="form-grid">
+                        <div class="field-group">
+                            <label for="ctClinicaltechTable">Clinicaltech Table</label>
+                            <select id="ctClinicaltechTable" onchange="window.ctLoadColumns('clinical', this.value)"></select>
+                        </div>
+                        <div class="field-group">
+                            <label for="ctProductionTable">Clinical Production Table</label>
+                            <select id="ctProductionTable" onchange="window.ctLoadColumns('production', this.value)"></select>
+                        </div>
+                    </div>
+                    <div class="form-grid" style="margin-top:12px">
+                        <div class="field-group">
+                            <label for="ctQualificationColumn">QUALIFICATION Column</label>
+                            <select id="ctQualificationColumn"></select>
+                        </div>
+                        <div class="field-group">
+                            <label for="ctSurnameColumn">Surname Column</label>
+                            <select id="ctSurnameColumn"></select>
+                        </div>
+                    </div>
+                    <div class="action-bar" style="justify-content:flex-start; margin:10px 0 0">
+                        <button type="button" class="btn btn-secondary" onclick="window.ctAutoDetectColumns()">Auto-Detect Columns</button>
+                    </div>
+                    <div id="ctConfigOutput" class="status-output"></div>
+                </div>
+            </div>
+        </div>
+    }
+
+    <div class="workspace-signoff-card">
+        <div class="workspace-signoff-card__header">
+            <div>
+                <div class="workspace-signoff-card__title">Saved Workspace</div>
+                <div class="workspace-signoff-card__subtitle">ClinicalTech connection and validation results auto-load for this engagement.</div>
+            </div>
+            <div id="ctWorkspaceRunState" class="badge badge--neutral badge--sm">No saved run</div>
+        </div>
+        <div id="ctWorkspaceInfo" class="alert alert--info">Select an engagement to load the ClinicalTech workspace.</div>
+        <div class="workspace-signoff-grid">
+            <div>
+                <div style="color:var(--text-muted);font-size:12px;text-transform:uppercase;font-weight:700">Current Run</div>
+                <div id="ctWorkspaceRunLabel">No saved run yet</div>
+            </div>
+            <div>
+                <div style="color:var(--text-muted);font-size:12px;text-transform:uppercase;font-weight:700">Status</div>
+                <div id="ctWorkspaceStatusLabel">-</div>
+            </div>
+            <div>
+                <div style="color:var(--text-muted);font-size:12px;text-transform:uppercase;font-weight:700">Last Run</div>
+                <div id="ctWorkspaceLastRunLabel">-</div>
+            </div>
+            <div class="field-group" style="grid-column:1 / -1">
+                <label for="ctWorkspaceComment">Notes</label>
+                <textarea id="ctWorkspaceComment" rows="2" placeholder="Add validation notes"></textarea>
+            </div>
+        </div>
+        <div class="workspace-signoff-actions">
+            @if (!isResultsOnlyRole)
+            {
+                <button type="button" class="btn btn-success" id="ctSaveWorkspaceBtn">Save Workspace</button>
+            }
+        </div>
+    </div>
+
+    @if (!isResultsOnlyRole)
+    {
+        <div class="action-bar">
+            <button type="button" class="btn btn-info" id="ctVerifyBtn">Verify Tables</button>
+            <button type="button" class="btn btn-success" id="ctRunBtn">Run ClinicalTech</button>
+            <button type="button" class="btn btn-primary" id="ctSqlBtn">Generate SQL</button>
+        </div>
+    }
+
+    <div class="results-panel">
+        <div class="results-tabs">
+            <button class="tab-btn active" type="button" data-tab="analysis">Analysis</button>
+            <button class="tab-btn" type="button" data-tab="results">Results</button>
+            <button class="tab-btn" type="button" data-tab="sql">SQL</button>
+        </div>
+        <div class="tab-pane active" data-tab-panel="analysis" id="ctAnalysisPane"></div>
+        <div class="tab-pane" data-tab-panel="results" id="ctResultsPane"></div>
+        <div class="tab-pane" data-tab-panel="sql">
+            <textarea id="ctSqlText" rows="20" readonly></textarea>
+        </div>
+    </div>
+
+    <div id="ctSpinner" class="spinner-overlay" style="display:none">
+        <div class="spinner-box">
+            <div class="spinner-ring"></div>
+            <p id="ctSpinnerMsg">Processing...</p>
+        </div>
+    </div>
+</div>
+
+<form id="ctAntiForgeryForm" method="post" style="display:none">@Html.AntiForgeryToken()</form>
+
+<script>
+window.toggleAccordion = function(id) {
+    const body = document.getElementById(`body-${id}`);
+    if (body) body.style.display = body.style.display === 'none' ? '' : 'none';
+};
+
+window.ctLoadColumns = async function(role, tableName) {
+    const server = document.getElementById('ctServer')?.value?.trim();
+    const db = document.getElementById('ctDatabase')?.value;
+    if (!server || !db || !tableName) return;
+    
+    try {
+        const data = await postJson('/ClinicalTech/GetColumns', {
+            server, database: db, driver: document.getElementById('ctDriver')?.value || 'ODBC Driver 17 for SQL Server',
+            clinicaltechTable: tableName
+        });
+        if (!data.success || !data.columns) return;
+        
+        const cols = data.columns || [];
+        if (role === 'clinical') {
+            fillColSel(document.getElementById('ctQualificationColumn'), cols, 'QUALIFICATION');
+            fillColSel(document.getElementById('ctSurnameColumn'), cols, 'Surname');
+        }
+    } catch (err) { console.error('Column load failed:', err); }
+};
+
+window.ctAutoDetectColumns = function() {
+    const qCol = document.getElementById('ctQualificationColumn');
+    const sCol = document.getElementById('ctSurnameColumn');
+    if (qCol?.options.length > 0 && !qCol.value) qCol.value = qCol.options[0].value;
+    if (sCol?.options.length > 0 && !sCol.value) sCol.value = sCol.options[0].value;
+    document.getElementById('ctConfigOutput').innerHTML = '<div class="alert alert--success">Column detection complete.</div>';
+};
+
+const ctToken = document.querySelector('#ctAntiForgeryForm input[name="__RequestVerificationToken"]')?.value || '';
+
+async function postJson(url, data) {
+    const resp = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': ctToken },
+        body: JSON.stringify(data)
+    });
+    return await resp.json();
+}
+
+function showSpinner(msg) {
+    document.getElementById('ctSpinnerMsg').textContent = msg || 'Processing...';
+    document.getElementById('ctSpinner').style.display = 'flex';
+}
+
+function hideSpinner() {
+    document.getElementById('ctSpinner').style.display = 'none';
+}
+
+function setAlert(target, type, message) {
+    if (target) target.innerHTML = `<div class="alert alert--${type}">${message}</div>`;
+}
+
+function populateSelect(sel, values, selected) {
+    if (!sel) return;
+    sel.innerHTML = '<option value="">Select table</option>';
+    values.forEach(v => {
+        const o = document.createElement('option');
+        o.value = o.textContent = v;
+        sel.appendChild(o);
+    });
+    if (selected) sel.value = selected;
+}
+
+function fillColSel(sel, cols, preferred) {
+    if (!sel) return;
+    sel.innerHTML = '';
+    (cols || []).forEach(c => {
+        const o = document.createElement('option');
+        o.value = o.textContent = c;
+        if (c === preferred) o.selected = true;
+        sel.appendChild(o);
+    });
+}
+
+document.getElementById('ctConnectBtn')?.addEventListener('click', async function() {
+    const server = document.getElementById('ctServer')?.value?.trim();
+    const driver = document.getElementById('ctDriver')?.value;
+    if (!server) return setAlert(document.getElementById('ctConnectionOutput'), 'error', 'Enter server name');
+    
+    showSpinner('Connecting...');
+    try {
+        const data = await postJson('/ClinicalTech/GetDatabases', { server, driver });
+        hideSpinner();
+        if (data.success) {
+            populateSelect(document.getElementById('ctDatabase'), data.databases || []);
+            setAlert(document.getElementById('ctConnectionOutput'), 'success', `Connected. Found ${data.databases?.length || 0} databases.`);
+            document.getElementById('ctDatabase').addEventListener('change', async function() {
+                if (!this.value) return;
+                showSpinner('Loading tables...');
+                const tableData = await postJson('/ClinicalTech/GetTables', { server, database: this.value, driver });
+                hideSpinner();
+                if (tableData.success) {
+                    populateSelect(document.getElementById('ctClinicaltechTable'), tableData.tables || [], tableData.autoClinicaltechTable);
+                    populateSelect(document.getElementById('ctProductionTable'), tableData.tables || [], tableData.autoProductionTable);
+                }
+            });
+        } else {
+            setAlert(document.getElementById('ctConnectionOutput'), 'error', data.error || 'Connection failed');
+        }
+    } catch (err) {
+        hideSpinner();
+        setAlert(document.getElementById('ctConnectionOutput'), 'error', err.message);
+    }
+});
+
+document.getElementById('ctRunBtn')?.addEventListener('click', async function() {
+    const clientId = parseInt(document.getElementById('ctClientId')?.value || '0');
+    if (!clientId) return setAlert(document.getElementById('ctAnalysisPane'), 'error', 'Select an engagement');
+    
+    showSpinner('Running validation...');
+    try {
+        const data = await postJson('/ClinicalTech/RunValidation', {
+            clientId,
+            server: document.getElementById('ctServer')?.value?.trim(),
+            database: document.getElementById('ctDatabase')?.value,
+            driver: document.getElementById('ctDriver')?.value,
+            clinicaltechTable: document.getElementById('ctClinicaltechTable')?.value,
+            productionTable: document.getElementById('ctProductionTable')?.value,
+            qualificationColumn: document.getElementById('ctQualificationColumn')?.value,
+            surnameColumn: document.getElementById('ctSurnameColumn')?.value
+        });
+        hideSpinner();
+        if (data.success) {
+            const html = `<div class="ct-results-grid">
+                <div class="ct-metric-card"><div class="ct-metric-value">${data.totalValidated}</div><div class="ct-metric-label">Records Validated</div></div>
+                <div class="ct-metric-card"><div class="ct-metric-value" style="color: #28a745">${data.passCount}</div><div class="ct-metric-label">Pass</div></div>
+                <div class="ct-metric-card"><div class="ct-metric-value" style="color: #dc3545">${data.failCount}</div><div class="ct-metric-label">Fail</div></div>
+                <div class="ct-metric-card"><div class="ct-metric-value">${data.exceptionRate}%</div><div class="ct-metric-label">Exception Rate</div></div>
+            </div>`;
+            document.getElementById('ctAnalysisPane').innerHTML = html;
+            document.getElementById('ctStatusBadge').style.display = 'inline-block';
+            document.getElementById('ctStatusBadge').textContent = data.status;
+            document.getElementById('ctStatusBadge').className = data.status === 'PASS' ? 'badge--pass' : 'badge--fail';
+        } else {
+            setAlert(document.getElementById('ctAnalysisPane'), 'error', data.error || 'Validation failed');
+        }
+    } catch (err) {
+        hideSpinner();
+        setAlert(document.getElementById('ctAnalysisPane'), 'error', err.message);
+    }
+});
+
+document.getElementById('ctVerifyBtn')?.addEventListener('click', async function() {
+    showSpinner('Verifying tables...');
+    try {
+        const data = await postJson('/ClinicalTech/VerifyTables', {
+            server: document.getElementById('ctServer')?.value?.trim(),
+            database: document.getElementById('ctDatabase')?.value,
+            driver: document.getElementById('ctDriver')?.value,
+            clinicaltechTable: document.getElementById('ctClinicaltechTable')?.value,
+            productionTable: document.getElementById('ctProductionTable')?.value,
+            qualificationColumn: document.getElementById('ctQualificationColumn')?.value,
+            surnameColumn: document.getElementById('ctSurnameColumn')?.value
+        });
+        hideSpinner();
+        if (data.success) {
+            setAlert(document.getElementById('ctConfigOutput'), 'success', 
+                `Clinicaltech: ${data.clinicaltechRecordCount} records | Production: ${data.productionRecordCount} records | Matched: ${data.matchedCount}`);
+        } else {
+            setAlert(document.getElementById('ctConfigOutput'), 'error', data.error);
+        }
+    } catch (err) {
+        hideSpinner();
+        setAlert(document.getElementById('ctConfigOutput'), 'error', err.message);
+    }
+});
+
+document.getElementById('ctSaveWorkspaceBtn')?.addEventListener('click', async function() {
+    const clientId = parseInt(document.getElementById('ctClientId')?.value || '0');
+    if (!clientId) return setAlert(document.getElementById('ctWorkspaceInfo'), 'error', 'Select an engagement');
+    
+    showSpinner('Saving workspace...');
+    try {
+        await postJson('/ClinicalTech/SaveWorkspace', {
+            clientId,
+            server: document.getElementById('ctServer')?.value?.trim(),
+            database: document.getElementById('ctDatabase')?.value,
+            driver: document.getElementById('ctDriver')?.value,
+            clinicaltechTable: document.getElementById('ctClinicaltechTable')?.value,
+            productionTable: document.getElementById('ctProductionTable')?.value,
+            qualificationColumn: document.getElementById('ctQualificationColumn')?.value,
+            surnameColumn: document.getElementById('ctSurnameColumn')?.value
+        });
+        hideSpinner();
+        setAlert(document.getElementById('ctWorkspaceInfo'), 'success', 'Workspace saved successfully');
+    } catch (err) {
+        hideSpinner();
+        setAlert(document.getElementById('ctWorkspaceInfo'), 'error', err.message);
+    }
+});
+
+document.getElementById('ctClientId')?.addEventListener('change', async function() {
+    if (!this.value) return;
+    const data = await postJson('/ClinicalTech/GetWorkspaceState', { clientId: parseInt(this.value) });
+    if (data.success && data.workspace) {
+        const ws = data.workspace;
+        document.getElementById('ctClinicaltechTable').value = ws.clinicaltechTable;
+        document.getElementById('ctProductionTable').value = ws.productionTable;
+        document.getElementById('ctQualificationColumn').value = ws.qualificationColumn;
+        document.getElementById('ctSurnameColumn').value = ws.surnameColumn;
+        document.getElementById('ctServer').value = ws.server;
+        document.getElementById('ctDatabase').value = ws.database;
+    }
+});
+</script>

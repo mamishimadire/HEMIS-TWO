@@ -67,7 +67,10 @@ namespace HemisAudit.Helpers
             new(65, "Rule 65", "Cancellation Census Date Validation"),
             new(66, "Rule 66", "NSFAS Students in CREG"),
             new(67, "Rule 67", "CREG-STUD Pair Validation"),
-            new(68, "Rule 68", "Credit Overload Validation")
+            new(68, "Rule 68", "Credit Overload Validation"),
+            new(69, "ClinicalTech", "Qualification & Surname Validation"),
+            new(70, "Biokinetic", "Qualification & Surname Validation"),
+            new(71, "Radiography", "Qualification & Surname Validation")
         };
 
         public static ModuleSequenceNavigationViewModel? BuildForWorkspace(int currentRuleNumber, int clientId)
