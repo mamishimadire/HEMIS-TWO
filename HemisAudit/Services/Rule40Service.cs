@@ -131,6 +131,24 @@ namespace HemisAudit.Services
             catch (Exception ex) { return new Rule40TableDiscoveryResult { Success = false, Error = ex.Message }; }
         }
 
+        public async Task<List<string>> GetTableColumnsAsync(string server, string database, string driver, string tableName)
+        {
+            ValidateObjectName(tableName);
+            try
+            {
+                await using var conn = new SqlConnection(BuildConnectionString(server, database, driver));
+                await conn.OpenAsync();
+                await using var cmd = conn.CreateConfiguredCommand();
+                cmd.CommandText = "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = @tbl ORDER BY ORDINAL_POSITION;";
+                cmd.Parameters.AddWithValue("@tbl", tableName);
+                await using var reader = await cmd.ExecuteReaderAsync();
+                var cols = new List<string>();
+                while (await reader.ReadAsync()) cols.Add(reader.GetString(0));
+                return cols;
+            }
+            catch { return new List<string>(); }
+        }
+
         public async Task<Rule40VerifyResult> VerifyTablesAsync(Rule40VerifyRequest request)
         {
             try

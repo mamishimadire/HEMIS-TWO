@@ -103,11 +103,11 @@
                 <div class="form-grid">
                     <div class="field-group">
                         <label>VALPAC Table (Staff PROF)</label>
-                        <select id="r40ValpacTable"></select>
+                        <select id="r40ValpacTable" onchange="r40OnValpacTableChange()"></select>
                     </div>
                     <div class="field-group">
                         <label>ASCII Table (2025H16PROF)</label>
-                        <select id="r40AsciiTable"></select>
+                        <select id="r40AsciiTable" onchange="r40OnAsciiTableChange()"></select>
                     </div>
                 </div>
                 <div id="r40TableOut" class="status-output"></div>
@@ -249,6 +249,7 @@ window.r40Tab = function(tab) {
     var st = {
         clientId: @(selectedClientId > 0 ? selectedClientId : 0),
         runId: null, summary: null, pairs: [],
+        valpacCols: [], asciiCols: [],
         isWorkspaceSaved: false, currentUserHasSignedOff: false, resultsVisible: false,
         currentUserEngagementRole: ''
     };
@@ -290,7 +291,46 @@ window.r40Tab = function(tab) {
         b.className = 'rule-header__badge ' + (String(status).toUpperCase() === 'PASS' ? 'badge--pass' : 'badge--fail');
     }
 
+    /* ── Column loading ── */
+    function loadOneCols(tableName, side) {
+        if (!tableName) return;
+        post(API + '/GetTableColumns', {
+            server: gv('r40Server').trim(), database: gv('r40Db'), driver: gv('r40Driver'),
+            tableName: tableName
+        }).then(function(d) {
+            if (!d.success || !d.columns) return;
+            if (side === 'valpac') st.valpacCols = d.columns;
+            else                   st.asciiCols  = d.columns;
+            renderPairs();
+        }).catch(function() {});
+    }
+
+    window.r40OnValpacTableChange = function() { loadOneCols(gv('r40ValpacTable'), 'valpac'); };
+    window.r40OnAsciiTableChange  = function() { loadOneCols(gv('r40AsciiTable'),  'ascii');  };
+
+    function r40LoadColumns() {
+        loadOneCols(gv('r40ValpacTable'), 'valpac');
+        loadOneCols(gv('r40AsciiTable'),  'ascii');
+    }
+
     /* ── Pair Management ── */
+    function makeColSel(idx, side, val, cols) {
+        var key = side === 'valpac' ? 'valpacCol' : 'asciiCol';
+        var ph  = side === 'valpac' ? 'VALPAC col' : 'ASCII col';
+        var opts = (cols || []).map(function(c) {
+            return '<option value="' + esc(c) + '"' + (c === val ? ' selected' : '') + '>' + esc(c) + '</option>';
+        }).join('');
+        var hasCols = cols && cols.length > 0;
+        if (hasCols) {
+            return '<select onchange="r40PairSet(' + idx + ',\'' + key + '\',this.value)" ' +
+                'style="font-size:.82rem;border:1px solid #ccc;border-radius:4px;padding:3px 6px;min-width:110px;max-width:175px">' +
+                '<option value="">-- ' + ph + ' --</option>' + opts + '</select>';
+        }
+        return '<input type="text" placeholder="' + ph + '" value="' + esc(val) + '" ' +
+            'oninput="r40PairSet(' + idx + ',\'' + key + '\',this.value)" ' +
+            'style="font-size:.82rem;border:1px solid #ccc;border-radius:4px;padding:3px 7px;min-width:100px;max-width:170px">';
+    }
+
     function renderPairs() {
         var box = g('r40ColPairs'); if (!box) return;
         box.innerHTML = '';
@@ -298,10 +338,11 @@ window.r40Tab = function(tab) {
         st.pairs.forEach(function(p, i) {
             var row = document.createElement('div'); row.className = 'r40-pair-row';
             row.innerHTML = '<span style="color:#888;font-size:.8rem">#' + (i + 1) + '</span>' +
-                '<input type="text" placeholder="VALPAC col" value="' + esc(p.valpacCol) + '" oninput="r40PairSet(' + i + ',\'valpacCol\',this.value)">' +
+                makeColSel(i, 'valpac', p.valpacCol, st.valpacCols) +
                 '<span style="color:#999">&harr;</span>' +
-                '<input type="text" placeholder="ASCII col" value="' + esc(p.asciiCol) + '" oninput="r40PairSet(' + i + ',\'asciiCol\',this.value)">' +
-                '<input type="text" placeholder="Label" value="' + esc(p.label) + '" oninput="r40PairSet(' + i + ',\'label\',this.value)" style="max-width:200px">' +
+                makeColSel(i, 'ascii',  p.asciiCol,  st.asciiCols) +
+                '<input type="text" placeholder="Label" value="' + esc(p.label) + '" ' +
+                'oninput="r40PairSet(' + i + ',\'label\',this.value)" style="font-size:.82rem;border:1px solid #ccc;border-radius:4px;padding:3px 7px;max-width:200px">' +
                 '<button class="r40-pair-del" onclick="r40RemovePair(' + i + ')">&#x2715;</button>';
             box.appendChild(row);
         });
@@ -341,6 +382,7 @@ window.r40Tab = function(tab) {
             setOut('r40TableOut', 'Loaded ' + tables.length + ' tables — VALPAC and ASCII auto-detected.', 'success');
             st.pairs = DEF_PAIRS.slice();
             renderPairs();
+            r40LoadColumns();
         }).catch(function(e) { unspin(); setOut('r40TableOut', e.message, 'error'); });
     };
 

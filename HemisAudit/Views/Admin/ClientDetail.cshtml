@@ -225,7 +225,7 @@
                 <span class="collapsible-trigger__title">Modules</span>
                 <span class="collapsible-trigger__subtitle">Open the validation workspaces or review module availability for this engagement.</span>
             </div>
-            <span class="collapsible-trigger__meta">Rules 1-10, 11-32, 34-36, 37, 38, 39, 40, 41, 44, 45, 46, 47, 48, 51, 52, 53, 54, 55, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, ClinicalTech (69), Biokinetic (70), Radiography (71), Pharmacy (72), Nursing (73), Biomedical (74) and Mop (75)</span>
+            <span class="collapsible-trigger__meta">Rules 1-10, 11-32, 34-36, 37, 38, 39, 40, 40.1, 41, 44, 45, 46, 47, 48, 51, 52, 53, 54, 55, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, ClinicalTech (69), Biokinetic (70), Radiography (71), Pharmacy (72), Nursing (73), Biomedical (74) and Mop (75)</span>
             <span class="collapsible-trigger__icon" aria-hidden="true"></span>
         </summary>
         <div class="collapsible-panel">
@@ -521,6 +521,15 @@
                             <p class="module-card__text">Reconcile common columns between the HEMIS ASCII PROF file and the VALPAC PROF and SFTE tables, identifying AGREE, DISAGREE, and MISSING staff records per Procedure 4.5.2.</p>
                             <div class="module-card__actions">
                                 <a href="/Rule40?clientId=@Model.Id" class="btn btn-success">Open Rule 40</a>
+                            </div>
+                        </article>
+
+                        <article class="module-card">
+                            <div class="module-card__eyebrow">Rule 40.1</div>
+                            <h4 class="module-card__title">PROF VALPAC vs H16SFTE Staff Presence</h4>
+                            <p class="module-card__text">Checks whether each staff member in the VALPAC PROF table appears in 2025H16SFTE using the <code>_037</code> (Staff Number) join key. Results classified as AGREE, MISSING-H16SFTE, or MISSING-VALPAC.</p>
+                            <div class="module-card__actions">
+                                <a href="/Rule40.1?clientId=@Model.Id" class="btn btn-success">Open Rule 40.1</a>
                             </div>
                         </article>
 

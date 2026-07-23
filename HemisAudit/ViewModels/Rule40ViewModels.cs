@@ -1,5 +1,12 @@
 namespace HemisAudit.ViewModels
 {
+    public class Rule40ColumnPair
+    {
+        public string ValpacCol { get; set; } = "";
+        public string AsciiCol  { get; set; } = "";
+        public string Label     { get; set; } = "";
+    }
+
     public class Rule40FieldValue
     {
         public string ValpacValue { get; set; } = "—";
@@ -25,6 +32,7 @@ namespace HemisAudit.ViewModels
         public string Driver      { get; set; } = "ODBC Driver 17 for SQL Server";
         public string ValpacTable { get; set; } = "";
         public string AsciiTable  { get; set; } = "";
+        public List<Rule40ColumnPair>? Pairs { get; set; }
     }
 
     public class Rule40ValidationSummary
@@ -45,8 +53,9 @@ namespace HemisAudit.ViewModels
         public int     MissingInAsciiCount  { get; set; }
         public int     MissingInValpacCount { get; set; }
         public decimal ExceptionRate        { get; set; }
-        public List<Rule40ReconcRow> ReviewRows  { get; set; } = new();
-        public List<Rule40ReconcRow> AgreeSample { get; set; } = new();
+        public List<Rule40ColumnPair> Pairs      { get; set; } = new();
+        public List<Rule40ReconcRow>  ReviewRows  { get; set; } = new();
+        public List<Rule40ReconcRow>  AgreeSample { get; set; } = new();
     }
 
     public class Rule40VerifyRequest
@@ -101,5 +110,13 @@ namespace HemisAudit.ViewModels
         public int    ClientId { get; set; }
         public int?   RunId    { get; set; }
         public string Comment  { get; set; } = "";
+    }
+
+    public class Rule40GetColumnsRequest
+    {
+        public string Server    { get; set; } = "";
+        public string Database  { get; set; } = "";
+        public string Driver    { get; set; } = "ODBC Driver 17 for SQL Server";
+        public string TableName { get; set; } = "";
     }
 }
