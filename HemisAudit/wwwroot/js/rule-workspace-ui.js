@@ -370,37 +370,50 @@
         });
     }
 
+    function resolveElements(target) {
+        if (!target) return [];
+        if (typeof target !== 'string') return target ? [target] : [];
+        // CSS class/attribute selector — return ALL matches, not just the first
+        if (target.charAt(0) === '.' || target.charAt(0) === '[') {
+            return Array.from(document.querySelectorAll(target));
+        }
+        var el = document.getElementById(target) || document.querySelector(target);
+        return el ? [el] : [];
+    }
+
     function setButtonGroupReadonly(targets, isReadonly, options) {
         var allow = options && Array.isArray(options.allow) ? options.allow : [];
         var groups = Array.isArray(targets) ? targets : [targets];
 
         groups.forEach(function (target) {
-            var root = resolveElement(target);
-            if (!root) return;
+            var roots = resolveElements(target);
+            if (!roots.length) return;
 
-            root.querySelectorAll('button').forEach(function (element) {
-                if (matchesAllowSelector(element, allow)) {
-                    if (!isReadonly && hasOwn(element.dataset, 'ruleUiLockPrevDisabled')) {
+            roots.forEach(function (root) {
+                root.querySelectorAll('button').forEach(function (element) {
+                    if (matchesAllowSelector(element, allow)) {
+                        if (!isReadonly && hasOwn(element.dataset, 'ruleUiLockPrevDisabled')) {
+                            element.disabled = element.dataset.ruleUiLockPrevDisabled === '1';
+                            delete element.dataset.ruleUiLockPrevDisabled;
+                        }
+
+                        return;
+                    }
+
+                    if (isReadonly) {
+                        if (!hasOwn(element.dataset, 'ruleUiLockPrevDisabled')) {
+                            element.dataset.ruleUiLockPrevDisabled = element.disabled ? '1' : '0';
+                        }
+
+                        element.disabled = true;
+                        return;
+                    }
+
+                    if (hasOwn(element.dataset, 'ruleUiLockPrevDisabled')) {
                         element.disabled = element.dataset.ruleUiLockPrevDisabled === '1';
                         delete element.dataset.ruleUiLockPrevDisabled;
                     }
-
-                    return;
-                }
-
-                if (isReadonly) {
-                    if (!hasOwn(element.dataset, 'ruleUiLockPrevDisabled')) {
-                        element.dataset.ruleUiLockPrevDisabled = element.disabled ? '1' : '0';
-                    }
-
-                    element.disabled = true;
-                    return;
-                }
-
-                if (hasOwn(element.dataset, 'ruleUiLockPrevDisabled')) {
-                    element.disabled = element.dataset.ruleUiLockPrevDisabled === '1';
-                    delete element.dataset.ruleUiLockPrevDisabled;
-                }
+                });
             });
         });
     }
